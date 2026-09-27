@@ -27,7 +27,6 @@ async function main(): Promise<void> {
     ownerId,
     dataDir,
     answer: agent.answer,
-    reset: agent.reset,
     send: async (text, update) => {
       for (const chunk of text.match(/[\s\S]{1,4000}/g) ?? []) await bot.api.sendMessage(update.userId, chunk);
     },
@@ -40,7 +39,7 @@ async function main(): Promise<void> {
       messageId: ctx.message.message_id,
     });
   });
-  bot.catch((error) => console.error("Telegram 更新处理失败：", error.message));
+  bot.catch(() => console.error("Telegram 更新处理失败，请检查连接和本地记录。"));
   const stop = () => bot.stop();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
@@ -49,4 +48,9 @@ async function main(): Promise<void> {
   finally { await agent.close(); }
 }
 
-main().catch((error) => { console.error((error as Error).message); process.exitCode = 1; });
+main().catch((error) => {
+  const message = (error as Error).message;
+  console.error(message.startsWith("缺少环境变量") || message.startsWith("TELEGRAM_USER_ID")
+    ? message : "启动或运行失败，请检查服务配置、连接及 System prompt 文件。");
+  process.exitCode = 1;
+});

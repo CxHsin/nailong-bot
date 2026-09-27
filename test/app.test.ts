@@ -59,3 +59,26 @@ test("a failed model turn is visible and never recorded as an assistant reply", 
   assert.equal(events.length, 1);
   assert.match(events[0] ?? "", /请回答/);
 });
+
+test("long context is limited while the complete append-only record remains", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  const seen: string[][] = [];
+  const app = createApp({ ownerId: 42, dataDir: dir, contextChars: 8,
+    send: async () => {},
+    answer: async (messages) => { seen.push(messages.map((message) => message.text)); return "ok"; },
+  });
+  await app.handle({ userId: 42, chatType: "private", text: "first", messageId: 1 });
+  await app.handle({ userId: 42, chatType: "private", text: "second", messageId: 2 });
+  assert.deepEqual(seen[1], ["second"]);
+  assert.match(await readFile(join(dir, "events.jsonl"), "utf8"), /first/);
+});
+
+test("a Telegram delivery failure does not record a successful answer", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  const app = createApp({ ownerId: 42, dataDir: dir,
+    send: async () => { throw new Error("Telegram unavailable"); },
+    answer: async () => "not delivered",
+  });
+  await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
+  assert.doesNotMatch(await readFile(join(dir, "events.jsonl"), "utf8"), /not delivered/);
+});

@@ -1,18 +1,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { defineTool } from "@mariozechner/pi-coding-agent";
-import { Type } from "typebox";
+import type { TSchema } from "typebox";
 
 const endpoint = "https://agent.tinyfish.ai/mcp";
 
-export async function connectTinyfish(apiKey: string) {
+export async function connectTinyfish(apiKey: string, url = endpoint) {
   const client = new Client({ name: "personal-telegram-agent", version: "0.1.0" });
-  const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { Authorization: `Bearer ${apiKey}` } },
   });
   await client.connect(transport);
-  const available = new Set((await client.listTools()).tools.map((tool) => tool.name));
-  if (!available.has("search") || !available.has("fetch_content")) {
+  const available = (await client.listTools()).tools;
+  const searchSchema = available.find((tool) => tool.name === "search")?.inputSchema;
+  const fetchSchema = available.find((tool) => tool.name === "fetch_content")?.inputSchema;
+  if (!searchSchema || !fetchSchema) {
     await client.close();
     throw new Error("TinyFish MCP 缺少 search 或 fetch_content 工具");
   }
@@ -29,12 +31,9 @@ export async function connectTinyfish(apiKey: string) {
     name: "web_search",
     label: "Web Search",
     description: "Search the public web with TinyFish for current facts, sources and relevant URLs. Use when web grounding helps. Cite useful source URLs in your answer.",
-    parameters: Type.Object({
-      query: Type.String({ minLength: 1, maxLength: 2000 }),
-      purpose: Type.Optional(Type.String()),
-    }),
+    parameters: searchSchema as TSchema,
     execute: async (_id, params) => ({
-      content: [{ type: "text" as const, text: resultText(await client.callTool({ name: "search", arguments: params })) }],
+      content: [{ type: "text" as const, text: resultText(await client.callTool({ name: "search", arguments: params as Record<string, unknown> })) }],
       details: {},
     }),
   });
@@ -43,11 +42,11 @@ export async function connectTinyfish(apiKey: string) {
     name: "web_fetch",
     label: "Read Web Page",
     description: "Read public URLs with TinyFish to inspect page content. Include the source URLs in your answer.",
-    parameters: Type.Object({ urls: Type.Array(Type.String({ format: "uri" }), { minItems: 1, maxItems: 10 }) }),
+    parameters: fetchSchema as TSchema,
     execute: async (_id, params) => ({
       content: [{ type: "text" as const, text: resultText(await client.callTool({
         name: "fetch_content",
-        arguments: { urls: params.urls, format: "markdown", links: false, image_links: false, page_metadata: false },
+        arguments: params as Record<string, unknown>,
       })) }],
       details: {},
     }),
