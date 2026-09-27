@@ -60,7 +60,7 @@ export async function createPiAgent(options: {
         cwd: options.dataDir, agentDir: options.dataDir,
         authStorage, modelRegistry: ModelRegistry.create(authStorage),
         settingsManager, resourceLoader: loader, model, thinkingLevel: "off",
-        tools: tinyfish ? ["web_search", "web_fetch"] : [],
+        tools: ["read", "write", "edit", "ls", "find", "grep", ...(tinyfish ? ["web_search", "web_fetch"] : [])],
         customTools: tinyfish?.tools ?? [], sessionManager: manager,
       });
       try {

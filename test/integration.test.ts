@@ -9,6 +9,7 @@ import { createPiAgent } from "../src/pi-agent.js";
 
 test("Telegram entry uses real pi to select MCP search and resumes from the event log", async () => {
   let query = "";
+  const offeredTools = new Set<string>();
   const prompts: Array<Array<{ role: string; content?: string }>> = [];
   const server = createServer(async (req, res) => {
     let body = "";
@@ -30,6 +31,7 @@ test("Telegram entry uses real pi to select MCP search and resumes from the even
       res.end(JSON.stringify({ jsonrpc: "2.0", id: data.id, result }));
       return;
     }
+    for (const tool of data.tools ?? []) offeredTools.add(tool.function.name);
     prompts.push(data.messages);
     const last = data.messages.at(-1);
     const needsTool = last.role === "user" && JSON.stringify(last.content).includes("搜索");
@@ -55,6 +57,7 @@ test("Telegram entry uses real pi to select MCP search and resumes from the even
     await app.handle({ userId: 42, chatType: "private", text: "搜索新闻", messageId: 1 });
     assert.equal(query, "news");
     assert.match(replies[0] ?? "", /https:\/\/example.com\/news/);
+    assert.deepEqual([...offeredTools].sort(), ["edit", "find", "grep", "ls", "read", "web_fetch", "web_search", "write"]);
     await agent.close();
     agent = await createPiAgent(options);
     app = createApp({ ownerId: 42, dataDir: dir, answer: agent.answer, send: async (text) => { replies.push(text); } });
