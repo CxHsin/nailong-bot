@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.js";
+import { createApp, DeliveryRejected } from "../src/app.js";
 
 test("owner can chat, restart, and reset without deleting the event log", async () => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
@@ -136,4 +136,15 @@ test("initial runtime log failure informs the user and does not start the agent"
   await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
   assert.equal(calls, 0);
   assert.match(replies[0] ?? "", /运行日志暂时不可用/);
+});
+
+test("a definite Telegram rejection is recorded as failed delivery", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  const app = createApp({ ownerId: 42, dataDir: dir, answer: async () => "answer",
+    send: async () => { throw new DeliveryRejected("Telegram rejected"); },
+  });
+  await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
+  const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(events.some((event) => event.type === "delivery_failed"));
+  assert.ok(!events.some((event) => event.type === "delivery_unknown"));
 });

@@ -16,14 +16,11 @@ export type ToolResult = {
 };
 
 function readableResult(result: ToolResult): string {
-  const blocks = Array.isArray(result.content) ? result.content : [];
-  const text = blocks.map((block: unknown) => {
-    if (typeof block === "object" && block !== null && "type" in block && block.type === "text" &&
-      "text" in block && typeof block.text === "string") return block.text;
-    return "[Non-text tool result block; see the original JSON archive.]";
-  }).join("\n\n");
-  // The built-in read tool is line-based and rejects a single very long line.
-  return (text.match(/[\s\S]{1,3000}/g) ?? [""]).join("\n");
+  const serialized = JSON.stringify(result);
+  // Each line is a bounded, lossless fragment. Concatenating its `text` fields
+  // reconstructs the exact JSON stored in the raw archive.
+  return (serialized.match(/[\s\S]{1,3000}/g) ?? [""])
+    .map((part, index) => JSON.stringify({ part: index + 1, text: part })).join("\n");
 }
 
 export function createRuntimeLog(dataDir: string) {

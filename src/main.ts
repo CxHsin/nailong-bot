@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import { Bot } from "grammy";
-import { createApp } from "./app.js";
+import { Bot, GrammyError } from "grammy";
+import { createApp, DeliveryRejected } from "./app.js";
 import { createPiAgent } from "./pi-agent.js";
 
 function required(name: string): string {
@@ -30,7 +30,11 @@ async function main(): Promise<void> {
     send: async (text, update, onChunk) => {
       const chunks = text.match(/[\s\S]{1,4000}/g) ?? [];
       for (const [index, chunk] of chunks.entries()) {
-        await bot.api.sendMessage(update.userId, chunk);
+        try { await bot.api.sendMessage(update.userId, chunk); }
+        catch (error) {
+          if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝发送：${error.error_code}`);
+          throw error;
+        }
         await onChunk?.(index + 1, chunks.length);
       }
     },

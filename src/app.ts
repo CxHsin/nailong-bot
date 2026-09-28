@@ -4,6 +4,7 @@ import { createRuntimeLog, type RuntimeLog } from "./runtime-log.js";
 export type Update = { userId: number; chatType: string; text?: string; messageId: number };
 export type Message = { role: "user" | "assistant"; text: string };
 export type Request = { id: string; log: RuntimeLog };
+export class DeliveryRejected extends Error {}
 
 export function createApp(options: {
   ownerId: number;
@@ -67,7 +68,8 @@ export function createApp(options: {
         });
       }
       catch (error) {
-        await log.append({ type: "delivery_unknown", requestId: id, error: String(error) });
+        await log.append({ type: error instanceof DeliveryRejected ? "delivery_failed" : "delivery_unknown",
+          requestId: id, error: String(error) });
         await log.append({ type: "request_failed", requestId: id, phase: "delivery" });
         throw error;
       }

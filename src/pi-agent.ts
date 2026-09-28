@@ -121,7 +121,7 @@ export async function createPiAgent(options: {
           if (!archive || result.content.some((block) => block.type !== "text") ||
             request.log.isArchiveRead(context.toolCall.name, context.args) ||
             JSON.stringify(result).length / 4 <= 2048) return previous;
-          return { content: [{ type: "text", text: `工具结果已归档。工具：${context.toolCall.name}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取。` }], details: {} };
+          return { content: [{ type: "text", text: `工具结果已归档。工具：${context.toolCall.name}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取 JSONL；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }], details: {} };
         };
         session.agent.subscribe(async (event) => {
           if (logFailure) return;
