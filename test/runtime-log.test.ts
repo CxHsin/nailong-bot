@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createApp } from "../src/app.js";
 import { createPiAgent } from "../src/pi-agent.js";
+import { createRuntimeLog } from "../src/runtime-log.js";
 
 test("large tool result is durably archived, pruned, and readable with the existing read tool", { timeout: 60_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-runtime-log-"));
@@ -65,6 +66,8 @@ test("large tool result is durably archived, pruned, and readable with the exist
   assert.equal(events.filter((event) => event.type === "model_message").length, 3);
   assert.equal(results[0].requestId, results[1].requestId);
   assert.equal(results[0].toolCallId, "read_source");
+  assert.match(JSON.stringify(results[0].result), /line 200:/);
+  assert.equal(results[0].result.isError, false);
   const raw = await readFile(results[0].archive.rawPath, "utf8");
   assert.match(raw, /line 200:/);
   const fragments = (await readFile(results[0].archive.path, "utf8")).split("\n").map((line) => JSON.parse(line));
@@ -143,3 +146,50 @@ for (const fault of ["archive", "tool_call", "tool_dispatch", "tool_result"] as 
     }
   });
 }
+
+test("archived long Unicode line is readable through bounded continuations", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-archive-page-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  const result = { content: [{ type: "text" as const, text: "龙🐉".repeat(4000) }], details: {}, isError: false };
+  const archive = await log.archive(result);
+  await log.append({ type: "tool_result", requestId: "one", toolCallId: "large", toolName: "read",
+    result, archive, modelVisible: "archive" });
+  await rm(archive.path);
+  let next = { path: archive.path, offset: 1, limit: 1 };
+  let collected = "";
+  let pages = 0;
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const data = JSON.parse(body);
+    const tool = data.messages.at(-1);
+    if (tool.role === "tool") {
+      const content = String(tool.content);
+      assert.ok(Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text: content }], details: {} })) <= 7500);
+      const continuation = content.match(/\n\[继续读取：read\((\{.*\})\)\]$/);
+      collected += continuation ? content.slice(0, continuation.index) : content;
+      if (continuation) next = JSON.parse(continuation[1]!);
+      else next = { path: "", offset: 0, limit: 0 };
+      pages++;
+    }
+    const call = next.path && pages < 100;
+    const delta = call ? { tool_calls: [{ index: 0, id: `page-${pages}`, type: "function",
+      function: { name: "read", arguments: JSON.stringify(next) } }] } : { content: "complete" };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
+      finish_reason: call ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    modelBaseUrl: `http://127.0.0.1:${address.port}` });
+  t.after(() => agent.close());
+  const app = createApp({ ownerId: 42, dataDir: dir, answer: agent.answer, send: async () => {} });
+  await app.handle({ userId: 42, chatType: "private", text: "read archive", messageId: 1 });
+  assert.ok(pages > 1 && pages < 100);
+  assert.equal(createHash("sha256").update(collected).digest("hex"),
+    createHash("sha256").update(await readFile(archive.path, "utf8")).digest("hex"));
+});

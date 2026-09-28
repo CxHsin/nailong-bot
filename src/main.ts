@@ -21,6 +21,8 @@ async function main(): Promise<void> {
     promptFile,
     deepseekKey,
     tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
+    modelBudgetRatios: process.env.PROJECTION_BUDGET_RATIOS
+      ? JSON.parse(process.env.PROJECTION_BUDGET_RATIOS) : undefined,
   });
   const bot = new Bot(token);
   const app = createApp({

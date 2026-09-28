@@ -11,7 +11,6 @@ export function createApp(options: {
   dataDir: string;
   send: (text: string, update: Update, onChunk?: (index: number, total: number) => Promise<void>) => Promise<void>;
   answer: (messages: Message[], request: Request) => Promise<string>;
-  contextChars?: number;
 }) {
   const log = createRuntimeLog(options.dataDir);
   let queue = Promise.resolve();
@@ -28,6 +27,18 @@ export function createApp(options: {
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
     try {
+      const previous = await log.read();
+      const reset = previous.findLastIndex((event) => event.type === "reset");
+      const active = new Set(previous.slice(reset + 1).filter((event) => event.type === "request_started")
+        .map((event) => event.requestId).filter((value): value is string => !!value));
+      for (const event of previous.slice(reset + 1)) {
+        if (event.type === "request_completed" || event.type === "request_failed" ||
+          event.type === "request_interrupted") {
+          if (event.requestId) active.delete(event.requestId);
+        }
+      }
+      // Requests are serialized by this app. An older open request cannot still be running here.
+      for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
       await log.append({ type: "message", role: "user", text, messageId: update.messageId, requestId: id });
       await log.append({ type: "request_started", requestId: id });
       history = await log.read();
@@ -52,12 +63,6 @@ export function createApp(options: {
         if (delivered !== undefined) messages.push({ role: "assistant", text: delivered });
       }
     }
-    const limit = options.contextChars ?? 60_000;
-    let size = messages.reduce((total, message) => total + message.text.length, 0);
-    while (messages.length > 1 && size > limit) {
-      size -= messages.shift()!.text.length;
-    }
-    while (messages.length > 1 && messages[0]?.role !== "user") messages.shift();
     try {
       const answer = await options.answer(messages, { id, log });
       if (!answer.trim()) throw new Error("模型没有返回文字");
@@ -83,7 +88,10 @@ export function createApp(options: {
         }
       }
       catch { /* Preserve the original storage failure. */ }
-      await options.send("抱歉，这条消息暂时处理失败，请稍后重试。", update);
+      const safeReason = error instanceof Error &&
+        /^(上下文超过预算|工具归档缺失或校验失败|模型窗口或 Projection 预算配置无效|历史摘要|模型上下文溢出)/.test(error.message)
+        ? `：${error.message}` : "，请稍后重试";
+      await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
     }
   }
 
