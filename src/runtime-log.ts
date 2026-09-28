@@ -19,7 +19,7 @@ export type ToolArchive = { path: string; bytes: number; sha256: string;
   rawPath: string; rawBytes: number; rawSha256: string };
 
 export function archivePlaceholder(toolName: string, archive: ToolArchive): ToolResult["content"] {
-  return [{ type: "text", text: `工具结果已归档。工具：${toolName}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取 JSONL；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }];
+  return [{ type: "text", text: `工具结果已归档。工具：${toolName}；可读取的 JSONL 归档路径：${archive.path}；该归档文件字节数：${archive.bytes}；该归档文件 SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }];
 }
 
 export function shouldPrune(result: ToolResult, archiveRead: boolean): boolean {
