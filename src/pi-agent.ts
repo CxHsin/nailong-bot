@@ -6,6 +6,7 @@ import {
   SessionManager, SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import type { Message } from "./app.js";
+import type { Request } from "./app.js";
 import { connectTinyfish } from "./tinyfish.js";
 
 export async function createPiAgent(options: {
@@ -39,7 +40,7 @@ export async function createPiAgent(options: {
   await loader.reload();
 
   return {
-    async answer(messages: Message[]): Promise<string> {
+    async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
       const manager = SessionManager.inMemory(options.dataDir);
@@ -63,8 +64,93 @@ export async function createPiAgent(options: {
         tools: ["read", "write", "edit", "ls", "find", "grep", ...(tinyfish ? ["web_search", "web_fetch"] : [])],
         customTools: tinyfish?.tools ?? [], sessionManager: manager,
       });
+      let logFailure: Error | undefined;
+      if (request) {
+        session.agent.toolExecution = "sequential";
+        const originalBefore = session.agent.beforeToolCall;
+        const originalAfter = session.agent.afterToolCall;
+        const recordedResults = new Set<string>();
+        let step = 0;
+        const recordResult = async (toolCallId: string, toolName: string, result: {
+          content: unknown; details: unknown; isError: boolean;
+        }) => {
+          let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
+          let archiveError: string | undefined;
+          try { archive = await request.log.archive(result); }
+          catch (error) { archiveError = String(error); }
+          await request.log.append({ type: "tool_result", requestId: request.id,
+            toolCallId, toolName, isError: result.isError,
+            ...(archive ? { archive } : { result, archiveError }) });
+          recordedResults.add(toolCallId);
+          return archive;
+        };
+        session.agent.beforeToolCall = async (context, signal) => {
+          if (logFailure) return { block: true, reason: "运行日志写入失败" };
+          const previous = await originalBefore?.(context, signal);
+          if (previous?.block) return previous;
+          if (request.log.isArchiveRead(context.toolCall.name, context.args)) {
+            const args = context.args as { limit?: number };
+            args.limit = Math.min(Math.max(1, args.limit ?? 120), 120);
+          }
+          try {
+            await request.log.append({ type: "tool_dispatch", requestId: request.id,
+              toolCallId: context.toolCall.id, toolName: context.toolCall.name, args: context.args });
+          } catch (error) {
+            logFailure = error instanceof Error ? error : new Error(String(error));
+            session.agent.abort();
+            return { block: true, reason: "运行日志写入失败" };
+          }
+          return previous;
+        };
+        session.agent.afterToolCall = async (context, signal) => {
+          if (logFailure) return { content: [{ type: "text", text: "运行日志写入失败" }], terminate: true };
+          const previous = await originalAfter?.(context, signal);
+          const result = {
+            content: previous?.content ?? context.result.content,
+            details: previous?.details ?? context.result.details,
+            isError: previous?.isError ?? context.isError,
+          };
+          let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
+          try {
+            archive = await recordResult(context.toolCall.id, context.toolCall.name, result);
+          } catch (error) {
+            logFailure = error instanceof Error ? error : new Error(String(error));
+            session.agent.abort();
+            return { content: [{ type: "text", text: "工具结果未能写入运行日志；本轮已停止。" }], terminate: true };
+          }
+          if (!archive || result.content.some((block) => block.type !== "text") ||
+            request.log.isArchiveRead(context.toolCall.name, context.args) ||
+            JSON.stringify(result).length / 4 <= 2048) return previous;
+          return { content: [{ type: "text", text: `工具结果已归档。工具：${context.toolCall.name}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取 JSONL；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }], details: {} };
+        };
+        session.agent.subscribe(async (event) => {
+          if (logFailure) return;
+          try {
+            if (event.type === "turn_start") {
+              step++;
+              await request.log.append({ type: "model_step_started", requestId: request.id, step });
+            } else if (event.type === "turn_end") {
+              await request.log.append({ type: "model_step_completed", requestId: request.id, step,
+                stopReason: event.message.role === "assistant" ? event.message.stopReason : undefined });
+            } else if (event.type === "tool_execution_start") {
+              await request.log.append({ type: "tool_call", requestId: request.id,
+                toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
+            } else if (event.type === "tool_execution_end" && !recordedResults.has(event.toolCallId)) {
+              const result = { content: event.result.content, details: event.result.details, isError: event.isError };
+              await recordResult(event.toolCallId, event.toolName, result);
+            } else if (event.type === "message_end" && event.message.role === "assistant") {
+              await request.log.append({ type: "model_message", requestId: request.id,
+                step, message: event.message });
+            }
+          } catch (error) {
+            logFailure = error instanceof Error ? error : new Error(String(error));
+            session.agent.abort();
+          }
+        });
+      }
       try {
         await session.prompt(current.text);
+        if (logFailure) throw logFailure;
         const last = session.messages.at(-1);
         if (last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted")) {
           throw new Error("模型调用失败");
