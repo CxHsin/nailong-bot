@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { StoredEvent } from "./runtime-log.js";
 import { sourceDigest } from "./projection.js";
 
-export type Checkpoint = { version: 1; id: string; boundary: string; through: number; sourceDigest: string;
+export type Checkpoint = { version: 2; id: string; boundary: string; through: number; sourceDigest: string;
+  lastEventDigest: string; summaryStrategy: "full-result-v1";
   summary: string; previousId?: string; model: string; ratio: number; createdAt: string };
 
 export function createCheckpointStore(dataDir: string) {
@@ -19,9 +20,11 @@ export function createCheckpointStore(dataDir: string) {
         try {
           const envelope = JSON.parse(await readFile(join(dir, name), "utf8"));
           const c = envelope.checkpoint as Checkpoint;
-          if (c?.version !== 1 || c.boundary !== boundary || !Number.isInteger(c.through) ||
+          if (c?.version !== 2 || c.summaryStrategy !== "full-result-v1" ||
+            c.boundary !== boundary || !Number.isInteger(c.through) ||
             c.through < 1 || c.through > events.length || typeof c.summary !== "string" ||
-            sourceDigest(c) !== envelope.sha256 || c.sourceDigest !== sourceDigest(events.slice(0, c.through))) continue;
+            sourceDigest(c) !== envelope.sha256 || c.sourceDigest !== sourceDigest(events.slice(0, c.through)) ||
+            c.lastEventDigest !== sourceDigest(events[c.through - 1])) continue;
           valid.push(c);
         } catch (e) {
           if (!(e instanceof SyntaxError)) throw e;
@@ -30,7 +33,7 @@ export function createCheckpointStore(dataDir: string) {
       return valid.sort((a, b) => b.through - a.through || b.createdAt.localeCompare(a.createdAt))[0];
     },
     async save(value: Omit<Checkpoint, "version" | "id" | "createdAt">): Promise<Checkpoint> {
-      const checkpoint: Checkpoint = { ...value, version: 1, id: randomUUID(), createdAt: new Date().toISOString() };
+      const checkpoint: Checkpoint = { ...value, version: 2, id: randomUUID(), createdAt: new Date().toISOString() };
       const serialized = JSON.stringify({ checkpoint, sha256: sourceDigest(checkpoint) });
       await mkdir(dir, { recursive: true });
       const path = join(dir, `${checkpoint.id}.json`);

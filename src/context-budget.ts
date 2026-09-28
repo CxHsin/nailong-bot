@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Api, Context, Message, Model } from "@mariozechner/pi-ai";
 import type { RuntimeLog } from "./runtime-log.js";
 import { replayEvents, sourceDigest, type Replay, type ReplayUnit } from "./projection.js";
@@ -45,6 +46,13 @@ function validateSummary(summary: string, source: string, sourceTokens: number) 
   }
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
+function summaryInput(previousSummary: string | undefined, history: Message[]): Context {
+  return { systemPrompt: SUMMARY_PROMPT, messages: [
+    { role: "user", timestamp: 0, content: JSON.stringify({ previousSummary,
+      history: history.map((m) => m.role === "assistant" ?
+        { ...m, content: m.content.filter((c) => c.type !== "thinking") } : m) }) },
+  ] };
+}
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
   ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
   const store = createCheckpointStore(options.dataDir);
@@ -54,7 +62,10 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0 ||
         !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) throw new Error("模型窗口或 Projection 预算配置无效");
       const budget = Math.floor(model.contextWindow * ratio);
+      const replayStarted = performance.now();
       const replay = await replayEvents(options.log, options.requestId, model);
+      const replayMs = performance.now() - replayStarted;
+      const processPeakRssBytes = process.resourceUsage().maxRSS * 1024;
       let checkpoint = await store.load(replay.boundary, replay.events);
       const compose = () => ({ ...context, messages: contextMessages(replay, checkpoint) });
       let projected = compose();
@@ -75,23 +86,67 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         if (estimateInput(projected) <= budget && (!force || forcedOnce)) break;
         if (candidate.through <= (checkpoint?.through ?? 0)) continue;
         const fold = replay.units.filter((u) => u.through > (checkpoint?.through ?? 0) && u.through <= candidate.through);
-        const input: Context = { systemPrompt: SUMMARY_PROMPT, messages: [
-          { role: "user", timestamp: 0, content: JSON.stringify({ previousSummary: checkpoint?.summary,
-            history: fold.flatMap((u) => u.messages).map((m) => m.role === "assistant" ?
-              { ...m, content: m.content.filter((c) => c.type !== "thinking") } : m) }) },
-        ] };
-        if (estimateInput(input) > budget) {
-          // Candidates are ascending complete boundaries, so a later/larger fold cannot fit either.
-          throw new Error("历史摘要输入中的单个完整步骤超过预算");
-        }
+        const history = fold.flatMap((u) => u.summaryMessages ?? u.messages);
         try {
+          let input = summaryInput(checkpoint?.summary, history);
+          if (estimateInput(input) > budget) {
+            for (const message of history) {
+              if (message.role !== "toolResult") continue;
+              const call = history.find((item) => item.role === "assistant" &&
+                item.content.some((part) => part.type === "toolCall" && part.id === message.toolCallId));
+              if (!call) throw new Error("历史摘要无法配对工具调用与结果");
+              const unit = fold.find((item) => (item.summaryMessages ?? item.messages).includes(message));
+              const sourceEventIndex = replay.events.findIndex((event) => event.type === "tool_result" &&
+                event.requestId === unit?.requestId && event.toolCallId === message.toolCallId);
+              if (sourceEventIndex < 0) throw new Error("历史摘要缺少结果事件身份");
+              if (message.content.some((part) => part.type !== "text")) {
+                throw new Error("非文本工具结果无法安全分段摘要");
+              }
+              const original = JSON.stringify(message.content);
+              const resultHash = createHash("sha256").update(original).digest("hex");
+              let position = 0;
+              let rolling = checkpoint?.summary;
+              let part = 0;
+              while (position < original.length) {
+                let low = 0;
+                let high = Math.min(original.length - position, 12000);
+                const makeChunk = (length: number) => summaryInput(rolling, [call, { ...message, content: [
+                  { type: "text", text: JSON.stringify({ toolCallId: message.toolCallId,
+                    sourceEventIndex, sourceEventDigest: sourceDigest(replay.events[sourceEventIndex]),
+                    part: part + 1, start: Buffer.byteLength(original.slice(0, position)),
+                    end: Buffer.byteLength(original.slice(0, position + length)), resultHash,
+                    text: original.slice(position, position + length) }) },
+                ] }]);
+                while (low < high) {
+                  const middle = Math.ceil((low + high) / 2);
+                  if (estimateInput(makeChunk(middle)) <= budget) low = middle;
+                  else high = middle - 1;
+                }
+                if (!low) throw new Error("历史摘要最小片段超过预算");
+                if (position + low < original.length && /[\uD800-\uDBFF]/.test(original[position + low - 1]!)) low--;
+                if (!low) throw new Error("历史摘要最小片段超过预算");
+                const chunk = makeChunk(low);
+                rolling = await options.summarize(chunk, Math.max(1, Math.min(8192, model.maxTokens,
+                  model.contextWindow - estimateInput(chunk))));
+                validateSummary(rolling, String((chunk.messages[0] as { content: string }).content), estimateInput(chunk));
+                position += low;
+                part++;
+              }
+              message.content = [{ type: "text", text: `工具结果已按原文分 ${part} 片摘要；toolCallId=${message.toolCallId}；SHA-256=${resultHash}；摘要：${rolling}` }];
+              input = summaryInput(checkpoint?.summary, history);
+              if (estimateInput(input) <= budget) break;
+            }
+            if (estimateInput(input) > budget) throw new Error("历史摘要输入中的完整步骤超过预算");
+          }
           const summary = await options.summarize(input, Math.max(1, Math.min(8192, model.maxTokens,
             model.contextWindow - estimateInput(input))));
           validateSummary(summary, String((input.messages[0] as { content: string }).content), estimateInput(input));
           const value = { boundary: replay.boundary, through: candidate.through,
             sourceDigest: sourceDigest(replay.events.slice(0, candidate.through)), summary,
+            lastEventDigest: sourceDigest(replay.events[candidate.through - 1]),
+            summaryStrategy: "full-result-v1" as const,
             previousId: checkpoint?.id, model: `${model.provider}/${model.id}`, ratio };
-          const preview: Checkpoint = { ...value, version: 1, id: "candidate", createdAt: "" };
+          const preview: Checkpoint = { ...value, version: 2, id: "candidate", createdAt: "" };
           if (estimateInput({ ...context, messages: contextMessages(replay, preview) }) >= estimateInput(projected)) {
             throw new Error("历史摘要没有缩小上下文");
           }
@@ -108,7 +163,8 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       const estimatedTokens = estimateInput(projected);
       if (estimatedTokens > budget || (force && !forcedOnce)) throw new Error("上下文超过预算且没有可压缩的完整历史");
       await options.log.append({ type: "context_projected", requestId: options.requestId, estimatedTokens, budget,
-        checkpointId: checkpoint?.id, diagnostics: replay.diagnostics });
+        checkpointId: checkpoint?.id, diagnostics: replay.diagnostics,
+        logBytes: await options.log.bytes(), replayMs, processPeakRssBytes });
       return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)) };
     },
   };

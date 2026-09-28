@@ -3,7 +3,8 @@ import type { Api, AssistantMessage, Message, Model, ToolCall } from "@mariozech
 import { archivePlaceholder, shouldPrune, type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "./runtime-log.js";
 
-export type ReplayUnit = { messages: Message[]; through: number; requestId?: string; safe: boolean };
+export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
+  through: number; requestId?: string; safe: boolean };
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
   diagnostics: string[] };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -60,6 +61,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       if (!toolCalls.length) continue; // Final text is admitted by delivery, not generation.
       const kept: ToolCall[] = [];
       const responses: Message[] = [];
+      const summaryResponses: Message[] = [];
       let through = index + 1;
       let safe = true;
       for (const call of toolCalls) {
@@ -73,7 +75,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           found.event.toolName === call.name) {
           const archive = found.event.archive as ToolArchive | undefined;
           let result: ToolResult;
-          try { result = archive ? await log.loadArchive(archive) : found.event.result as ToolResult; }
+          try { result = archive ? await log.recoverArchive(archive, found.event.result as ToolResult | undefined) :
+            found.event.result as ToolResult; }
           catch { throw new Error("工具归档缺失或校验失败"); }
           if (!result || !Array.isArray(result.content)) throw new Error("缺少完整工具结果");
           const archiveRead = log.isArchiveRead(call.name, sent.event.args);
@@ -84,6 +87,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           kept.push(call);
           responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content,
             details: pruned ? {} : result.details, isError: result.isError, timestamp: Date.parse(found.event.at) || 0 });
+          summaryResponses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name,
+            content: structuredClone(result.content), details: result.details, isError: result.isError,
+            timestamp: Date.parse(found.event.at) || 0 });
           used.add(identity);
           through = Math.max(through, found.index + 1);
         } else if (!found && sent?.event.toolName === call.name && sent.index > index &&
@@ -92,12 +98,17 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           kept.push(call);
           responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, isError: true,
             content: [{ type: "text", text: `outcome_unknown:${identity}: 工具已派发，但没有持久结果；可能已产生副作用。先检查现状，不要盲目重试。` }], timestamp });
+          summaryResponses.push(responses.at(-1)!);
           safe = false;
           diagnostics.push(`outcome_unknown:${identity}`);
         } else diagnostics.push(`unmatched_tool_call:${identity}`);
       }
-      if (kept.length) units.push({ messages: [{ ...original, content: original.content.filter((c) =>
-        c.type !== "toolCall" || kept.includes(c)) }, ...responses], through, requestId: event.requestId, safe });
+      if (kept.length) {
+        const assistant = { ...original, content: original.content.filter((c) =>
+          c.type !== "toolCall" || kept.includes(c)) };
+        units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
+          through, requestId: event.requestId, safe });
+      }
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);
       if (typeof answer?.text === "string") units.push({ messages: [assistantText(answer.text, model, timestamp)],

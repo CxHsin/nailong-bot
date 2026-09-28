@@ -8,6 +8,7 @@ import { createApp } from "../src/app.js";
 import { createPiAgent } from "../src/pi-agent.js";
 import { assistantText } from "../src/projection.js";
 import { getModel } from "@mariozechner/pi-ai";
+import { createRuntimeLog } from "../src/runtime-log.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
@@ -202,7 +203,7 @@ test("an input that cannot be split is rejected before provider dispatch at a pe
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /预算/);
 });
 
-test("archive references remain pruned on restart and corrupt archives stop replay", async (t) => {
+test("archive references remain pruned on restart and corrupt copies recover from events", async (t) => {
   const f = await fixture(t, (data, res) => {
     if (data.messages.at(-1)?.content === "read large") {
       reply(res, "", { id: "large", name: "read", args: { path: "large.txt" } });
@@ -219,11 +220,13 @@ test("archive references remain pruned on restart and corrupt archives stop repl
   const result = events.find((e) => e.type === "tool_result");
   assert.equal(result.modelVisible, "archive");
   await writeFile(result.archive.rawPath, "corrupted");
-  const before = f.seen.length;
   await f.send("check again");
-  assert.equal(f.seen.length, before);
-  assert.match(f.replies.at(-1)!, /处理失败/);
-  assert.match(f.replies.at(-1)!, /工具归档/);
+  assert.equal(f.replies.at(-1), "finished");
+  assert.match(await readFile(result.archive.rawPath, "utf8"), /big-evidence/);
+  await rm(join(f.dir, "tool-results"), { recursive: true, force: true });
+  await f.send("recover missing archive directory");
+  assert.equal(f.replies.at(-1), "finished");
+  assert.match(await readFile(result.archive.rawPath, "utf8"), /big-evidence/);
 });
 
 test("a result before matching dispatch is not replayed as an executed tool", async (t) => {
@@ -287,4 +290,67 @@ test("an oversized old request is summarized in complete tool steps", async (t) 
   assert.equal(f.replies.at(-1), "continued");
   assert.ok(summarizeCalls >= 2);
   assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
+});
+
+test("compaction reads the original archived result while ordinary replay stays pruned", async (t) => {
+  const compactInputs: string[] = [];
+  let normalCalls = 0;
+  const f = await fixture(t, (data, res) => {
+    if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
+      compactInputs.push(JSON.stringify(data.messages));
+      reply(res, summary);
+    } else if (++normalCalls === 1) {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
+    } else reply(res, "continued");
+  }, { contextWindow: 6000 });
+  const log = createRuntimeLog(f.dir);
+  const result = { content: [
+    { type: "text" as const, text: "specific-evidence-A:" + "龙".repeat(9000) },
+    { type: "text" as const, text: "specific-evidence-B:" + "虎".repeat(9000) },
+  ],
+    details: { source: "file-A" }, isError: false };
+  const archive = await log.archive(result);
+  const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
+  message.content.push({ type: "toolCall", id: "source-call", name: "read", arguments: { path: "file-A" } });
+  for (const event of [
+    { type: "message", role: "user", text: "inspect file", requestId: "old" },
+    { type: "model_message", requestId: "old", message },
+    { type: "tool_dispatch", requestId: "old", toolCallId: "source-call", toolName: "read", args: { path: "file-A" } },
+    { type: "tool_result", requestId: "old", toolCallId: "source-call", toolName: "read", result, archive,
+      modelVisible: "archive" },
+    { type: "answer_generated", requestId: "old", text: "done" },
+    { type: "delivery_succeeded", requestId: "old" },
+    { type: "request_completed", requestId: "old" },
+  ]) await log.append(event);
+  await f.send("continue");
+  assert.equal(f.replies.at(-1), "continued", await readFile(join(f.dir, "events.jsonl"), "utf8"));
+  assert.ok(compactInputs.length > 1);
+  assert.ok(compactInputs.some((input) => input.includes("specific-evidence-A")));
+  assert.ok(compactInputs.some((input) => input.includes("specific-evidence-B")));
+  assert.ok(compactInputs.every((input) => !input.includes("工具结果已归档")));
+  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
+  const files = await readdir(join(f.dir, "checkpoints"));
+  assert.ok(files.some((name) => name.endsWith(".json")));
+});
+
+test("legacy archive-only events fail clearly when their copy is missing", async (t) => {
+  const f = await fixture(t, (_data, res) => reply(res, "unexpected"));
+  const log = createRuntimeLog(f.dir);
+  const result = { content: [{ type: "text" as const, text: "old evidence" }], details: {}, isError: false };
+  const archive = await log.archive(result);
+  const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
+  message.content.push({ type: "toolCall", id: "old-call", name: "read", arguments: { path: "old" } });
+  for (const event of [
+    { type: "message", role: "user", text: "old", requestId: "old" },
+    { type: "model_message", requestId: "old", message },
+    { type: "tool_dispatch", requestId: "old", toolCallId: "old-call", toolName: "read", args: { path: "old" } },
+    { type: "tool_result", requestId: "old", toolCallId: "old-call", toolName: "read", archive,
+      modelVisible: "archive" },
+    { type: "request_completed", requestId: "old" },
+  ]) await log.append(event);
+  await rm(archive.rawPath);
+  await f.send("continue");
+  assert.equal(f.seen.length, 0);
+  assert.match(f.replies.at(-1)!, /工具归档缺失或校验失败/);
 });

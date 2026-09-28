@@ -11,6 +11,8 @@ import { connectTinyfish } from "./tinyfish.js";
 import { createContextProjection } from "./context-budget.js";
 import { assistantText } from "./projection.js";
 import { archivePlaceholder, shouldPrune, type ToolResult } from "./runtime-log.js";
+import { createBoundedRead } from "./archive-read.js";
+import { createRuntimeLog } from "./runtime-log.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -63,7 +65,8 @@ export async function createPiAgent(options: {
         authStorage, modelRegistry: ModelRegistry.create(authStorage),
         settingsManager, resourceLoader: loader, model, thinkingLevel: "off",
         tools: ["read", "write", "edit", "ls", "find", "grep", ...(tinyfish ? ["web_search", "web_fetch"] : [])],
-        customTools: tinyfish?.tools ?? [], sessionManager: manager,
+        customTools: [createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)),
+          ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
       let logFailure: Error | undefined;
       let projectionFailure: Error | undefined;
@@ -124,7 +127,7 @@ export async function createPiAgent(options: {
           await request.log.append({ type: "tool_result", requestId: request.id,
             toolCallId, toolName, isError: result.isError,
             modelVisible: archive && shouldPrune(result, request.log.isArchiveRead(toolName, args)) ? "archive" : "original",
-            ...(archive ? { archive } : { result, archiveError }) });
+            result, ...(archive ? { archive } : { archiveError }) });
           recordedResults.add(toolCallId);
           return archive;
         };
