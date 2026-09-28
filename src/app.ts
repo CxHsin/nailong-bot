@@ -25,9 +25,16 @@ export function createApp(options: {
       return;
     }
     const id = randomUUID();
-    await log.append({ type: "message", role: "user", text, messageId: update.messageId, requestId: id });
-    await log.append({ type: "request_started", requestId: id });
-    const history = await log.read();
+    let history: Awaited<ReturnType<typeof log.read>>;
+    try {
+      await log.append({ type: "message", role: "user", text, messageId: update.messageId, requestId: id });
+      await log.append({ type: "request_started", requestId: id });
+      history = await log.read();
+    } catch (error) {
+      try { await options.send("抱歉，本地运行日志暂时不可用，本条请求没有开始执行。", update); }
+      catch { /* The storage error remains the request failure. */ }
+      throw error;
+    }
     const resetIndex = history.findLastIndex((event) => event.type === "reset");
     const generated = new Map<string, string>();
     let messages: Message[] = [];
@@ -60,7 +67,7 @@ export function createApp(options: {
         });
       }
       catch (error) {
-        await log.append({ type: "delivery_failed", requestId: id, error: String(error) });
+        await log.append({ type: "delivery_unknown", requestId: id, error: String(error) });
         await log.append({ type: "request_failed", requestId: id, phase: "delivery" });
         throw error;
       }

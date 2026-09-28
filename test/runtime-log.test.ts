@@ -67,7 +67,9 @@ test("large tool result is durably archived, pruned, and readable with the exist
   assert.equal(results[0].toolCallId, "read_source");
   const raw = await readFile(results[0].archive.rawPath, "utf8");
   assert.match(raw, /line 200:/);
-  assert.equal(createHash("sha256").update(raw).digest("hex"), results[0].archive.sha256);
+  assert.equal(createHash("sha256").update(raw).digest("hex"), results[0].archive.rawSha256);
+  assert.equal(createHash("sha256").update(await readFile(results[0].archive.path)).digest("hex"),
+    results[0].archive.sha256);
 });
 
 for (const fault of ["archive", "tool_call", "tool_dispatch", "tool_result"] as const) {

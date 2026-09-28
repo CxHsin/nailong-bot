@@ -118,7 +118,8 @@ export async function createPiAgent(options: {
             session.agent.abort();
             return { content: [{ type: "text", text: "工具结果未能写入运行日志；本轮已停止。" }], terminate: true };
           }
-          if (!archive || request.log.isArchiveRead(context.toolCall.name, context.args) ||
+          if (!archive || result.content.some((block) => block.type !== "text") ||
+            request.log.isArchiveRead(context.toolCall.name, context.args) ||
             JSON.stringify(result).length / 4 <= 2048) return previous;
           return { content: [{ type: "text", text: `工具结果已归档。工具：${context.toolCall.name}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取。` }], details: {} };
         };

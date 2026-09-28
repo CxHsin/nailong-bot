@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -84,7 +84,7 @@ test("a Telegram delivery failure preserves the generated answer without treatin
   await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
   const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.ok(events.some((event) => event.type === "answer_generated" && event.text === "not delivered"));
-  assert.ok(events.some((event) => event.type === "delivery_failed"));
+  assert.ok(events.some((event) => event.type === "delivery_unknown"));
   assert.ok(!events.some((event) => event.type === "delivery_succeeded"));
 });
 
@@ -104,7 +104,7 @@ test("a partially delivered answer records the delivered chunk and stays out of 
   await makeApp().handle({ userId: 42, chatType: "private", text: "first", messageId: 1 });
   const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.ok(events.some((event) => event.type === "delivery_chunk_succeeded" && event.index === 1 && event.total === 2));
-  assert.ok(events.some((event) => event.type === "delivery_failed"));
+  assert.ok(events.some((event) => event.type === "delivery_unknown"));
   assert.ok(!events.some((event) => event.type === "delivery_succeeded"));
   await makeApp().handle({ userId: 42, chatType: "private", text: "second", messageId: 2 });
   assert.deepEqual(seen[1], ["first", "second"]);
@@ -122,4 +122,18 @@ test("legacy message events remain readable after the runtime log upgrade", asyn
   });
   await app.handle({ userId: 42, chatType: "private", text: "new user", messageId: 3 });
   assert.deepEqual(seen, ["old user", "old reply", "new user"]);
+});
+
+test("initial runtime log failure informs the user and does not start the agent", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  await mkdir(join(dir, "events.jsonl"));
+  const replies: string[] = [];
+  let calls = 0;
+  const app = createApp({ ownerId: 42, dataDir: dir,
+    answer: async () => { calls++; return "should not run"; },
+    send: async (text) => { replies.push(text); },
+  });
+  await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
+  assert.equal(calls, 0);
+  assert.match(replies[0] ?? "", /运行日志暂时不可用/);
 });

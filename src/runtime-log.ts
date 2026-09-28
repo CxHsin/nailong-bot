@@ -50,19 +50,23 @@ export function createRuntimeLog(dataDir: string) {
     },
     async archive(result: ToolResult) {
       const serialized = JSON.stringify(result);
-      const sha256 = createHash("sha256").update(serialized).digest("hex");
+      const rawSha256 = createHash("sha256").update(serialized).digest("hex");
+      const readable = readableResult(result);
+      const sha256 = createHash("sha256").update(readable).digest("hex");
       const id = randomUUID();
       const rawPath = join(archiveDir, `${id}.json`);
       const path = join(archiveDir, `${id}.txt`);
       await mkdir(archiveDir, { recursive: true });
-      for (const [target, body] of [[rawPath, serialized], [path, readableResult(result)]] as const) {
+      for (const [target, body] of [[rawPath, serialized], [path, readable]] as const) {
         const file = await open(target, "wx");
         try { await file.writeFile(body, "utf8"); await file.sync(); }
         finally { await file.close(); }
       }
-      const actual = createHash("sha256").update(await readFile(rawPath)).digest("hex");
-      if (actual !== sha256) throw new Error("工具结果归档校验失败");
-      return { path, rawPath, bytes: Buffer.byteLength(serialized), sha256 };
+      const actualRaw = createHash("sha256").update(await readFile(rawPath)).digest("hex");
+      const actualReadable = createHash("sha256").update(await readFile(path)).digest("hex");
+      if (actualRaw !== rawSha256 || actualReadable !== sha256) throw new Error("工具结果归档校验失败");
+      return { path, bytes: Buffer.byteLength(readable), sha256,
+        rawPath, rawBytes: Buffer.byteLength(serialized), rawSha256 };
     },
     isArchiveRead(toolName: string, args: unknown): boolean {
       if (toolName !== "read" || typeof args !== "object" || args === null || !("path" in args) ||
