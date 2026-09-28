@@ -11,7 +11,6 @@ export function createApp(options: {
   dataDir: string;
   send: (text: string, update: Update, onChunk?: (index: number, total: number) => Promise<void>) => Promise<void>;
   answer: (messages: Message[], request: Request) => Promise<string>;
-  contextChars?: number;
 }) {
   const log = createRuntimeLog(options.dataDir);
   let queue = Promise.resolve();
@@ -52,12 +51,6 @@ export function createApp(options: {
         if (delivered !== undefined) messages.push({ role: "assistant", text: delivered });
       }
     }
-    const limit = options.contextChars ?? 60_000;
-    let size = messages.reduce((total, message) => total + message.text.length, 0);
-    while (messages.length > 1 && size > limit) {
-      size -= messages.shift()!.text.length;
-    }
-    while (messages.length > 1 && messages[0]?.role !== "user") messages.shift();
     try {
       const answer = await options.answer(messages, { id, log });
       if (!answer.trim()) throw new Error("模型没有返回文字");

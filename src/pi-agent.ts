@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getModel } from "@mariozechner/pi-ai";
+import { createAssistantMessageEventStream, getModel, isContextOverflow } from "@mariozechner/pi-ai";
 import {
   AuthStorage, createAgentSession, DefaultResourceLoader, ModelRegistry,
   SessionManager, SettingsManager,
@@ -8,6 +8,8 @@ import {
 import type { Message } from "./app.js";
 import type { Request } from "./app.js";
 import { connectTinyfish } from "./tinyfish.js";
+import { createContextProjection } from "./context-budget.js";
+import { archivePlaceholder, shouldPrune, type ToolResult } from "./runtime-log.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -16,6 +18,9 @@ export async function createPiAgent(options: {
   tinyfishKey?: string;
   modelBaseUrl?: string;
   tinyfishUrl?: string;
+  contextWindow?: number;
+  contextBudgetRatio?: number;
+  modelBudgetRatios?: Record<string, number>;
 }) {
   const systemPrompt = (await readFile(options.promptFile, "utf8")).trim();
   if (!systemPrompt) throw new Error("System prompt 文件为空");
@@ -26,7 +31,8 @@ export async function createPiAgent(options: {
   }
   const defaultModel = getModel("deepseek", "deepseek-v4-flash");
   if (!defaultModel) throw new Error("pi SDK 未提供 DeepSeek 模型");
-  const model = options.modelBaseUrl ? { ...defaultModel, baseUrl: options.modelBaseUrl } : defaultModel;
+  const model = { ...defaultModel, ...(options.modelBaseUrl ? { baseUrl: options.modelBaseUrl } : {}),
+    ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) };
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
@@ -44,7 +50,7 @@ export async function createPiAgent(options: {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
       const manager = SessionManager.inMemory(options.dataDir);
-      for (const message of messages.slice(0, -1)) {
+      for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.text, timestamp: Date.now() });
         } else {
@@ -65,21 +71,61 @@ export async function createPiAgent(options: {
         customTools: tinyfish?.tools ?? [], sessionManager: manager,
       });
       let logFailure: Error | undefined;
+      let projectionFailure: Error | undefined;
       if (request) {
+        const providerStream = session.agent.streamFn;
+        const projection = createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
+          ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
+          summarize: async (context, maxTokens) => {
+            const stream = await providerStream(model, context, { maxTokens, signal: session.agent.signal });
+            for await (const _event of stream) { /* Drain snapshots rather than retaining them. */ }
+            const response = await stream.result();
+            if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
+            return response.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+          },
+        });
+        session.agent.streamFn = async (selected, context, streamOptions) => {
+          try { for (let attempt = 0; attempt < 2; attempt++) {
+            const result = await projection.project(selected, context, attempt === 1);
+            const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
+            let producedOutput = false;
+            for await (const event of source) {
+              if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
+                producedOutput = true;
+              }
+            }
+            const message = await source.result();
+            if (attempt === 0 && message.stopReason === "error" && !producedOutput && !message.content.length &&
+              isContextOverflow(message, selected.contextWindow)) {
+              await request.log.append({ type: "provider_overflow", requestId: request.id, retry: 1 });
+              continue;
+            }
+            // Deliver only the settled physical attempt to Pi. A rejected request cannot issue tools.
+            const response = createAssistantMessageEventStream();
+            if (message.stopReason === "error" || message.stopReason === "aborted") {
+              response.push({ type: "error", reason: message.stopReason, error: message });
+            } else response.push({ type: "done", reason: message.stopReason, message });
+            return response;
+          }
+          throw new Error("模型上下文溢出重试失败");
+          } catch (error) {
+            projectionFailure = error instanceof Error ? error : new Error(String(error));
+            throw error;
+          }
+        };
         session.agent.toolExecution = "sequential";
         const originalBefore = session.agent.beforeToolCall;
         const originalAfter = session.agent.afterToolCall;
         const recordedResults = new Set<string>();
         let step = 0;
-        const recordResult = async (toolCallId: string, toolName: string, result: {
-          content: unknown; details: unknown; isError: boolean;
-        }) => {
+        const recordResult = async (toolCallId: string, toolName: string, result: ToolResult, args?: unknown) => {
           let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
           let archiveError: string | undefined;
           try { archive = await request.log.archive(result); }
           catch (error) { archiveError = String(error); }
           await request.log.append({ type: "tool_result", requestId: request.id,
             toolCallId, toolName, isError: result.isError,
+            modelVisible: archive && shouldPrune(result, request.log.isArchiveRead(toolName, args)) ? "archive" : "original",
             ...(archive ? { archive } : { result, archiveError }) });
           recordedResults.add(toolCallId);
           return archive;
@@ -112,16 +158,14 @@ export async function createPiAgent(options: {
           };
           let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
           try {
-            archive = await recordResult(context.toolCall.id, context.toolCall.name, result);
+            archive = await recordResult(context.toolCall.id, context.toolCall.name, result, context.args);
           } catch (error) {
             logFailure = error instanceof Error ? error : new Error(String(error));
             session.agent.abort();
             return { content: [{ type: "text", text: "工具结果未能写入运行日志；本轮已停止。" }], terminate: true };
           }
-          if (!archive || result.content.some((block) => block.type !== "text") ||
-            request.log.isArchiveRead(context.toolCall.name, context.args) ||
-            JSON.stringify(result).length / 4 <= 2048) return previous;
-          return { content: [{ type: "text", text: `工具结果已归档。工具：${context.toolCall.name}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取 JSONL；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }], details: {} };
+          if (!archive || !shouldPrune(result, request.log.isArchiveRead(context.toolCall.name, context.args))) return previous;
+          return { content: archivePlaceholder(context.toolCall.name, archive), details: {} };
         };
         session.agent.subscribe(async (event) => {
           if (logFailure) return;
@@ -151,6 +195,7 @@ export async function createPiAgent(options: {
       try {
         await session.prompt(current.text);
         if (logFailure) throw logFailure;
+        if (projectionFailure) throw projectionFailure;
         const last = session.messages.at(-1);
         if (last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted")) {
           throw new Error("模型调用失败");

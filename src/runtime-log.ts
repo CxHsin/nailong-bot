@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, open, readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import type { ToolResultMessage } from "@mariozechner/pi-ai";
 
 export type StoredEvent = {
   type: string;
@@ -10,10 +11,21 @@ export type StoredEvent = {
 };
 
 export type ToolResult = {
-  content: unknown;
+  content: ToolResultMessage["content"];
   details: unknown;
   isError: boolean;
 };
+export type ToolArchive = { path: string; bytes: number; sha256: string;
+  rawPath: string; rawBytes: number; rawSha256: string };
+
+export function archivePlaceholder(toolName: string, archive: ToolArchive): ToolResult["content"] {
+  return [{ type: "text", text: `工具结果已归档。工具：${toolName}；路径：${archive.path}；字节数：${archive.bytes}；SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取 JSONL；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }];
+}
+
+export function shouldPrune(result: ToolResult, archiveRead: boolean): boolean {
+  return !archiveRead && result.content.every((block) => block.type === "text") &&
+    JSON.stringify(result).length / 4 > 2048;
+}
 
 function readableResult(result: ToolResult): string {
   const serialized = JSON.stringify(result);
@@ -25,7 +37,7 @@ function readableResult(result: ToolResult): string {
 
 export function createRuntimeLog(dataDir: string) {
   const eventFile = join(dataDir, "events.jsonl");
-  const archiveDir = join(dataDir, "tool-results");
+  const archiveDir = resolve(dataDir, "tool-results");
 
   return {
     async read(): Promise<StoredEvent[]> {
@@ -65,10 +77,29 @@ export function createRuntimeLog(dataDir: string) {
       return { path, bytes: Buffer.byteLength(readable), sha256,
         rawPath, rawBytes: Buffer.byteLength(serialized), rawSha256 };
     },
+    async loadArchive(archive: ToolArchive): Promise<ToolResult> {
+      const root = await realpath(archiveDir);
+      const bodies: string[] = [];
+      for (const [path, bytes, sha256] of [[archive.rawPath, archive.rawBytes, archive.rawSha256],
+        [archive.path, archive.bytes, archive.sha256]] as const) {
+        const actual = await realpath(path);
+        const inside = relative(root, actual);
+        if (!inside || inside.startsWith("..") || isAbsolute(inside)) throw new Error("工具归档位置不受信任");
+        const body = await readFile(actual, "utf8");
+        if (Buffer.byteLength(body) !== bytes || createHash("sha256").update(body).digest("hex") !== sha256) {
+          throw new Error("工具归档校验失败");
+        }
+        bodies.push(body);
+      }
+      const result: ToolResult = JSON.parse(bodies[0]!);
+      if (!Array.isArray(result.content) || typeof result.isError !== "boolean") throw new Error("工具归档格式错误");
+      return result;
+    },
     isArchiveRead(toolName: string, args: unknown): boolean {
       if (toolName !== "read" || typeof args !== "object" || args === null || !("path" in args) ||
         typeof args.path !== "string") return false;
-      return args.path.startsWith(archiveDir) && args.path.endsWith(".txt");
+      const inside = relative(archiveDir, resolve(dataDir, args.path));
+      return !!inside && !inside.startsWith("..") && !isAbsolute(inside) && args.path.endsWith(".txt");
     },
   };
 }
