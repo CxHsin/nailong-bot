@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-议题和规格文档保存在 `.scratch/<feature>/` 下的 Markdown 文件中。See `docs/agents/issue-tracker.md`.
+`grillme` 的结论、`to-spec` 的规格和实现任务都发布为 GitHub Issues。创建、读取和关联 Issue 时遵循 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
