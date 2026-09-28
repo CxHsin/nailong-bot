@@ -25,7 +25,7 @@ function contextMessages(replay: Replay, checkpoint?: Checkpoint): Message[] {
   if (checkpoint && !suffix.includes(replay.current)) suffix.unshift(replay.current);
   return checkpoint ? [checkpointMessage(checkpoint), ...suffix] : suffix;
 }
-function validateSummary(summary: string) {
+function validateSummary(summary: string, source: string, sourceTokens: number) {
   const headings = ["Goal", "Progress", "Constraints", "Decisions", "Next Steps", "Critical Context"];
   let previous = -1;
   for (const heading of headings) {
@@ -36,6 +36,13 @@ function validateSummary(summary: string) {
     previous = at;
   }
   if ((summary.match(/```/g)?.length ?? 0) % 2) throw new Error("历史摘要被截断");
+  if (summary.trim().length < 100 || (sourceTokens > 10_000 && estimateInput({ messages: [
+    { role: "user", content: summary, timestamp: 0 },
+  ] }) < 200)) throw new Error("历史摘要过短");
+  const unknownIds = [...source.matchAll(/outcome_unknown:[^\s"\\]+/g)].map((m) => m[0]);
+  if (unknownIds.length && !unknownIds.every((id) => summary.includes(id))) {
+    throw new Error("历史摘要遗漏未知工具结果");
+  }
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
@@ -57,8 +64,8 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         if (!unit.safe || units.slice(0, index).some((u) => !u.safe) || unit.through <= (checkpoint?.through ?? 0)) return false;
         const next = units[index + 1];
         const wholeRequest = unit.requestId !== options.requestId && next?.requestId !== unit.requestId;
-        const currentStep = unit.requestId === options.requestId && unit.messages.some((m) => m.role === "toolResult") &&
-          next?.requestId === options.requestId;
+        const currentStep = unit.messages.some((m) => m.role === "toolResult") &&
+          next?.requestId === unit.requestId;
         return wholeRequest || currentStep;
       });
       const preferred = candidates.filter((c) => !recentIds.includes(c.requestId) && c.requestId !== options.requestId);
@@ -80,7 +87,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         try {
           const summary = await options.summarize(input, Math.max(1, Math.min(8192, model.maxTokens,
             model.contextWindow - estimateInput(input))));
-          validateSummary(summary);
+          validateSummary(summary, String((input.messages[0] as { content: string }).content), estimateInput(input));
           const value = { boundary: replay.boundary, through: candidate.through,
             sourceDigest: sourceDigest(replay.events.slice(0, candidate.through)), summary,
             previousId: checkpoint?.id, model: `${model.provider}/${model.id}`, ratio };

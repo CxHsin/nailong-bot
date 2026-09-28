@@ -105,6 +105,15 @@ test("model window budget folds old history, preserves three requests, and reuse
   await f.send("again");
   assert.equal(summaries, before);
   assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
+  const names = (await readdir(join(f.dir, "checkpoints"))).filter((n) => n.endsWith(".json"));
+  assert.ok(names.length > 0);
+  for (const name of names) {
+    const path = join(f.dir, "checkpoints", name);
+    const body = await readFile(path, "utf8");
+    await writeFile(path, body.replace("Earlier work completed.", "Tampered summary."));
+  }
+  await f.send("after tampering");
+  assert.ok(summaries > before, "invalid checkpoint must be rebuilt from source events");
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /old-0:/);
 });
 
@@ -144,6 +153,25 @@ test("provider overflow compacts and retries the rejected model step once", asyn
   assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
 });
 
+test("a second provider overflow fails after one retry", async (t) => {
+  let normal = 0;
+  const f = await fixture(t, (data, res) => {
+    if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) reply(res, summary);
+    else {
+      normal++;
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
+    }
+  });
+  await writeFile(join(f.dir, "events.jsonl"), [
+    { type: "message", role: "user", text: "old goal " + "a".repeat(1500) },
+    { type: "message", role: "assistant", text: "old answer " + "b".repeat(1500) },
+  ].map((e) => JSON.stringify({ ...e, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.send("continue");
+  assert.equal(normal, 2);
+  assert.match(f.replies.at(-1)!, /溢出重试失败/);
+});
+
 test("a single long tool chain compacts settled earlier steps while keeping the current goal", async (t) => {
   let tools = 0;
   let compacted = false;
@@ -170,6 +198,7 @@ test("an input that cannot be split is rejected before provider dispatch at a pe
   await f.send("large current input " + "x".repeat(7000));
   assert.equal(f.seen.length, 0);
   assert.match(f.replies.at(-1)!, /处理失败/);
+  assert.match(f.replies.at(-1)!, /预算/);
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /预算/);
 });
 
@@ -194,4 +223,68 @@ test("archive references remain pruned on restart and corrupt archives stop repl
   await f.send("check again");
   assert.equal(f.seen.length, before);
   assert.match(f.replies.at(-1)!, /处理失败/);
+  assert.match(f.replies.at(-1)!, /工具归档/);
+});
+
+test("a result before matching dispatch is not replayed as an executed tool", async (t) => {
+  const f = await fixture(t, (_data, res) => reply(res, "checked"));
+  const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
+  message.content.push({ type: "toolCall", id: "orphan", name: "write", arguments: { path: "note" } });
+  const old = [
+    { type: "message", role: "user", text: "save", requestId: "old" },
+    { type: "model_message", requestId: "old", message },
+    { type: "tool_result", requestId: "old", toolCallId: "orphan", toolName: "write",
+      result: { content: [{ type: "text", text: "success" }], details: {}, isError: false } },
+    { type: "tool_dispatch", requestId: "old", toolCallId: "orphan", toolName: "write" },
+    { type: "request_failed", requestId: "old" },
+  ];
+  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
+    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.send("check");
+  assert.equal(f.seen.at(-1)!.messages.some((m) => m.role === "tool"), false);
+  assert.equal(f.seen.at(-1)!.messages.some((m) => m.tool_calls?.some((c) => c.id === "orphan")), false);
+});
+
+test("a crashed dispatched tool is marked interrupted before its outcome becomes unknown", async (t) => {
+  const f = await fixture(t, (_data, res) => reply(res, "checked"));
+  const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
+  message.content.push({ type: "toolCall", id: "pending", name: "write", arguments: { path: "note" } });
+  const old = [
+    { type: "message", role: "user", text: "save", requestId: "old" },
+    { type: "request_started", requestId: "old" },
+    { type: "model_message", requestId: "old", message },
+    { type: "tool_dispatch", requestId: "old", toolCallId: "pending", toolName: "write" },
+  ];
+  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
+    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.send("check");
+  assert.match(f.seen.at(-1)!.messages.find((m) => m.role === "tool")!.content!, /outcome_unknown/);
+  assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /request_interrupted/);
+});
+
+test("an oversized old request is summarized in complete tool steps", async (t) => {
+  let summarizeCalls = 0;
+  const f = await fixture(t, (data, res) => {
+    if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
+      summarizeCalls++; reply(res, summary);
+    } else reply(res, "continued");
+  }, { contextWindow: 6000 });
+  const model = getModel("deepseek", "deepseek-v4-flash");
+  const old: object[] = [{ type: "message", role: "user", text: "inspect files", requestId: "old" }];
+  for (let i = 0; i < 3; i++) {
+    const message = assistantText("", model);
+    message.content.push({ type: "toolCall", id: `read-${i}`, name: "read", arguments: { path: `file-${i}` } });
+    old.push({ type: "model_message", requestId: "old", message },
+      { type: "tool_dispatch", requestId: "old", toolCallId: `read-${i}`, toolName: "read" },
+      { type: "tool_result", requestId: "old", toolCallId: `read-${i}`, toolName: "read",
+        result: { content: [{ type: "text", text: "evidence-".repeat(1300) }], details: {}, isError: false } });
+  }
+  old.push({ type: "answer_generated", requestId: "old", text: "complete" },
+    { type: "delivery_succeeded", requestId: "old" }, { type: "request_completed", requestId: "old" });
+  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
+    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.send("continue");
+  assert.equal(f.replies.at(-1), "continued");
+  assert.ok(summarizeCalls >= 2);
+  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
 });

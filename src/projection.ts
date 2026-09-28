@@ -24,9 +24,10 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   const diagnostics: string[] = [];
   const key = (e: StoredEvent) => `${e.requestId}:${String(e.toolCallId)}`;
   const results = new Map<string, { event: StoredEvent; index: number }>();
-  const dispatch = new Map<string, StoredEvent>();
+  const dispatch = new Map<string, { event: StoredEvent; index: number }>();
   const delivered = new Set(events.filter((e) => e.type === "delivery_succeeded").map((e) => e.requestId));
-  const ended = new Set(events.filter((e) => e.type === "request_failed" || e.type === "request_completed")
+  const ended = new Set(events.filter((e) => e.type === "request_failed" || e.type === "request_completed" ||
+    e.type === "request_interrupted")
     .map((e) => e.requestId));
   const used = new Set<string>();
   const calls = new Set<string>();
@@ -35,7 +36,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       if (results.has(key(event))) throw new Error("工具结果编号重复");
       results.set(key(event), { event, index });
     }
-    if (event.type === "tool_dispatch") dispatch.set(key(event), event);
+    if (event.type === "tool_dispatch") dispatch.set(key(event), { event, index });
   }
   const recent = [...new Set(events.filter((e) => e.type === "message" && e.role === "user" &&
     ended.has(e.requestId)).map((e) => e.requestId))].slice(-3);
@@ -67,11 +68,15 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         calls.add(identity);
         const found = results.get(identity);
         const sent = dispatch.get(identity);
-        if (found && found.index > index && found.event.toolName === call.name) {
+        if (found && sent?.event.toolName === call.name && sent.index > index &&
+          found.index > sent.index &&
+          found.event.toolName === call.name) {
           const archive = found.event.archive as ToolArchive | undefined;
-          const result = archive ? await log.loadArchive(archive) : found.event.result as ToolResult;
+          let result: ToolResult;
+          try { result = archive ? await log.loadArchive(archive) : found.event.result as ToolResult; }
+          catch { throw new Error("工具归档缺失或校验失败"); }
           if (!result || !Array.isArray(result.content)) throw new Error("缺少完整工具结果");
-          const archiveRead = !!sent && log.isArchiveRead(call.name, sent.args);
+          const archiveRead = log.isArchiveRead(call.name, sent.event.args);
           const pruned = found.event.modelVisible === "archive" ||
             (found.event.modelVisible === undefined && shouldPrune(result, archiveRead)) ||
             (!recent.includes(event.requestId) && event.requestId !== currentId && shouldPrune(result, false));
@@ -81,11 +86,12 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
             details: pruned ? {} : result.details, isError: result.isError, timestamp: Date.parse(found.event.at) || 0 });
           used.add(identity);
           through = Math.max(through, found.index + 1);
-        } else if (!found && sent?.toolName === call.name && event.requestId !== currentId) {
-          // The app serializes requests: any earlier invocation is stopped, including a crashed predecessor.
+        } else if (!found && sent?.event.toolName === call.name && sent.index > index &&
+          event.requestId !== currentId &&
+          ended.has(event.requestId)) {
           kept.push(call);
           responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, isError: true,
-            content: [{ type: "text", text: "outcome_unknown: 工具已派发，但没有持久结果；可能已产生副作用。先检查现状，不要盲目重试。" }], timestamp });
+            content: [{ type: "text", text: `outcome_unknown:${identity}: 工具已派发，但没有持久结果；可能已产生副作用。先检查现状，不要盲目重试。` }], timestamp });
           safe = false;
           diagnostics.push(`outcome_unknown:${identity}`);
         } else diagnostics.push(`unmatched_tool_call:${identity}`);

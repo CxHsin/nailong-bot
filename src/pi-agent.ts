@@ -9,6 +9,7 @@ import type { Message } from "./app.js";
 import type { Request } from "./app.js";
 import { connectTinyfish } from "./tinyfish.js";
 import { createContextProjection } from "./context-budget.js";
+import { assistantText } from "./projection.js";
 import { archivePlaceholder, shouldPrune, type ToolResult } from "./runtime-log.js";
 
 export async function createPiAgent(options: {
@@ -54,13 +55,7 @@ export async function createPiAgent(options: {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.text, timestamp: Date.now() });
         } else {
-          manager.appendMessage({
-            role: "assistant", content: [{ type: "text", text: message.text }],
-            api: model.api, provider: model.provider, model: model.id,
-            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-            stopReason: "stop", timestamp: Date.now(),
-          });
+          manager.appendMessage(assistantText(message.text, model));
         }
       }
       const { session } = await createAgentSession({
@@ -99,6 +94,9 @@ export async function createPiAgent(options: {
               isContextOverflow(message, selected.contextWindow)) {
               await request.log.append({ type: "provider_overflow", requestId: request.id, retry: 1 });
               continue;
+            }
+            if (message.stopReason === "error" && isContextOverflow(message, selected.contextWindow)) {
+              throw new Error(producedOutput ? "模型上下文溢出且已有部分输出" : "模型上下文溢出重试失败");
             }
             // Deliver only the settled physical attempt to Pi. A rejected request cannot issue tools.
             const response = createAssistantMessageEventStream();
