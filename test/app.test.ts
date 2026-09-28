@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -27,8 +27,9 @@ test("owner can chat, restart, and reset without deleting the event log", async 
   assert.deepEqual(seen[2], ["新会话"]);
   assert.equal(replies.at(-2), "已开始新对话，旧记录仍保留在本地。");
   const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n");
-  assert.equal(events.length, 8);
-  assert.match(events[4] ?? "", /reset/);
+  assert.equal(events.filter((line) => JSON.parse(line).type === "message").length, 4);
+  assert.equal(events.filter((line) => JSON.parse(line).type === "reset").length, 1);
+  assert.equal(events.filter((line) => JSON.parse(line).type === "request_completed").length, 3);
 });
 
 test("strangers and groups cannot use the agent or enter its history", async () => {
@@ -56,8 +57,9 @@ test("a failed model turn is visible and never recorded as an assistant reply", 
   await app.handle({ userId: 42, chatType: "private", text: "请回答", messageId: 1 });
   assert.match(replies[0] ?? "", /暂时处理失败/);
   const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n");
-  assert.equal(events.length, 1);
+  assert.equal(events.filter((line) => JSON.parse(line).type === "message").length, 1);
   assert.match(events[0] ?? "", /请回答/);
+  assert.ok(events.some((line) => JSON.parse(line).type === "request_failed"));
 });
 
 test("long context is limited while the complete append-only record remains", async () => {
@@ -73,12 +75,51 @@ test("long context is limited while the complete append-only record remains", as
   assert.match(await readFile(join(dir, "events.jsonl"), "utf8"), /first/);
 });
 
-test("a Telegram delivery failure does not record a successful answer", async () => {
+test("a Telegram delivery failure preserves the generated answer without treating it as delivered", async () => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
   const app = createApp({ ownerId: 42, dataDir: dir,
     send: async () => { throw new Error("Telegram unavailable"); },
     answer: async () => "not delivered",
   });
   await assert.rejects(app.handle({ userId: 42, chatType: "private", text: "hello", messageId: 1 }));
-  assert.doesNotMatch(await readFile(join(dir, "events.jsonl"), "utf8"), /not delivered/);
+  const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(events.some((event) => event.type === "answer_generated" && event.text === "not delivered"));
+  assert.ok(events.some((event) => event.type === "delivery_failed"));
+  assert.ok(!events.some((event) => event.type === "delivery_succeeded"));
+});
+
+test("a partially delivered answer records the delivered chunk and stays out of later context", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  const seen: string[][] = [];
+  let sendCount = 0;
+  const makeApp = () => createApp({ ownerId: 42, dataDir: dir,
+    answer: async (messages) => { seen.push(messages.map((message) => message.text)); return "long answer"; },
+    send: async (text, _update, onChunk) => {
+      if (text === "long answer" && sendCount++ === 0) {
+        await onChunk?.(1, 2);
+        throw new Error("second chunk failed");
+      }
+    },
+  });
+  await makeApp().handle({ userId: 42, chatType: "private", text: "first", messageId: 1 });
+  const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(events.some((event) => event.type === "delivery_chunk_succeeded" && event.index === 1 && event.total === 2));
+  assert.ok(events.some((event) => event.type === "delivery_failed"));
+  assert.ok(!events.some((event) => event.type === "delivery_succeeded"));
+  await makeApp().handle({ userId: 42, chatType: "private", text: "second", messageId: 2 });
+  assert.deepEqual(seen[1], ["first", "second"]);
+});
+
+test("legacy message events remain readable after the runtime log upgrade", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
+  await writeFile(join(dir, "events.jsonl"), [
+    { type: "message", role: "user", text: "old user", at: "2026-01-01T00:00:00Z" },
+    { type: "message", role: "assistant", text: "old reply", at: "2026-01-01T00:00:01Z" },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n");
+  let seen: string[] = [];
+  const app = createApp({ ownerId: 42, dataDir: dir, send: async () => {},
+    answer: async (messages) => { seen = messages.map((message) => message.text); return "new reply"; },
+  });
+  await app.handle({ userId: 42, chatType: "private", text: "new user", messageId: 3 });
+  assert.deepEqual(seen, ["old user", "old reply", "new user"]);
 });

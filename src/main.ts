@@ -27,8 +27,12 @@ async function main(): Promise<void> {
     ownerId,
     dataDir,
     answer: agent.answer,
-    send: async (text, update) => {
-      for (const chunk of text.match(/[\s\S]{1,4000}/g) ?? []) await bot.api.sendMessage(update.userId, chunk);
+    send: async (text, update, onChunk) => {
+      const chunks = text.match(/[\s\S]{1,4000}/g) ?? [];
+      for (const [index, chunk] of chunks.entries()) {
+        await bot.api.sendMessage(update.userId, chunk);
+        await onChunk?.(index + 1, chunks.length);
+      }
     },
   });
   bot.on("message:text", async (ctx) => {
