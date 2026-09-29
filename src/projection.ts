@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import type { Api, AssistantMessage, Message, Model, ToolCall } from "@mariozechner/pi-ai";
-import { archivePlaceholder, shouldPrune, type RuntimeLog, type StoredEvent, type ToolArchive,
+import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "./runtime-log.js";
+import { replayToolResultView } from "./tool-result-projection.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean };
@@ -82,14 +83,13 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
             found.event.result as ToolResult; }
           catch { throw new Error("工具归档缺失或校验失败"); }
           if (!result || !Array.isArray(result.content)) throw new Error("缺少完整工具结果");
-          const archiveRead = log.isArchiveRead(call.name, sent.event.args);
-          const pruned = found.event.modelVisible === "archive" ||
-            (found.event.modelVisible === undefined && shouldPrune(result, archiveRead)) ||
-            (!recent.includes(event.requestId) && event.requestId !== currentId && shouldPrune(result, false));
-          const content = pruned && archive ? archivePlaceholder(call.name, archive) : result.content;
+          const view = replayToolResultView({ result, archive, recorded: found.event.modelVisible,
+            archiveRead: log.isArchiveRead(call.name, sent.event.args),
+            olderThanRecent: !recent.includes(event.requestId) && event.requestId !== currentId,
+            toolName: call.name });
           kept.push(call);
-          responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content,
-            details: pruned ? {} : result.details, isError: result.isError, timestamp: Date.parse(found.event.at) || 0 });
+          responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: view.content,
+            details: view.details, isError: result.isError, timestamp: Date.parse(found.event.at) || 0 });
           summaryResponses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name,
             content: structuredClone(result.content), details: result.details, isError: result.isError,
             timestamp: Date.parse(found.event.at) || 0 });

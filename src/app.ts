@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { createRuntimeLog, type RuntimeLog } from "./runtime-log.js";
 import { createTelegramProjection, type TelegramTransport } from "./telegram-projection.js";
+import { projectDeliveredChat, projectFinalAnswer, projectRecoverableTelegram,
+  projectRequestState } from "./runtime-projections.js";
 
 export type Update = { userId: number; chatType: string; text?: string; messageId: number };
 export type Message = { role: "user" | "assistant"; text: string };
@@ -46,14 +48,7 @@ export function createApp(options: {
     try {
       const previous = await log.read();
       const reset = previous.findLastIndex((event) => event.type === "reset");
-      const active = new Set(previous.slice(reset + 1).filter((event) => event.type === "request_started")
-        .map((event) => event.requestId).filter((value): value is string => !!value));
-      for (const event of previous.slice(reset + 1)) {
-        if (event.type === "request_completed" || event.type === "request_failed" ||
-          event.type === "request_interrupted") {
-          if (event.requestId) active.delete(event.requestId);
-        }
-      }
+      const active = projectRequestState(previous.slice(reset + 1)).open;
       // Requests are serialized by this app. An older open request cannot still be running here.
       for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
       const batch = [{ type: "message", role: "user", text, messageId: update.messageId, requestId: id },
@@ -67,30 +62,13 @@ export function createApp(options: {
       catch { /* The storage error remains the request failure. */ }
       throw error;
     }
-    const resetIndex = history.findLastIndex((event) => event.type === "reset");
-    const generated = new Map<string, string>();
-    let messages: Message[] = [];
-    for (const event of history.slice(resetIndex + 1)) {
-      if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
-        messages.push({ role: "user", text: event.text });
-      } else if (event.type === "message" && event.role === "assistant" && !event.requestId &&
-        typeof event.text === "string") {
-        messages.push({ role: "assistant", text: event.text });
-      } else if (event.type === "answer_generated" && event.requestId && typeof event.text === "string") {
-        generated.set(event.requestId, event.text);
-      } else if (event.type === "delivery_succeeded" && event.requestId) {
-        const delivered = generated.get(event.requestId);
-        if (delivered !== undefined) messages.push({ role: "assistant", text: delivered });
-      }
-    }
+    const messages = projectDeliveredChat(history);
     try {
       const answer = await options.answer(messages, { id, log, onText: telegram?.stream.bind(telegram) });
       if (!answer.trim()) throw new Error("模型没有返回文字");
       await telegram?.finish();
       await log.append({ type: "answer_generated", requestId: id, text: answer });
-      const final = telegram && (await log.read()).findLast((event) =>
-        event.type === "text_finalized" && event.requestId === id && event.contentKind === "final" &&
-        event.text === answer && typeof event.textSegmentId === "string");
+      const final = telegram && projectFinalAnswer(await log.read(), id, answer);
       if (final && telegram) {
         await telegram.reconcile(String(final.textSegmentId));
         if (await telegram.finalDelivered(String(final.textSegmentId))) {
@@ -118,7 +96,7 @@ export function createApp(options: {
       await telegram?.stop();
       try {
         const events = await log.read();
-        if (!events.some((event) => event.type === "request_failed" && event.requestId === id)) {
+        if (!projectRequestState(events).failed.has(id)) {
           await log.append({ type: "request_failed", requestId: id, phase: "agent", error: String(error) });
         }
       }
@@ -133,24 +111,15 @@ export function createApp(options: {
   return {
     async recover(): Promise<void> {
       const events = await log.read();
-      const open = new Set(events.filter((event) => event.type === "request_started")
-        .map((event) => event.requestId).filter((id): id is string => typeof id === "string"));
-      for (const event of events) {
-        if (["request_completed", "request_failed", "request_interrupted"].includes(event.type) && event.requestId) {
-          open.delete(event.requestId);
-        }
-      }
+      const open = projectRequestState(events).open;
       for (const requestId of open) await log.append({ type: "request_interrupted", requestId });
       if (telegram) {
-        const segments = [...new Set(events.filter((event) => event.type === "text_snapshot" &&
-          typeof event.textSegmentId === "string").map((event) => event.textSegmentId as string))];
+        const { segments } = projectRecoverableTelegram(events);
         for (const segment of segments) await telegram.reconcile(segment);
         const current = await log.read();
-        for (const event of current.filter((item) => item.type === "text_finalized" &&
-          item.contentKind === "final" && typeof item.textSegmentId === "string" &&
-          typeof item.requestId === "string" && typeof item.text === "string")) {
+        for (const event of projectRecoverableTelegram(current).finals) {
           if (!await telegram.finalDelivered(String(event.textSegmentId)) ||
-            current.some((item) => item.type === "delivery_succeeded" && item.requestId === event.requestId)) continue;
+            projectRequestState(current).delivered.has(event.requestId!)) continue;
           if (!current.some((item) => item.type === "answer_generated" && item.requestId === event.requestId)) {
             await log.append({ type: "answer_generated", requestId: event.requestId, text: event.text });
           }

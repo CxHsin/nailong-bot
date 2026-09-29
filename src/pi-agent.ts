@@ -11,7 +11,8 @@ import type { Request } from "./app.js";
 import { connectTinyfish } from "./tinyfish.js";
 import { createContextProjection } from "./context-budget.js";
 import { assistantText } from "./projection.js";
-import { archivePlaceholder, shouldPrune, type ToolResult } from "./runtime-log.js";
+import { type ToolResult } from "./runtime-log.js";
+import { toolResultView, TOOL_RESULT_PROJECTION_VERSION } from "./tool-result-projection.js";
 import { createBoundedRead } from "./archive-read.js";
 import { createRuntimeLog } from "./runtime-log.js";
 
@@ -169,11 +170,12 @@ export async function createPiAgent(options: {
           let archiveError: string | undefined;
           try { archive = await request.log.archive(result); }
           catch (error) { archiveError = String(error); }
+          const view = toolResultView(toolName, result, archive, request.log.isArchiveRead(toolName, args));
           await request.log.append({ type: "tool_result", requestId: request.id,
             toolCallId, toolName, isError: result.isError,
-            modelVisible: archive && shouldPrune(result, request.log.isArchiveRead(toolName, args)) ? "archive" : "original",
+            modelVisible: view.modelVisible, modelProjectionVersion: TOOL_RESULT_PROJECTION_VERSION,
             result, ...(archive ? { archive } : { archiveError }) });
-          return archive;
+          return view;
         };
         session.agent.beforeToolCall = async (context, signal) => {
           if (logFailure) return { block: true, reason: "运行日志写入失败" };
@@ -201,16 +203,16 @@ export async function createPiAgent(options: {
             details: previous?.details ?? context.result.details,
             isError: previous?.isError ?? context.isError,
           };
-          let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
+          let view: ReturnType<typeof toolResultView>;
           try {
-            archive = await recordResult(context.toolCall.id, context.toolCall.name, result, context.args);
+            view = await recordResult(context.toolCall.id, context.toolCall.name, result, context.args);
           } catch (error) {
             logFailure = error instanceof Error ? error : new Error(String(error));
             session.agent.abort();
             return { content: [{ type: "text", text: "工具结果未能写入运行日志；本轮已停止。" }], terminate: true };
           }
-          if (!archive || !shouldPrune(result, request.log.isArchiveRead(context.toolCall.name, context.args))) return previous;
-          return { content: archivePlaceholder(context.toolCall.name, archive), details: {} };
+          if (view.modelVisible === "original") return previous;
+          return { content: view.content, details: {} };
         };
       }
       try {

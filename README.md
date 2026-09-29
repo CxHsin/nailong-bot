@@ -13,11 +13,13 @@
 
 Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊中发送的文字。电脑关机或进程停止时 Bot 不在线。`/reset` 开始新上下文，但不会删除旧记录。修改 System prompt 后重启生效。
 
-`.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。`data/events.jsonl` 追加保存聊天及运行事件；完整工具结果保存在 `data/tool-results/`，历史摘要 checkpoint 保存在 `data/checkpoints/`。这些记录可能包含私人文件内容和工具参数，请按私人数据管理。每次模型调用前，Bot 从事件日志投影用户、模型和工具历史，默认输入预算为当前模型上下文窗口的 86%。可选的 `PROJECTION_BUDGET_RATIOS` 环境变量按模型覆盖比例，例如 `{"deepseek/deepseek-v4-flash":0.8}`。超预算时较早的完整历史折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 不删除旧事件。
+`.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。当前以 `data/events.sqlite` 中按序追加的运行事件作为事实源；启动时校验并导入旧版 `data/events.jsonl`（若存在）；完整工具结果保存在 `data/tool-results/`，历史摘要 checkpoint 保存在 `data/checkpoints/`。这些记录可能包含私人文件内容和工具参数，请按私人数据管理。每次模型调用前，Bot 从事件日志投影用户、模型和工具历史，默认输入预算为当前模型上下文窗口的 86%。可选的 `PROJECTION_BUDGET_RATIOS` 环境变量按模型覆盖比例，例如 `{"deepseek/deepseek-v4-flash":0.8}`。超预算时较早的完整历史折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 不删除旧事件。
 
 同一轮中，较大的工具结果会先完整归档，再以包含路径、大小和校验值的短提示交给模型。历史重放继续使用这些引用；模型可用现有 `read` 工具按段读取归档的文本视图。归档失败时原结果仍交给模型，并完整写入运行事件。运行事件写入失败会停止后续工具或模型步骤；已执行但结果未入库的工具不会自动重试，下一轮只标记结果未知。模型已生成的回答与 Telegram 送达状态分开记录，未送达的回答可在事件中查到，但不进入续聊历史。
 
 ## 本机文件工具
+
+运行事件是事实源：`src/runtime-projections.ts` 从已提交事件推导请求终态、兼容聊天历史与 Telegram 恢复候选；`src/telegram-projection.ts` 消费文本及投递事件并执行发送；`src/projection.ts` 和 `src/context-budget.ts` 构造下一次模型调用的上下文。兼容聊天历史仅供简单 `answer(messages)` 适配器使用，真实 pi 会话以完整事件重放为准。`src/tool-result-projection.ts` 定义工具结果的当前与重放视图；新事件会记录投影版本和当时的模型可见形式。修改这些投影不会改写原始事件。
 
 模型可自行调用 `read`、`write`、`edit`、`ls`、`find`、`grep`，完成文件读取、写入、修改、目录浏览和搜索。文件内容、命名、格式和组织方式由模型结合对话决定；`write` 可覆盖已有文件。没有开放 `bash` 命令执行工具。
 

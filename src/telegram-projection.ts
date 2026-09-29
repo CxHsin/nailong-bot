@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { RuntimeLog, StoredEvent } from "./runtime-log.js";
+import type { RuntimeLog } from "./runtime-log.js";
+import { projectTelegramSegment } from "./runtime-projections.js";
 import { formatMarkdownForTelegram } from "./telegram-format.js";
 
 export type TelegramTransport = {
@@ -8,12 +9,6 @@ export type TelegramTransport = {
   draft?(draftId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
   isRejected?: (error: unknown) => boolean;
   retryAfter?: (error: unknown) => number | undefined;
-};
-
-type TextEvent = StoredEvent & { eventId: string; sequence: number; textSegmentId: string; text: string };
-type DeliveryEvent = StoredEvent & {
-  textSegmentId: string; partIndex: number; attemptId: string;
-  snapshotEventId: string; telegramMessageId?: number; text?: string; action?: string;
 };
 
 export function splitTelegramText(text: string): string[] {
@@ -45,18 +40,7 @@ export function createTelegramProjection(options: { log: RuntimeLog; chatId: num
   const points = (text: string) => Array.from(characters.segment(text), (part) => part.segment);
   const hasVisibleContent = (rendered: string) => !!rendered.replace(/<[^>]+>/g, "").trim();
   async function state(textSegmentId: string) {
-    const all = await options.log.read();
-    const snapshots = all.filter((event): event is TextEvent =>
-      event.type === "text_snapshot" && event.textSegmentId === textSegmentId &&
-      typeof event.text === "string" && typeof event.eventId === "string" &&
-      typeof event.sequence === "number");
-    const final = all.findLast((event) => event.type === "text_finalized" &&
-      event.textSegmentId === textSegmentId);
-    const deliveries = all.filter((event): event is DeliveryEvent =>
-      event.textSegmentId === textSegmentId && event.type.startsWith("telegram_delivery_") &&
-      typeof event.partIndex === "number" && typeof event.attemptId === "string" &&
-      typeof event.snapshotEventId === "string");
-    return { snapshots, final, deliveries };
+    return projectTelegramSegment(await options.log.read(), textSegmentId);
   }
 
   return {
