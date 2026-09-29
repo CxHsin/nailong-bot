@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { Bot, GrammyError } from "grammy";
 import { createApp, DeliveryRejected } from "./app.js";
 import { createPiAgent } from "./pi-agent.js";
+import { createSqliteRuntimeLog } from "./sqlite-runtime-log.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -16,6 +17,8 @@ async function main(): Promise<void> {
   if (!Number.isSafeInteger(ownerId) || ownerId <= 0) throw new Error("TELEGRAM_USER_ID 必须是正整数");
   const dataDir = resolve("data");
   const promptFile = resolve("system-prompt.md");
+  const log = createSqliteRuntimeLog(dataDir);
+  await log.importLegacy();
   const agent = await createPiAgent({
     dataDir,
     promptFile,
@@ -28,6 +31,24 @@ async function main(): Promise<void> {
   const app = createApp({
     ownerId,
     dataDir,
+    log,
+    telegram: {
+      send: async (text, chatId) => {
+        try { return (await bot.api.sendMessage(chatId, text)).message_id; }
+        catch (error) {
+          if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝发送：${error.error_code}`);
+          throw error;
+        }
+      },
+      edit: async (messageId, text, chatId) => {
+        try { await bot.api.editMessageText(chatId, messageId, text); }
+        catch (error) {
+          if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝编辑：${error.error_code}`);
+          throw error;
+        }
+      },
+      isRejected: (error) => error instanceof DeliveryRejected,
+    },
     answer: agent.answer,
     send: async (text, update, onChunk) => {
       const chunks = text.match(/[\s\S]{1,4000}/g) ?? [];
@@ -41,6 +62,7 @@ async function main(): Promise<void> {
       }
     },
   });
+  await app.recover();
   bot.on("message:text", async (ctx) => {
     await app.handle({
       userId: ctx.from.id,

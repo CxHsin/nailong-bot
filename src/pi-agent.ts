@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createAssistantMessageEventStream, getModel, isContextOverflow } from "@mariozechner/pi-ai";
 import {
   AuthStorage, createAgentSession, DefaultResourceLoader, ModelRegistry,
@@ -71,6 +72,7 @@ export async function createPiAgent(options: {
       let logFailure: Error | undefined;
       let projectionFailure: Error | undefined;
       if (request) {
+        let step = 0;
         const providerStream = session.agent.streamFn;
         const projection = createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
           ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
@@ -85,11 +87,31 @@ export async function createPiAgent(options: {
         session.agent.streamFn = async (selected, context, streamOptions) => {
           try { for (let attempt = 0; attempt < 2; attempt++) {
             const result = await projection.project(selected, context, attempt === 1);
+            const currentStep = ++step;
+            const modelStepId = randomUUID();
+            const textSegmentId = randomUUID();
+            await request.log.append({ type: "model_step_started", requestId: request.id,
+              step: currentStep, modelStepId });
             const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
             let producedOutput = false;
+            let text = "";
+            let saved = "";
+            let lastSnapshot = 0;
+            const snapshot = async () => {
+              if (!text || text === saved) return;
+              await request.log.append({ type: "text_snapshot", requestId: request.id,
+                modelStepId, textSegmentId, contentKind: "provisional", text });
+              saved = text;
+              lastSnapshot = Date.now();
+              await request.onText?.(textSegmentId);
+            };
             for await (const event of source) {
               if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
                 producedOutput = true;
+              }
+              if (event.type === "text_delta") {
+                text += event.delta;
+                if (text.length - saved.length >= 80 || Date.now() - lastSnapshot >= 350) await snapshot();
               }
             }
             const message = await source.result();
@@ -101,6 +123,28 @@ export async function createPiAgent(options: {
             if (message.stopReason === "error" && isContextOverflow(message, selected.contextWindow)) {
               throw new Error(producedOutput ? "模型上下文溢出且已有部分输出" : "模型上下文溢出重试失败");
             }
+            const settledText = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+            if (settledText) {
+              text = settledText;
+              await snapshot();
+              if (message.stopReason !== "error" && message.stopReason !== "aborted") {
+                await request.log.append({ type: "text_finalized", requestId: request.id,
+                  modelStepId, textSegmentId,
+                  contentKind: message.content.some((part) => part.type === "toolCall") ? "progress" : "final",
+                  text: settledText });
+                await request.onText?.(textSegmentId);
+              }
+            }
+            await request.log.append({ type: "model_message", requestId: request.id,
+              step: currentStep, modelStepId, message });
+            for (const part of message.content) {
+              if (part.type === "toolCall") {
+                await request.log.append({ type: "tool_call", requestId: request.id,
+                  toolCallId: part.id, toolName: part.name, args: part.arguments });
+              }
+            }
+            await request.log.append({ type: "model_step_completed", requestId: request.id,
+              step: currentStep, modelStepId, stopReason: message.stopReason });
             // Deliver only the settled physical attempt to Pi. A rejected request cannot issue tools.
             const response = createAssistantMessageEventStream();
             if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -117,8 +161,6 @@ export async function createPiAgent(options: {
         session.agent.toolExecution = "sequential";
         const originalBefore = session.agent.beforeToolCall;
         const originalAfter = session.agent.afterToolCall;
-        const recordedResults = new Set<string>();
-        let step = 0;
         const recordResult = async (toolCallId: string, toolName: string, result: ToolResult, args?: unknown) => {
           let archive: Awaited<ReturnType<Request["log"]["archive"]>> | undefined;
           let archiveError: string | undefined;
@@ -128,7 +170,6 @@ export async function createPiAgent(options: {
             toolCallId, toolName, isError: result.isError,
             modelVisible: archive && shouldPrune(result, request.log.isArchiveRead(toolName, args)) ? "archive" : "original",
             result, ...(archive ? { archive } : { archiveError }) });
-          recordedResults.add(toolCallId);
           return archive;
         };
         session.agent.beforeToolCall = async (context, signal) => {
@@ -168,30 +209,6 @@ export async function createPiAgent(options: {
           if (!archive || !shouldPrune(result, request.log.isArchiveRead(context.toolCall.name, context.args))) return previous;
           return { content: archivePlaceholder(context.toolCall.name, archive), details: {} };
         };
-        session.agent.subscribe(async (event) => {
-          if (logFailure) return;
-          try {
-            if (event.type === "turn_start") {
-              step++;
-              await request.log.append({ type: "model_step_started", requestId: request.id, step });
-            } else if (event.type === "turn_end") {
-              await request.log.append({ type: "model_step_completed", requestId: request.id, step,
-                stopReason: event.message.role === "assistant" ? event.message.stopReason : undefined });
-            } else if (event.type === "tool_execution_start") {
-              await request.log.append({ type: "tool_call", requestId: request.id,
-                toolCallId: event.toolCallId, toolName: event.toolName, args: event.args });
-            } else if (event.type === "tool_execution_end" && !recordedResults.has(event.toolCallId)) {
-              const result = { content: event.result.content, details: event.result.details, isError: event.isError };
-              await recordResult(event.toolCallId, event.toolName, result);
-            } else if (event.type === "message_end" && event.message.role === "assistant") {
-              await request.log.append({ type: "model_message", requestId: request.id,
-                step, message: event.message });
-            }
-          } catch (error) {
-            logFailure = error instanceof Error ? error : new Error(String(error));
-            session.agent.abort();
-          }
-        });
       }
       try {
         await session.prompt(current.text);

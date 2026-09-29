@@ -148,4 +148,7 @@ export function createRuntimeLog(dataDir: string) {
   };
 }
 
-export type RuntimeLog = ReturnType<typeof createRuntimeLog>;
+export type RuntimeLog = Omit<ReturnType<typeof createRuntimeLog>, "append"> & {
+  append(event: Omit<StoredEvent, "at">): Promise<unknown>;
+  appendBatch?(events: Array<Omit<StoredEvent, "at">>): Promise<unknown>;
+};

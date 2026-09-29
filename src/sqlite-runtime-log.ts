@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { StoredEvent } from "./runtime-log.js";
+import { createRuntimeLog } from "./runtime-log.js";
 
 export type EventInput = Omit<StoredEvent, "at"> & { at?: string };
 export type SqliteEvent = StoredEvent & {
@@ -194,6 +195,7 @@ function validateLegacy(events: StoredEvent[]): void {
 export function createSqliteRuntimeLog(dataDir: string) {
   const databaseFile = join(dataDir, "events.sqlite");
   const legacyFile = join(dataDir, "events.jsonl");
+  const archive = createRuntimeLog(dataDir);
 
   async function withDatabase<T>(work: (db: DatabaseSync) => T): Promise<T> {
     await mkdir(dataDir, { recursive: true });
@@ -203,6 +205,17 @@ export function createSqliteRuntimeLog(dataDir: string) {
   }
 
   return {
+    archive: archive.archive,
+    loadArchive: archive.loadArchive,
+    recoverArchive: archive.recoverArchive,
+    isArchiveRead: archive.isArchiveRead,
+    async bytes(): Promise<number> {
+      try { return (await stat(databaseFile)).size; }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+        throw error;
+      }
+    },
     async read(afterSequence = 0): Promise<SqliteEvent[]> {
       if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new Error("事件游标无效");
       return withDatabase((db) => {
