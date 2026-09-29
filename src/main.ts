@@ -34,6 +34,15 @@ async function main(): Promise<void> {
     dataDir,
     log,
     telegram: {
+      draft: async (draftId, text, chatId, parseMode) => {
+        try { await bot.api.sendMessageDraft(chatId, draftId, text,
+          parseMode ? { parse_mode: parseMode } : undefined); }
+        catch (error) {
+          if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝草稿：${error.error_code}`,
+            error.parameters.retry_after === undefined ? undefined : error.parameters.retry_after * 1000);
+          throw error;
+        }
+      },
       send: async (text, chatId, parseMode) => {
         try { return (await bot.api.sendMessage(chatId, text,
           parseMode ? { parse_mode: parseMode } : undefined)).message_id; }

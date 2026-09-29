@@ -57,6 +57,69 @@ test("short model deltas appear in readable Telegram updates", { timeout: 30_000
   assert.ok(modes.every((mode) => mode === "HTML"));
 });
 
+test("Telegram native draft animates selected text and final answer becomes a lasting message", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-native-draft-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const drafts: Array<{ id: number; text: string; mode?: string }> = [];
+  const sent: string[] = [];
+  let edits = 0;
+  const app = createApp({ ownerId: 42, dataDir: dir, log,
+    answer: async (_messages, request) => {
+      for (const text of ["你", "你好", "你好，世界"]) {
+        await log.append({ type: "text_snapshot", requestId: request.id, textSegmentId: "native",
+          contentKind: "provisional", text });
+        await request.onText?.("native");
+        await new Promise((resolve) => setTimeout(resolve, 230));
+      }
+      await log.append({ type: "text_finalized", requestId: request.id, textSegmentId: "native",
+        contentKind: "final", text: "你好，世界" });
+      await request.onText?.("native");
+      return "你好，世界";
+    },
+    send: async () => { throw new Error("must persist through projection"); },
+    telegram: {
+      draft: async (id, text, _chatId, mode) => { drafts.push({ id, text, mode }); },
+      send: async (text) => { sent.push(text); return 1; },
+      edit: async () => { edits++; },
+    },
+  });
+  await app.handle({ userId: 42, chatType: "private", text: "打招呼", messageId: 1 });
+  assert.ok(drafts.length >= 2);
+  assert.ok(drafts.every((draft) => draft.id === drafts[0]!.id && draft.mode === "HTML"));
+  assert.equal(drafts.at(-1)!.text, "你好，世界");
+  assert.deepEqual(sent, ["你好，世界"]);
+  assert.equal(edits, 0);
+});
+
+test("a rejected native draft still delivers the lasting final answer", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-draft-rejected-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const sent: string[] = [];
+  const app = createApp({ ownerId: 42, dataDir: dir, log,
+    answer: async (_messages, request) => {
+      await log.append({ type: "text_snapshot", requestId: request.id, textSegmentId: "rejected-draft",
+        contentKind: "provisional", text: "完整回复" });
+      await request.onText?.("rejected-draft");
+      await log.append({ type: "text_finalized", requestId: request.id, textSegmentId: "rejected-draft",
+        contentKind: "final", text: "完整回复" });
+      await request.onText?.("rejected-draft");
+      return "完整回复";
+    },
+    send: async () => { throw new Error("must persist through projection"); },
+    telegram: {
+      draft: async () => { throw new DeliveryRejected("draft unavailable"); },
+      send: async (text) => { sent.push(text); return 1; },
+      edit: async () => undefined,
+      isRejected: (error) => error instanceof DeliveryRejected,
+    },
+  });
+  await app.handle({ userId: 42, chatType: "private", text: "回复", messageId: 1 });
+  assert.deepEqual(sent, ["完整回复"]);
+  assert.equal((await log.read()).some((event) => event.type === "delivery_succeeded"), true);
+});
+
 test("a new user message completes the older visible reply", { timeout: 15_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-interrupt-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

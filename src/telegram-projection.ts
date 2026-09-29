@@ -5,6 +5,7 @@ import { formatMarkdownForTelegram } from "./telegram-format.js";
 export type TelegramTransport = {
   send(text: string, chatId: number, parseMode?: "HTML"): Promise<number>;
   edit(messageId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
+  draft?(draftId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
   isRejected?: (error: unknown) => boolean;
   retryAfter?: (error: unknown) => number | undefined;
 };
@@ -114,6 +115,42 @@ export function createTelegramProjection(options: { log: RuntimeLog; chatId: num
     },
     stream(textSegmentId: string): Promise<void> {
       if (animations.has(textSegmentId)) return Promise.resolve();
+      if (options.draft) {
+        const run = async () => {
+          let drafted = "";
+          while (true) {
+            const { snapshots, final } = await state(textSegmentId);
+            const first = snapshots[0];
+            const latest = snapshots.at(-1);
+            const target = latest?.text ?? "";
+            if (first && target && Date.now() >= retryNotBefore) {
+              const preview = splitTelegramText(target)[0] ?? "";
+              const rendered = formatMarkdownForTelegram(preview);
+              if (hasVisibleContent(rendered) && rendered !== drafted) {
+                try {
+                  await options.draft!(first.sequence, rendered, options.chatId, "HTML");
+                  drafted = rendered;
+                } catch (error) {
+                  const retryAfter = options.retryAfter?.(error);
+                  if (retryAfter !== undefined && Number.isFinite(retryAfter) && retryAfter > 0) {
+                    retryNotBefore = Date.now() + retryAfter;
+                  }
+                }
+              }
+            }
+            if (final) {
+              await this.reconcile(textSegmentId);
+              return;
+            }
+            if (stopAnimations || finishingAt !== undefined) return;
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+        };
+        const task = run().catch((error: unknown) => { animationError = error; })
+          .finally(() => animations.delete(textSegmentId));
+        animations.set(textSegmentId, task);
+        return Promise.resolve();
+      }
       const run = async () => {
         const initial = await state(textSegmentId);
         let visible = splitTelegramText(initial.snapshots.at(-1)?.text ?? "").map((_part, partIndex) =>
