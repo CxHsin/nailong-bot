@@ -43,6 +43,7 @@ async function main(): Promise<void> {
       edit: async (messageId, text, chatId) => {
         try { await bot.api.editMessageText(chatId, messageId, text); }
         catch (error) {
+          if (error instanceof GrammyError && /message is not modified/i.test(error.description)) return;
           if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝编辑：${error.error_code}`);
           throw error;
         }
