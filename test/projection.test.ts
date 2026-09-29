@@ -194,7 +194,7 @@ test("a single long tool chain compacts settled earlier steps while keeping the 
 
 test("an input that cannot be split is rejected before provider dispatch at a per-model ratio", async (t) => {
   const f = await fixture(t, (_data, res) => reply(res, "should not dispatch"), {
-    contextWindow: 6000, modelBudgetRatios: { "deepseek/deepseek-v4-flash": 0.4 },
+    contextWindow: 6000, modelBudgetRatios: { "deepseek/deepseek-flash": 0.4 },
   });
   await f.send("large current input " + "x".repeat(7000));
   assert.equal(f.seen.length, 0);

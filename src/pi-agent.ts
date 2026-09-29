@@ -36,7 +36,8 @@ export async function createPiAgent(options: {
   }
   const defaultModel = getModel("deepseek", "deepseek-v4-flash");
   if (!defaultModel) throw new Error("pi SDK 未提供 DeepSeek 模型");
-  const model = { ...defaultModel, ...(options.modelBaseUrl ? { baseUrl: options.modelBaseUrl } : {}),
+  const model = { ...defaultModel, id: "deepseek-flash", name: "deepseek-flash",
+    ...(options.modelBaseUrl ? { baseUrl: options.modelBaseUrl } : {}),
     ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) };
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
