@@ -3,6 +3,7 @@ import { Bot, GrammyError } from "grammy";
 import { createApp, DeliveryRejected } from "./app.js";
 import { createPiAgent } from "./pi-agent.js";
 import { createSqliteRuntimeLog } from "./sqlite-runtime-log.js";
+import { formatMarkdownForTelegram } from "./telegram-format.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -33,15 +34,17 @@ async function main(): Promise<void> {
     dataDir,
     log,
     telegram: {
-      send: async (text, chatId) => {
-        try { return (await bot.api.sendMessage(chatId, text)).message_id; }
+      send: async (text, chatId, parseMode) => {
+        try { return (await bot.api.sendMessage(chatId, text,
+          parseMode ? { parse_mode: parseMode } : undefined)).message_id; }
         catch (error) {
           if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝发送：${error.error_code}`);
           throw error;
         }
       },
-      edit: async (messageId, text, chatId) => {
-        try { await bot.api.editMessageText(chatId, messageId, text); }
+      edit: async (messageId, text, chatId, parseMode) => {
+        try { await bot.api.editMessageText(chatId, messageId, text,
+          parseMode ? { parse_mode: parseMode } : undefined); }
         catch (error) {
           if (error instanceof GrammyError && /message is not modified/i.test(error.description)) return;
           if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝编辑：${error.error_code}`);
@@ -54,7 +57,7 @@ async function main(): Promise<void> {
     send: async (text, update, onChunk) => {
       const chunks = text.match(/[\s\S]{1,4000}/g) ?? [];
       for (const [index, chunk] of chunks.entries()) {
-        try { await bot.api.sendMessage(update.userId, chunk); }
+        try { await bot.api.sendMessage(update.userId, formatMarkdownForTelegram(chunk), { parse_mode: "HTML" }); }
         catch (error) {
           if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝发送：${error.error_code}`);
           throw error;

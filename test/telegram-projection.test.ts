@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
 import { createTelegramProjection } from "../src/telegram-projection.js";
+import { formatMarkdownForTelegram } from "../src/telegram-format.js";
 
 test("committed snapshots grow one Telegram message and finalize in place", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-projection-"));
@@ -126,4 +127,22 @@ test("a delivery result commit failure remains a storage failure", async (t) => 
     send: async () => { sent++; return 8; }, edit: async () => {},
   }).reconcile("text-1");
   assert.equal(sent, 1, "restart must not blindly repeat an unacknowledged first send");
+});
+
+test("Telegram projection renders Markdown without changing durable source text", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-markdown-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const source = "**加粗** 和 [链接](https://example.com)";
+  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
+    contentKind: "provisional", text: source });
+  const calls: Array<{ text: string; mode?: string }> = [];
+  const projection = createTelegramProjection({ log, chatId: 42,
+    send: async (text, _chatId, mode) => { calls.push({ text, mode }); return 7; },
+    edit: async () => {},
+  });
+  await projection.reconcile("text-1");
+  assert.deepEqual(calls, [{ text: formatMarkdownForTelegram(source), mode: "HTML" }]);
+  assert.match(calls[0]!.text, /<b>加粗<\/b>/);
+  assert.equal((await log.read()).find((event) => event.type === "text_snapshot")?.text, source);
 });

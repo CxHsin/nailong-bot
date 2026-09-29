@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeLog, StoredEvent } from "./runtime-log.js";
+import { formatMarkdownForTelegram } from "./telegram-format.js";
 
 export type TelegramTransport = {
-  send(text: string, chatId: number): Promise<number>;
-  edit(messageId: number, text: string, chatId: number): Promise<void>;
+  send(text: string, chatId: number, parseMode?: "HTML"): Promise<number>;
+  edit(messageId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
   isRejected?: (error: unknown) => boolean;
 };
 
@@ -67,9 +68,10 @@ export function createTelegramProjection(options: { log: RuntimeLog; chatId: num
         await options.log.append({ type: "telegram_delivery_attempt", ...identity, action, text });
         let telegramMessageId: number;
         try {
+          const rendered = formatMarkdownForTelegram(text);
           telegramMessageId = action === "send"
-            ? await options.send(text, options.chatId)
-            : (await options.edit(messageId!, text, options.chatId), messageId!);
+            ? await options.send(rendered, options.chatId, "HTML")
+            : (await options.edit(messageId!, rendered, options.chatId, "HTML"), messageId!);
         } catch (error) {
           await options.log.append({ type: options.isRejected?.(error) ?
             "telegram_delivery_failed" : "telegram_delivery_unknown", ...identity,
