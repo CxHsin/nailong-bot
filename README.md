@@ -7,19 +7,29 @@
 需要 Node.js 24 或更新版本。
 
 1. `npm install`
-2. 复制 `.env.example` 为 `.env`，填写 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_USER_ID`、`DEEPSEEK_API_KEY`、`TINYFISH_API_KEY`。用户 ID 是 Telegram 数字 ID，不是用户名。
+2. 复制 `.env.example` 为 `.env`，填写 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_USER_ID`、`DEEPSEEK_API_KEY`。需要网页搜索时再填写可选的 `TINYFISH_API_KEY`。用户 ID 是 Telegram 数字 ID，不是用户名。
 3. 按需要编辑 `system-prompt.md`。
 4. `npm start`
 
 Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊中发送的文字。电脑关机或进程停止时 Bot 不在线。`/reset` 开始新上下文，但不会删除旧记录。修改 System prompt 后重启生效。
 
-`.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。当前以 `data/events.sqlite` 中按序追加的运行事件作为事实源；启动时校验并导入旧版 `data/events.jsonl`（若存在）；完整工具结果保存在 `data/tool-results/`，历史摘要 checkpoint 保存在 `data/checkpoints/`。这些记录可能包含私人文件内容和工具参数，请按私人数据管理。每次模型调用前，Bot 从事件日志投影用户、模型和工具历史，默认输入预算为当前模型上下文窗口的 86%。可选的 `PROJECTION_BUDGET_RATIOS` 环境变量按模型覆盖比例，例如 `{"deepseek/deepseek-v4-flash":0.8}`。超预算时较早的完整历史折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 不删除旧事件。
+## 运行事件与投影
 
-同一轮中，较大的工具结果会先完整归档，再以包含路径、大小和校验值的短提示交给模型。历史重放继续使用这些引用；模型可用现有 `read` 工具按段读取归档的文本视图。归档失败时原结果仍交给模型，并完整写入运行事件。运行事件写入失败会停止后续工具或模型步骤；已执行但结果未入库的工具不会自动重试，下一轮只标记结果未知。模型已生成的回答与 Telegram 送达状态分开记录，未送达的回答可在事件中查到，但不进入续聊历史。
+`data/events.sqlite` 中按序追加的 Runtime Event Log 是运行事实源。用户消息、模型步骤与文字、工具派发与结果、Telegram 投递尝试与结果分别记录；已经生成的回答与已经送达的回答不是同一件事。运行时从同一份已提交日志生成不同视图：
+
+- **Model Context Projection**（`src/projection.ts`、`src/context-budget.ts`）：重放用户、模型和工具历史，构造下一次模型调用。已定稿的进展文字会进入上下文；最终回答只有完整送达后才作为用户已收到的答复回放。
+- **Telegram UI Projection**（`src/runtime-projections.ts`、`src/telegram-projection.ts`）：读取已提交的文字快照和投递状态。生成期间使用 Telegram 原生草稿显示选中的文字；定稿后发送持久消息，记录实际投递结果。长消息按 Telegram 限制分段。
+- **运行与恢复视图**（`src/runtime-projections.ts`）：推导请求终态和重启后的待核对内容。重启时未结束的请求标为中断，不自动重做已经派发但结果未知的工具操作。
+
+`src/runtime-projections.ts` 中的简化聊天视图仅服务于 `answer(messages)` 适配器；正式 pi 会话使用完整事件重放。`src/tool-result-projection.ts` 集中定义工具结果给模型的原文或归档引用视图，并在新事件中记录投影版本与当时的选择。投影和摘要都不改写原始运行事件。
+
+`.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。启动时如发现旧版 `data/events.jsonl`，会校验并幂等导入 SQLite，旧文件保留。完整工具结果存于 `data/tool-results/`，历史摘要 checkpoint 存于 `data/checkpoints/`。这些数据可能包含私人文件内容和工具参数，请按私人数据管理。
+
+每次模型调用前会估算上下文大小，默认输入预算为模型上下文窗口的 86%。可用 `PROJECTION_BUDGET_RATIOS` 按模型覆盖，例如 `{"deepseek/deepseek-v4-flash":0.8}`。超预算时，较早的完整历史会折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 只改变续聊边界，不删除旧事件。
+
+较大的工具结果会先完整归档，再把包含路径、大小和校验值的引用交给模型。模型可用 `read` 分段取回归档文本。归档失败时仍使用原始结果；日志写入失败则停止后续工具或模型步骤。工具已执行但结果未成功入库时，下一轮只标记结果未知，避免盲目重试。
 
 ## 本机文件工具
-
-运行事件是事实源：`src/runtime-projections.ts` 从已提交事件推导请求终态、兼容聊天历史与 Telegram 恢复候选；`src/telegram-projection.ts` 消费文本及投递事件并执行发送；`src/projection.ts` 和 `src/context-budget.ts` 构造下一次模型调用的上下文。兼容聊天历史仅供简单 `answer(messages)` 适配器使用，真实 pi 会话以完整事件重放为准。`src/tool-result-projection.ts` 定义工具结果的当前与重放视图；新事件会记录投影版本和当时的模型可见形式。修改这些投影不会改写原始事件。
 
 模型可自行调用 `read`、`write`、`edit`、`ls`、`find`、`grep`，完成文件读取、写入、修改、目录浏览和搜索。文件内容、命名、格式和组织方式由模型结合对话决定；`write` 可覆盖已有文件。没有开放 `bash` 命令执行工具。
 
@@ -31,4 +41,4 @@ Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊
 
 `npm run typecheck`、`npm test`、`npm run build`。
 
-配置真实凭据后，分别验证普通聊天、需要搜索的问题、包含网址的问题、重启续聊，以及 `/reset` 后的新对话。再在普通对话中要求保存一个结论，检查回复涉及的文件是否实际存在、内容是否可读。TinyFish 不可用时 Bot 仍能进行普通聊天和文件操作，启动日志会说明网页查询工具未启用。
+配置真实凭据后，分别验证普通聊天、需要搜索的问题、包含网址的问题、流式草稿与最终消息、重启续聊，以及 `/reset` 后的新对话。再在普通对话中要求保存一个结论，检查回复涉及的文件是否实际存在、内容是否可读。TinyFish 不可用时 Bot 仍能进行普通聊天和文件操作，启动日志会说明网页查询工具未启用。Telegram 原生草稿的具体渐入效果由客户端呈现，自动化测试不能替代真实聊天中的视觉检查。
