@@ -24,6 +24,13 @@ type EventRow = {
 };
 
 const reserved = new Set(["eventId", "sequence", "schemaVersion"]);
+const legacyKinds = new Set([
+  "message", "reset", "request_started", "request_completed", "request_failed",
+  "request_interrupted", "model_step_started", "model_step_completed", "model_message",
+  "tool_call", "tool_dispatch", "tool_result", "answer_generated",
+  "delivery_chunk_succeeded", "delivery_succeeded", "delivery_failed", "delivery_unknown",
+  "context_projected", "projection_failed", "provider_overflow",
+]);
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
 function openDatabase(path: string): DatabaseSync {
@@ -104,10 +111,12 @@ function validateLegacy(events: StoredEvent[]): void {
   const dispatch = new Set<string>();
   const results = new Set<string>();
   const answers = new Set<string>();
+  const steps = new Map<string, Set<number>>();
   let previousTime = -Infinity;
   for (const event of events) {
     validateEvent(event);
     if (!event.at) throw new Error("旧日志缺少事件时间");
+    if (!legacyKinds.has(event.type)) throw new Error("旧日志包含未知事件类型");
     if (event.type === "message" &&
       (!(["user", "assistant"] as unknown[]).includes(event.role) || typeof event.text !== "string")) {
       throw new Error("旧日志消息缺少角色或文本");
@@ -136,11 +145,25 @@ function validateLegacy(events: StoredEvent[]): void {
     if (time < previousTime) throw new Error("旧日志时间顺序倒退");
     previousTime = time;
     const requestId = event.requestId;
+    if (requestId && ended.has(requestId)) throw new Error("旧日志请求结束后仍有事件");
+    if (event.type === "model_step_started") {
+      if (!requestId || !started.has(requestId)) throw new Error("旧日志模型步骤无对应请求");
+      const open = steps.get(requestId) ?? new Set<number>();
+      if (open.has(Number(event.step))) throw new Error("旧日志模型步骤重复开始");
+      open.add(Number(event.step));
+      steps.set(requestId, open);
+    } else if (event.type === "model_step_completed") {
+      const open = requestId ? steps.get(requestId) : undefined;
+      if (!open?.delete(Number(event.step))) throw new Error("旧日志模型步骤无对应开始");
+    }
     if (event.type === "request_started") {
       if (!requestId || started.has(requestId)) throw new Error("旧日志请求开始事件重复或缺少身份");
       started.add(requestId);
     } else if (["request_completed", "request_failed", "request_interrupted"].includes(event.type)) {
       if (!requestId || !started.has(requestId) || ended.has(requestId)) throw new Error("旧日志请求终态矛盾");
+      if (event.type === "request_completed" && (steps.get(requestId)?.size ?? 0) > 0) {
+        throw new Error("旧日志完成请求仍有未完成模型步骤");
+      }
       ended.add(requestId);
     } else if (event.type === "tool_dispatch" || event.type === "tool_result") {
       if (!requestId || !started.has(requestId) || typeof event.toolCallId !== "string" ||

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
 
@@ -41,6 +42,23 @@ test("a failed SQLite batch exposes no partial prefix or allocated sequence", as
   assert.deepEqual(await createSqliteRuntimeLog(dir).read(), []);
   const event = await log.append({ type: "request_started", requestId: "request-1" });
   assert.equal(event.sequence, 1);
+});
+
+test("a database failure after one valid insertion rolls back the whole batch", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sqlite-fault-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  await log.read();
+  const db = new DatabaseSync(join(dir, "events.sqlite"));
+  db.exec(`CREATE TRIGGER reject_second BEFORE INSERT ON runtime_events
+    WHEN NEW.kind = 'reject_second' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`);
+  db.close();
+  await assert.rejects(log.appendBatch([
+    { type: "request_started", requestId: "r1" },
+    { type: "reject_second", requestId: "r1" },
+  ]), /injected failure/);
+  assert.deepEqual(await createSqliteRuntimeLog(dir).read(), []);
+  assert.equal((await log.append({ type: "request_started", requestId: "r1" })).sequence, 1);
 });
 
 test("legacy import preserves payload and source, and repeats without duplicates", async (t) => {
@@ -102,3 +120,25 @@ test("legacy import rejects missing required fields and a changed source", async
   await assert.rejects(log.importLegacy());
   assert.deepEqual(await log.read(), imported);
 });
+
+for (const [name, legacy] of [
+  ["unknown event kind", [{ type: "mystery", at: "2026-01-01T00:00:00Z" }]],
+  ["model step completion without start", [
+    { type: "request_started", requestId: "r1", at: "2026-01-01T00:00:00Z" },
+    { type: "model_step_completed", requestId: "r1", step: 1, at: "2026-01-01T00:00:01Z" },
+  ]],
+  ["tool dispatch after request completion", [
+    { type: "request_started", requestId: "r1", at: "2026-01-01T00:00:00Z" },
+    { type: "request_completed", requestId: "r1", at: "2026-01-01T00:00:01Z" },
+    { type: "tool_dispatch", requestId: "r1", toolCallId: "c1", toolName: "read", at: "2026-01-01T00:00:02Z" },
+  ]],
+] as const) {
+  test(`legacy import rejects ${name}`, async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "sqlite-lifecycle-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    await writeFile(join(dir, "events.jsonl"), legacy.map((event) => JSON.stringify(event)).join("\n") + "\n");
+    const log = createSqliteRuntimeLog(dir);
+    await assert.rejects(log.importLegacy());
+    assert.deepEqual(await log.read(), []);
+  });
+}
