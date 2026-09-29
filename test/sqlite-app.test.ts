@@ -161,7 +161,9 @@ test("committed progress remains in context when tool dispatch fails", { timeout
     answer: agent.answer, send: async () => {} });
   await app.handle({ userId: 42, chatType: "private", text: "检查", messageId: 1 });
   await app.handle({ userId: 42, chatType: "private", text: "继续", messageId: 2 });
-  assert.match(JSON.stringify(contexts[1]), /我先检查目录/);
+  const context = JSON.stringify(contexts[1]);
+  assert.match(context, /我先检查目录/);
+  assert.equal(context.split("我先检查目录").length - 1, 1);
 });
 
 test("restart interrupts open work and reconciles only safe Telegram segments", async (t) => {

@@ -32,6 +32,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     .map((e) => e.requestId));
   const used = new Set<string>();
   const calls = new Set<string>();
+  const progressSteps = new Set(events.filter((event) => event.type === "text_finalized" &&
+    event.contentKind === "progress" && typeof event.modelStepId === "string")
+    .map((event) => event.modelStepId));
   for (const [index, event] of events.entries()) {
     if (event.type === "tool_result") {
       if (results.has(key(event))) throw new Error("工具结果编号重复");
@@ -105,7 +108,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
       if (kept.length) {
         const assistant = { ...original, content: original.content.filter((c) =>
-          (c.type !== "toolCall" || kept.includes(c)) && c.type !== "text") };
+          (c.type !== "toolCall" || kept.includes(c)) &&
+          (c.type !== "text" || !progressSteps.has(event.modelStepId))) };
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
           through, requestId: event.requestId, safe });
       }
