@@ -65,17 +65,19 @@ export function createTelegramProjection(options: { log: RuntimeLog; chatId: num
         const identity = { requestId: snapshot.requestId, textSegmentId, partIndex,
           snapshotEventId: snapshot.eventId, attemptId, chatId: options.chatId };
         await options.log.append({ type: "telegram_delivery_attempt", ...identity, action, text });
+        let telegramMessageId: number;
         try {
-          const telegramMessageId = action === "send"
+          telegramMessageId = action === "send"
             ? await options.send(text, options.chatId)
             : (await options.edit(messageId!, text, options.chatId), messageId!);
-          await options.log.append({ type: "telegram_delivery_succeeded", ...identity,
-            action, text, telegramMessageId });
         } catch (error) {
           await options.log.append({ type: options.isRejected?.(error) ?
             "telegram_delivery_failed" : "telegram_delivery_unknown", ...identity,
             action, error: String(error), ...(messageId === undefined ? {} : { telegramMessageId: messageId }) });
+          continue;
         }
+        await options.log.append({ type: "telegram_delivery_succeeded", ...identity,
+          action, text, telegramMessageId });
       }
     },
     async finalDelivered(textSegmentId: string): Promise<boolean> {

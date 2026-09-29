@@ -97,6 +97,7 @@ export async function createPiAgent(options: {
             let text = "";
             let saved = "";
             let lastSnapshot = 0;
+            let lastDelta = 0;
             const snapshot = async () => {
               if (!text || text === saved) return;
               await request.log.append({ type: "text_snapshot", requestId: request.id,
@@ -111,7 +112,11 @@ export async function createPiAgent(options: {
               }
               if (event.type === "text_delta") {
                 text += event.delta;
-                if (text.length - saved.length >= 80 || Date.now() - lastSnapshot >= 350) await snapshot();
+                const now = Date.now();
+                if (text.length - saved.length >= 80 ||
+                  (text.length - saved.length >= 24 && now - lastSnapshot >= 350) ||
+                  (text.length > saved.length && lastDelta && now - lastDelta >= 900)) await snapshot();
+                lastDelta = now;
               }
             }
             const message = await source.result();

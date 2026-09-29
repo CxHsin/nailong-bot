@@ -127,6 +127,43 @@ test("private Telegram sees committed progress before tool work and final text i
   assert.match(JSON.stringify(contexts[2]), /目录已查看/);
 });
 
+test("committed progress remains in context when tool dispatch fails", { timeout: 60_000 }, async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "sqlite-progress-failure-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  await log.importLegacy();
+  const contexts: unknown[] = [];
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    contexts.push(JSON.parse(body).messages);
+    const first = contexts.length === 1;
+    const delta = first ? { content: "我先检查目录。", tool_calls: [{ index: 0, id: "ls-one",
+      type: "function", function: { name: "ls", arguments: JSON.stringify({ path: dir }) } }] }
+      : { content: "继续处理" };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
+      finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    modelBaseUrl: `http://127.0.0.1:${address.port}` });
+  t.after(() => agent.close());
+  let fail = true;
+  const faulty = { ...log, append: async (event: Parameters<typeof log.append>[0]) => {
+    if (event.type === "tool_dispatch" && fail) { fail = false; throw new Error("commit failure"); }
+    return log.append(event);
+  } };
+  const app = createApp({ ownerId: 42, dataDir: dir, log: faulty,
+    answer: agent.answer, send: async () => {} });
+  await app.handle({ userId: 42, chatType: "private", text: "检查", messageId: 1 });
+  await app.handle({ userId: 42, chatType: "private", text: "继续", messageId: 2 });
+  assert.match(JSON.stringify(contexts[1]), /我先检查目录/);
+});
+
 test("restart interrupts open work and reconciles only safe Telegram segments", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "sqlite-recover-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

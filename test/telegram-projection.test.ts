@@ -102,3 +102,28 @@ test("a failed edit preserves durable text and later syncs a known message", asy
   assert.equal(visible, "开头和后续");
   assert.equal((await log.read()).filter((event) => event.type === "telegram_delivery_succeeded").length, 2);
 });
+
+test("a delivery result commit failure remains a storage failure", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "telegram-commit-fault-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
+    contentKind: "provisional", text: "已写入快照" });
+  let sent = 0;
+  const faulty = { ...log, append: async (event: Parameters<typeof log.append>[0]) => {
+    if (event.type === "telegram_delivery_succeeded") throw new Error("SQLite commit failed");
+    return log.append(event);
+  } };
+  const projection = createTelegramProjection({ log: faulty, chatId: 42,
+    send: async () => { sent++; return 7; }, edit: async () => {},
+  });
+  await assert.rejects(projection.reconcile("text-1"), /SQLite commit failed/);
+  assert.equal(sent, 1);
+  const events = await log.read();
+  assert.equal(events.filter((event) => event.type === "telegram_delivery_attempt").length, 1);
+  assert.equal(events.filter((event) => event.type === "telegram_delivery_unknown").length, 0);
+  await createTelegramProjection({ log, chatId: 42,
+    send: async () => { sent++; return 8; }, edit: async () => {},
+  }).reconcile("text-1");
+  assert.equal(sent, 1, "restart must not blindly repeat an unacknowledged first send");
+});

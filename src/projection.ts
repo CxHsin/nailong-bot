@@ -105,10 +105,14 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
       if (kept.length) {
         const assistant = { ...original, content: original.content.filter((c) =>
-          c.type !== "toolCall" || kept.includes(c)) };
+          (c.type !== "toolCall" || kept.includes(c)) && c.type !== "text") };
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
           through, requestId: event.requestId, safe });
       }
+    } else if (event.type === "text_finalized" && event.contentKind === "progress" &&
+      typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
+      units.push({ messages: [assistantText(event.text, model, timestamp)], through: index + 1,
+        requestId: event.requestId, safe: true });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);
       if (typeof answer?.text === "string") units.push({ messages: [assistantText(answer.text, model, timestamp)],
