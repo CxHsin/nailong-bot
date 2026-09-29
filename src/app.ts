@@ -5,7 +5,9 @@ import { createTelegramProjection, type TelegramTransport } from "./telegram-pro
 export type Update = { userId: number; chatType: string; text?: string; messageId: number };
 export type Message = { role: "user" | "assistant"; text: string };
 export type Request = { id: string; log: RuntimeLog; onText?: (textSegmentId: string) => Promise<void> };
-export class DeliveryRejected extends Error {}
+export class DeliveryRejected extends Error {
+  constructor(message: string, readonly retryAfterMs?: number) { super(message); }
+}
 
 export function createApp(options: {
   ownerId: number;
@@ -16,23 +18,30 @@ export function createApp(options: {
   answer: (messages: Message[], request: Request) => Promise<string>;
 }) {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
+  const telegram = options.telegram && createTelegramProjection({
+    log, chatId: options.ownerId, ...options.telegram,
+  });
   let queue = Promise.resolve();
+  let pendingRequests = 0;
 
-  async function process(update: Update): Promise<void> {
-    if (update.userId !== options.ownerId || update.chatType !== "private" || !update.text?.trim()) return;
+  function accepts(update: Update): update is Update & { text: string } {
+    return update.userId === options.ownerId && update.chatType === "private" && !!update.text?.trim();
+  }
+
+  async function process(update: Update & { text: string }, onStarted?: () => void): Promise<void> {
+    telegram?.resume();
+    if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text.trim();
     if (text === "/reset") {
       const batch = [{ type: "message", role: "user", text, messageId: update.messageId },
         { type: "reset" }];
       if (log.appendBatch) await log.appendBatch(batch);
       else for (const event of batch) await log.append(event);
+      onStarted?.();
       await options.send("已开始新对话，旧记录仍保留在本地。", update);
       return;
     }
     const id = randomUUID();
-    const telegram = options.telegram && createTelegramProjection({
-      log, chatId: update.userId, ...options.telegram,
-    });
     let history: Awaited<ReturnType<typeof log.read>>;
     try {
       const previous = await log.read();
@@ -51,6 +60,7 @@ export function createApp(options: {
         { type: "request_started", requestId: id }];
       if (log.appendBatch) await log.appendBatch(batch);
       else for (const event of batch) await log.append(event);
+      onStarted?.();
       history = await log.read();
     } catch (error) {
       try { await options.send("抱歉，本地运行日志暂时不可用，本条请求没有开始执行。", update); }
@@ -74,8 +84,9 @@ export function createApp(options: {
       }
     }
     try {
-      const answer = await options.answer(messages, { id, log, onText: telegram?.reconcile });
+      const answer = await options.answer(messages, { id, log, onText: telegram?.stream.bind(telegram) });
       if (!answer.trim()) throw new Error("模型没有返回文字");
+      await telegram?.finish();
       await log.append({ type: "answer_generated", requestId: id, text: answer });
       const final = telegram && (await log.read()).findLast((event) =>
         event.type === "text_finalized" && event.requestId === id && event.contentKind === "final" &&
@@ -104,6 +115,7 @@ export function createApp(options: {
       await log.append({ type: "delivery_succeeded", requestId: id });
       await log.append({ type: "request_completed", requestId: id });
     } catch (error) {
+      await telegram?.stop();
       try {
         const events = await log.read();
         if (!events.some((event) => event.type === "request_failed" && event.requestId === id)) {
@@ -129,10 +141,9 @@ export function createApp(options: {
         }
       }
       for (const requestId of open) await log.append({ type: "request_interrupted", requestId });
-      if (options.telegram) {
+      if (telegram) {
         const segments = [...new Set(events.filter((event) => event.type === "text_snapshot" &&
           typeof event.textSegmentId === "string").map((event) => event.textSegmentId as string))];
-        const telegram = createTelegramProjection({ log, chatId: options.ownerId, ...options.telegram });
         for (const segment of segments) await telegram.reconcile(segment);
         const current = await log.read();
         for (const event of current.filter((item) => item.type === "text_finalized" &&
@@ -148,8 +159,11 @@ export function createApp(options: {
         }
       }
     },
-    handle(update: Update): Promise<void> {
-      const next = queue.then(() => process(update));
+    handle(update: Update, onStarted?: () => void): Promise<void> {
+      if (!accepts(update)) return Promise.resolve();
+      pendingRequests++;
+      telegram?.interrupt();
+      const next = queue.then(() => process(update, onStarted)).finally(() => { pendingRequests--; });
       queue = next.catch(() => undefined);
       return next;
     },

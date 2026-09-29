@@ -111,8 +111,8 @@ export async function createPiAgent(options: {
               }
               if (event.type === "text_delta") {
                 text += event.delta;
-                const threshold = saved ? 120 : 48;
-                if (text.length - saved.length >= threshold && Date.now() - lastSnapshot >= 900) {
+                const threshold = saved ? 3 : 1;
+                if (text.length - saved.length >= threshold && (!saved || Date.now() - lastSnapshot >= 150)) {
                   await snapshot();
                 }
               }
