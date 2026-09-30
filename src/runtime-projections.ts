@@ -24,7 +24,8 @@ export function projectDeliveredChat(events: StoredEvent[]): Message[] {
   const messages: Message[] = [];
   for (const event of events.slice(reset + 1)) {
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
-      messages.push({ role: "user", text: event.text });
+      messages.push({ role: "user", text: event.text,
+        ...(Array.isArray(event.images) ? { images: event.images as NonNullable<Message["images"]> } : {}) });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId &&
       typeof event.text === "string") {
       messages.push({ role: "assistant", text: event.text });

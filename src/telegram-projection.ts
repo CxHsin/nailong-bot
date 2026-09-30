@@ -1,6 +1,6 @@
 import { createTelegramOutput } from "./telegram-output.js";
 import { randomUUID } from "node:crypto";
-import type { RuntimeLog } from "./runtime-log.js";
+import { createEventReader, type RuntimeLog } from "./runtime-log.js";
 import { projectTelegramSegment } from "./runtime-projections.js";
 import { formatMarkdownForTelegram } from "./telegram-format.js";
 
@@ -225,6 +225,7 @@ function createLegacyTelegramProjection(options: { log: RuntimeLog; chatId: numb
 
 /** Old records keep their original delivery semantics; new records use immutable pages. */
 export function createTelegramProjection(options: { log: RuntimeLog; chatId: number } & TelegramTransport) {
+  options = { ...options, log: { ...options.log, read: createEventReader(options.log) } };
   const legacy = createLegacyTelegramProjection(options);
   const current = createTelegramOutput(options);
   async function output(id: string) {

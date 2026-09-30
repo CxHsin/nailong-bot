@@ -36,7 +36,7 @@ export async function createPiAgent(options: {
   }
   const defaultModel = getModel("deepseek", "deepseek-v4-flash");
   if (!defaultModel) throw new Error("pi SDK 未提供 DeepSeek 模型");
-  const model = { ...defaultModel, id: "deepseek-flash", name: "deepseek-flash",
+  const model = { ...defaultModel, id: "deepseek-flash", name: "deepseek-flash", input: ["text", "image"] as ("text" | "image")[],
     ...(options.modelBaseUrl ? { baseUrl: options.modelBaseUrl } : {}),
     ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) };
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
@@ -56,7 +56,7 @@ export async function createPiAgent(options: {
       const manager = SessionManager.inMemory(options.dataDir);
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
-          manager.appendMessage({ role: "user", content: message.text, timestamp: Date.now() });
+          manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });
         } else {
           manager.appendMessage(assistantText(protocolText("final", message.text), model));
         }
@@ -81,7 +81,7 @@ export async function createPiAgent(options: {
           return { block: true, reason };
         }
         const previous = await previousBeforeTool?.(context, signal);
-        if (!previous?.block) { idleProgress = 0; dispatchedThisStep = true; }
+        if (!previous?.block) { idleProgress = 0; stepsWithoutTool = 0; resultTexts.clear(); dispatchedThisStep = true; }
         return previous;
       };
       let logFailure: Error | undefined;
@@ -89,7 +89,15 @@ export async function createPiAgent(options: {
       let finalText: string | undefined;
       let protocolErrors = 0;
       let idleProgress = 0;
+      let stepsWithoutTool = 0;
+      const resultTexts = new Set<string>();
       session.agent.subscribe((event) => {
+        // Distinct text alone cannot keep a request alive forever; real dispatch resets this budget.
+        if (event.type === "turn_end" && event.message.role === "assistant" && finalText === undefined &&
+          !dispatchedThisStep && ++stepsWithoutTool >= 12) {
+          projectionFailure = new Error("模型连续十二步未执行工具或提交最终答复，本轮未完成");
+          session.agent.abort();
+        }
         if (event.type === "turn_end" && event.message.role === "assistant" && event.message.content.some((c) => c.type === "toolCall") && !dispatchedThisStep) {
           if (++idleProgress >= 3) {
             projectionFailure = new Error("模型连续三次未推进，本轮未完成");
@@ -130,6 +138,7 @@ export async function createPiAgent(options: {
             const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
             let producedOutput = false;
             let lastPreview = "";
+            let lastPreviewAt = -Infinity;
             let lastValidatedPrefix = "";
             for await (const event of source) {
               if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
@@ -137,6 +146,7 @@ export async function createPiAgent(options: {
                 const rawPreview = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
                 let preview: ReturnType<typeof previewStructuredText>;
                 let validatedPrefix = false;
+                let prefixChanged = false;
                 try {
                   const frames = readOutputFrames(rawPreview);
                   const partial = previewStructuredText(frames.rest);
@@ -147,14 +157,17 @@ export async function createPiAgent(options: {
                       await request.log.append({ type: "text_validated_prefix", requestId: request.id,
                         modelStepId, textSegmentId, text: frames.prefix.text, contentKind: frames.prefix.type });
                       lastValidatedPrefix = frames.prefix.text;
+                      prefixChanged = true;
                     }
                   } else preview = frames.output ?? partial;
                 } catch { /* Invalid protocol cannot publish new text or dispatch tools. */ }
-                if (preview && preview.text !== lastPreview) {
+                // Preview at most every 100 ms, but publish complete validated frames immediately.
+                if (preview && preview.text !== lastPreview && (prefixChanged || performance.now() - lastPreviewAt >= 100)) {
                   await request.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
                     textSegmentId, contentKind: preview.type, text: preview.text,
                     protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
                   lastPreview = preview.text;
+                  lastPreviewAt = performance.now();
                   await request.onText?.(textSegmentId);
                 }
               }
@@ -199,7 +212,15 @@ export async function createPiAgent(options: {
               if (["progress", "status"].includes(parsed.type) && !toolCalls.length && ++idleProgress >= 3)
                 throw new Error("模型连续三次未推进，本轮未完成");
               if (parsed.type === "final") finalText = parsed.text;
-              if (parsed.type === "result") idleProgress = 0;
+              if (parsed.type === "result") {
+                const identity = parsed.text.trim();
+                if (resultTexts.has(identity)) {
+                  if (++idleProgress >= 3) throw new Error("模型连续重复阶段性成果，本轮未完成");
+                } else {
+                  resultTexts.add(identity);
+                  idleProgress = 0;
+                }
+              }
               await request?.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
                 textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
               await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
@@ -294,7 +315,7 @@ export async function createPiAgent(options: {
         };
       }
       try {
-        try { await session.prompt(current.text); }
+        try { await session.prompt(current.text, { images: current.images }); }
         catch (error) { throw logFailure ?? projectionFailure ?? error; }
         if (logFailure) throw logFailure;
         if (projectionFailure) throw projectionFailure;

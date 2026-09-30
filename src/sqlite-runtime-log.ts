@@ -26,7 +26,7 @@ type EventRow = {
 
 const reserved = new Set(["eventId", "sequence", "schemaVersion"]);
 const legacyKinds = new Set([
-  "message", "reset", "request_started", "request_completed", "request_failed",
+  "input_received", "message", "reset", "request_started", "request_completed", "request_failed",
   "request_interrupted", "model_step_started", "model_step_completed", "model_message",
   "tool_call", "tool_dispatch", "tool_result", "answer_generated",
   "delivery_chunk_succeeded", "delivery_succeeded", "delivery_failed", "delivery_unknown",
@@ -227,6 +227,9 @@ export function createSqliteRuntimeLog(dataDir: string) {
           schemaVersion: row.schema_version as 1, eventId: row.event_id,
           sequence: row.sequence, sessionId: row.session_id }));
       });
+    },
+    async readSince(afterSequence: number): Promise<SqliteEvent[]> {
+      return this.read(afterSequence);
     },
     async append(input: EventInput): Promise<SqliteEvent> {
       const [event] = await this.appendBatch([input]);

@@ -47,8 +47,9 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
   const makeApp = () => createApp({ ownerId: 42, dataDir: dir, answer: agent.answer,
     send: async (text) => { replies.push(text); } });
   let app = makeApp();
+  let messageId = 0;
   return { dir, seen, replies,
-    async send(text: string) { await app.handle({ userId: 42, chatType: "private", text, messageId: seen.length + 1 }); },
+    async send(text: string) { await app.handle({ userId: 42, chatType: "private", text, messageId: ++messageId }); },
     async restart() { await agent.close(); agent = await createPiAgent(agentOptions); app = makeApp(); },
   };
 }

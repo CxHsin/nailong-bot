@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Api, AssistantMessage, Message, Model, ToolCall } from "@mariozechner/pi-ai";
+import type { Api, AssistantMessage, ImageContent, Message, Model, ToolCall } from "@mariozechner/pi-ai";
 import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "./runtime-log.js";
 import { protocolText } from "./output-protocol.js";
@@ -59,7 +59,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   for (const [index, event] of events.entries()) {
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
-      const message: Message = { role: "user", content: event.text, timestamp };
+      const images = Array.isArray(event.images) ? event.images as ImageContent[] : [];
+      const message: Message = { role: "user", content: images.length
+        ? [{ type: "text", text: event.text }, ...images] : event.text, timestamp };
       if (event.requestId === currentId) current = message;
       legacyRequest = event.requestId ?? `legacy:${index}`;
       units.push({ messages: [message], through: index + 1, requestId: legacyRequest, safe: true });

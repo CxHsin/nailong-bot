@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import type { ImageContent } from "@mariozechner/pi-ai";
 import { randomUUID } from "node:crypto";
-import { createRuntimeLog, type RuntimeLog } from "./runtime-log.js";
+import { createRuntimeLog, createEventReader, type RuntimeLog } from "./runtime-log.js";
 import { createTelegramProjection, type TelegramTransport } from "./telegram-projection.js";
 import { projectDeliveredChat, projectFinalAnswer, projectRecoverableTelegram,
   projectRequestState } from "./runtime-projections.js";
 
-export type Update = { userId: number; chatType: string; text?: string; messageId: number };
-export type Message = { role: "user" | "assistant"; text: string };
+export type Update = { userId: number; chatType: string; text?: string; images?: ImageContent[]; messageId: number };
+export type Message = { role: "user" | "assistant"; text: string; images?: ImageContent[] };
 export type Request = { id: string; log: RuntimeLog; botPrompt?: string; botPromptVersion?: string; onText?: (textSegmentId: string) => Promise<void> };
 export class DeliveryRejected extends Error {
   constructor(message: string, readonly retryAfterMs?: number) { super(message); }
@@ -23,14 +24,15 @@ export function createApp(options: {
   answer: (messages: Message[], request: Request) => Promise<string>;
 }) {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
+  const readEvents = createEventReader(log);
   const telegram = options.telegram && createTelegramProjection({
-    log, chatId: options.ownerId, ...options.telegram,
+    log: { ...log, read: readEvents, readSince: undefined }, chatId: options.ownerId, ...options.telegram,
   });
   let queue = Promise.resolve();
   let pendingRequests = 0;
 
-  function accepts(update: Update): update is Update & { text: string } {
-    return update.userId === options.ownerId && update.chatType === "private" && !!update.text?.trim();
+  function accepts(update: Update): boolean {
+    return update.userId === options.ownerId && update.chatType === "private" && (!!update.text?.trim() || !!update.images?.length);
   }
 
   async function notice(requestId: string, text: string) {
@@ -50,11 +52,34 @@ export function createApp(options: {
       event.requestId === requestId && event.protocolVersion === "json-text-v2");
   }
 
-  async function process(update: Update & { text: string }, onStarted?: () => void): Promise<void> {
+  async function process(update: Update, onStarted?: () => void): Promise<void> {
+    let previous: Awaited<ReturnType<typeof log.read>>;
+    try {
+      previous = await readEvents();
+      // Input identities outlive /reset and include records written before receipts existed.
+      if (previous.some((event) => event.messageId === update.messageId &&
+        (event.type === "input_received" || event.type === "message" && event.role === "user") &&
+        (event.chatId === update.userId || event.chatId === undefined && event.type === "message"))) {
+        onStarted?.();
+        return;
+      }
+    } catch (error) {
+      try { await options.send("抱歉，本地运行日志暂时不可用，本条请求没有开始执行。", update); }
+      catch { /* Preserve the storage failure. */ }
+      throw error;
+    }
+    const receipt = { type: "input_received", chatId: update.userId, messageId: update.messageId };
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
-    const text = update.text.trim();
-    if (/^\/prompt(?:\s|$)/.test(text)) {
+    const text = update.text?.trim() || "请分析这张图片。";
+    if (!update.images?.length && /^\/prompt(?:\s|$)/.test(text)) {
+      const changesPrompt = text === "/prompt reset" || text.startsWith("/prompt set ");
+      const prompt = text === "/prompt reset" ? undefined : text.slice("/prompt set ".length).trim();
+      const events = changesPrompt && (prompt === undefined || prompt)
+        ? [receipt, { type: "bot_prompt_config", chatId: update.userId, version: randomUUID(), text: prompt }]
+        : [receipt];
+      if (log.appendBatch) await log.appendBatch(events);
+      else for (const event of events) await log.append(event);
       onStarted?.();
       if (text === "/prompt") {
         const configured = (await log.read()).findLast((e) => e.type === "bot_prompt_config" && e.chatId === update.userId);
@@ -64,13 +89,12 @@ export function createApp(options: {
       } else if (text === "/prompt reset" || text.startsWith("/prompt set ")) {
         const prompt = text === "/prompt reset" ? undefined : text.slice("/prompt set ".length).trim();
         if (prompt !== undefined && !prompt) { await options.send("请在 /prompt set 后提供非空提示词。", update); return; }
-        await log.append({ type: "bot_prompt_config", chatId: update.userId, version: randomUUID(), text: prompt });
         await options.send(prompt === undefined ? "已恢复默认 bot 提示词，下一请求生效。" : "已设置当前聊天的 bot 提示词，下一请求生效。", update);
       } else await options.send("查看：/prompt；设置：/prompt set 提示词；恢复默认：/prompt reset", update);
       return;
     }
-    if (text === "/reset") {
-      const batch = [{ type: "message", role: "user", text, messageId: update.messageId },
+    if (!update.images?.length && text === "/reset") {
+      const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId },
         { type: "reset" }];
       if (log.appendBatch) await log.appendBatch(batch);
       else for (const event of batch) await log.append(event);
@@ -81,12 +105,12 @@ export function createApp(options: {
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
     try {
-      const previous = await log.read();
       const reset = previous.findLastIndex((event) => event.type === "reset");
       const active = projectRequestState(previous.slice(reset + 1)).open;
       // Requests are serialized by this app. An older open request cannot still be running here.
       for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
-      const batch = [{ type: "message", role: "user", text, messageId: update.messageId, requestId: id },
+      const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId, requestId: id,
+        ...(update.images?.length ? { images: update.images } : {}) },
         { type: "request_started", requestId: id }];
       if (log.appendBatch) await log.appendBatch(batch);
       else for (const event of batch) await log.append(event);
@@ -103,7 +127,7 @@ export function createApp(options: {
       const answer = await options.answer(messages, { id, log,
         botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
         botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined, onText: telegram ? async (segment) => {
-          const event = (await log.read()).findLast((e) => e.type === "text_finalized" && e.textSegmentId === segment);
+          const event = (await readEvents()).findLast((e) => e.type === "text_finalized" && e.textSegmentId === segment);
           if (event?.contentKind === "progress" || event?.contentKind === "result") await telegram.reconcile(segment);
           else await telegram.stream(segment);
         } : undefined });
