@@ -3,6 +3,14 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { TSchema } from "typebox";
 
+export function tinyfishResultText(result: Awaited<ReturnType<Client["callTool"]>>): string {
+  const blocks = Array.isArray(result.content) ? result.content : [];
+  const text = blocks.filter((item): item is { type: "text"; text: string } =>
+    typeof item === "object" && item !== null && item.type === "text" && typeof item.text === "string")
+    .map((item) => item.text).join("\n");
+  return result.isError ? `查询失败：${text}` : text;
+}
+
 const endpoint = "https://agent.tinyfish.ai/mcp";
 
 export async function connectTinyfish(apiKey: string, url = endpoint) {
@@ -19,13 +27,6 @@ export async function connectTinyfish(apiKey: string, url = endpoint) {
     throw new Error("TinyFish MCP 缺少 search 或 fetch_content 工具");
   }
 
-  const resultText = (result: Awaited<ReturnType<typeof client.callTool>>): string => {
-    const blocks = Array.isArray(result.content) ? result.content : [];
-    const text = blocks.filter((item): item is { type: "text"; text: string } =>
-      typeof item === "object" && item !== null && item.type === "text" && typeof item.text === "string")
-      .map((item) => item.text).join("\n");
-    return (result.isError ? `查询失败：${text}` : text).slice(0, 30_000);
-  };
 
   const search = defineTool({
     name: "web_search",
@@ -33,7 +34,7 @@ export async function connectTinyfish(apiKey: string, url = endpoint) {
     description: "Search the public web with TinyFish for current facts, sources and relevant URLs. Use when web grounding helps. Cite useful source URLs in your answer.",
     parameters: searchSchema as TSchema,
     execute: async (_id, params) => ({
-      content: [{ type: "text" as const, text: resultText(await client.callTool({ name: "search", arguments: params as Record<string, unknown> })) }],
+      content: [{ type: "text" as const, text: tinyfishResultText(await client.callTool({ name: "search", arguments: params as Record<string, unknown> })) }],
       details: {},
     }),
   });
@@ -44,7 +45,7 @@ export async function connectTinyfish(apiKey: string, url = endpoint) {
     description: "Read public URLs with TinyFish to inspect page content. Include the source URLs in your answer.",
     parameters: fetchSchema as TSchema,
     execute: async (_id, params) => ({
-      content: [{ type: "text" as const, text: resultText(await client.callTool({
+      content: [{ type: "text" as const, text: tinyfishResultText(await client.callTool({
         name: "fetch_content",
         arguments: params as Record<string, unknown>,
       })) }],
