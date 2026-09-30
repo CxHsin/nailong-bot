@@ -300,11 +300,6 @@ test("restart acknowledges fully sent v2 content without resending body or showi
   const dir = await mkdtemp(join(tmpdir(), "output-restart-complete-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const log = createSqliteRuntimeLog(dir);
-  let crash = true;
-  const wrapped = { ...log, append: async (event: Parameters<typeof log.append>[0]) => {
-    if (event.type === "answer_generated" && crash) { crash = false; throw new Error("crash after send"); }
-    return log.append(event);
-  } };
   const sent: string[] = [];
   // Simulate a process crash by stopping directly at the projection boundary.
   await log.append({ type: "request_started", requestId: "complete-request" });
@@ -312,7 +307,7 @@ test("restart acknowledges fully sent v2 content without resending body or showi
     protocolVersion: "json-text-v2", contentKind: "final", text: "已经送达" });
   await log.append({ type: "text_finalized", requestId: "complete-request", textSegmentId: "complete-body",
     protocolVersion: "json-text-v2", contentKind: "final", text: "已经送达" });
-  const projection = createTelegramProjection({ log: wrapped, chatId: 42,
+  const projection = createTelegramProjection({ log, chatId: 42,
     send: async (text) => { sent.push(text); return 1; }, edit: async () => {} });
   await projection.reconcile("complete-body");
   const app = createApp({ ownerId: 42, dataDir: dir, log, answer: async () => "unused", send: async () => {},
@@ -342,4 +337,135 @@ test("restart cannot confuse a delivered long prefix with the completed full ans
   assert.ok(!(await log.read()).some((event) => event.type === "delivery_succeeded"));
   assert.ok(sent.some((text) => text.includes("可能不完整")));
   assert.ok(!sent.some((text) => text.includes("乙")));
+});
+
+test("malformed append frames cannot send unvalidated body or execute their tool calls", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-invalid-frame-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  let calls = 0;
+  const sent: string[] = [];
+  const server = createServer(async (req, res) => {
+    for await (const _ of req) {}
+    const raw = calls++ === 0 ? JSON.stringify({ type: "result", text: "不应发送正文", end: false, extra: true }) :
+      JSON.stringify({ type: "final", text: "纠正后的正文" });
+    const toolCalls = calls === 1 ? [{ index: 0, id: "forbidden", type: "function",
+      function: { name: "write", arguments: JSON.stringify({ path: "bad.md", content: "bad" }) } }] : undefined;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0,
+      delta: { content: raw, ...(toolCalls ? { tool_calls: toolCalls } : {}) }, finish_reason: toolCalls ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    modelBaseUrl: `http://127.0.0.1:${address.port}` });
+  t.after(() => agent.close());
+  const app = createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer,
+    send: async () => {}, telegram: { send: async (text) => { sent.push(text); return sent.length; },
+      draft: async () => {}, edit: async () => {} } });
+  await app.handle(update);
+  assert.deepEqual(sent, ["纠正后的正文"]);
+  assert.ok(!(await log.read()).some((event) => event.type === "tool_dispatch"));
+});
+
+test("failed generation after a valid long prefix keeps only that prefix and a single failure notice", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-prefix-failure-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const first = "第一段" + "甲".repeat(3500);
+  const sent: string[] = [];
+  const app = createApp({ ownerId: 42, dataDir: dir, log,
+    answer: async (_messages, request) => {
+      await log.append({ type: "text_snapshot", requestId: request.id, textSegmentId: "failed-prefix",
+        protocolVersion: "json-text-v2", contentKind: "final", validatedPrefix: true,
+        text: first + "\n\n" + "乙".repeat(1500) + "\n\n未完成" });
+      await request.onText?.("failed-prefix");
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      throw new Error("generation failed");
+    }, send: async () => {}, telegram: { send: async (text) => { sent.push(text); return sent.length; },
+      draft: async () => {}, edit: async () => {} } });
+  await app.handle(update);
+  await app.recover();
+  assert.equal(sent[0], first);
+  assert.equal(sent.length, 2);
+  assert.match(sent[1]!, /尚未完成/);
+  assert.ok(!sent.join("").includes("乙"));
+});
+
+test("late Markdown reference definitions cannot mutate an already sent prefix", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-reference-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const sent: string[] = [];
+  let sentBeforeDefinition = -1;
+  const prefix = "[label][ref]\n\n" + "甲".repeat(3990) + "\n\n尾段";
+  const body = prefix + "\n\n[ref]: https://example.com";
+  const app = createApp({ ownerId: 42, dataDir: dir, log,
+    answer: async (_messages, request) => {
+      await log.append({ type: "text_snapshot", requestId: request.id, textSegmentId: "reference",
+        protocolVersion: "json-text-v2", contentKind: "final", validatedPrefix: true, text: prefix });
+      await request.onText?.("reference");
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      sentBeforeDefinition = sent.length;
+      await log.append({ type: "text_snapshot", requestId: request.id, textSegmentId: "reference",
+        protocolVersion: "json-text-v2", contentKind: "final", text: body });
+      await log.append({ type: "text_finalized", requestId: request.id, textSegmentId: "reference",
+        protocolVersion: "json-text-v2", contentKind: "final", text: body });
+      await request.onText?.("reference"); return body;
+    }, send: async () => {}, telegram: { send: async (text) => { sent.push(text); return sent.length; },
+      draft: async () => {}, edit: async () => {} } });
+  await app.handle(update);
+  assert.equal(sentBeforeDefinition, 0);
+  assert.match(sent.join(""), /<a href="https:\/\/example.com">label<\/a>/);
+  assert.ok(!sent.join("").includes("尚未完成"));
+  assert.ok((await log.read()).some((event) => event.type === "delivery_succeeded"));
+});
+
+test("known long cooldown retries after its deadline without repeating unknown deliveries", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-cooldown-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  let attempts = 0;
+  await log.append({ type: "text_snapshot", requestId: "cool", textSegmentId: "cool-body",
+    protocolVersion: "json-text-v2", contentKind: "final", text: "限流正文" });
+  await log.append({ type: "text_finalized", requestId: "cool", textSegmentId: "cool-body",
+    protocolVersion: "json-text-v2", contentKind: "final", text: "限流正文" });
+  const projection = createTelegramProjection({ log, chatId: 42, edit: async () => {},
+    send: async () => { if (++attempts === 1) throw new Error("rate limit"); return 1; },
+    isRejected: () => true, retryAfter: () => 1700 });
+  assert.equal(await projection.reconcile("cool-body"), false);
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  assert.equal(attempts, 2);
+  assert.equal(await projection.finalDelivered("cool-body"), true);
+});
+
+import { previewTelegramText } from "../src/telegram-layout.js";
+import { replayEvents } from "../src/projection.js";
+import { getModel } from "@mariozechner/pi-ai";
+
+test("unfinished emphasis previews render without exposing markers or altering escaped text and lists", () => {
+  assert.deepEqual(previewTelegramText("*强调"), ["<i>强调</i>"]);
+  assert.deepEqual(previewTelegramText("_强调"), ["<i>强调</i>"]);
+  assert.deepEqual(previewTelegramText("**强调"), ["<b>强调</b>"]);
+  assert.deepEqual(previewTelegramText("\\*原样"), ["*原样"]);
+  assert.deepEqual(previewTelegramText("* 列表"), ["• 列表"]);
+});
+
+test("an incomplete result delivery plan never replays its unseen tail as a delivered stage", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-result-replay-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  await log.append({ type: "message", role: "user", requestId: "old", text: "旧问题" });
+  const text = "甲".repeat(3500) + "\n\n" + "未送达乙".repeat(400) + "\n\n尾部";
+  await log.append({ type: "text_snapshot", requestId: "old", textSegmentId: "result-prefix",
+    protocolVersion: "json-text-v2", contentKind: "result", validatedPrefix: true, text });
+  await createTelegramProjection({ log, chatId: 42, send: async () => 1, edit: async () => {} }).reconcile("result-prefix");
+  await log.append({ type: "text_finalized", requestId: "old", textSegmentId: "result-prefix",
+    protocolVersion: "json-text-v2", contentKind: "result", text });
+  await log.append({ type: "request_interrupted", requestId: "old" });
+  await log.append({ type: "message", role: "user", requestId: "new", text: "继续" });
+  const model = getModel("deepseek", "deepseek-v4-flash"); assert.ok(model);
+  const replay = await replayEvents(log, "new", model, true);
+  assert.ok(!JSON.stringify(replay.units).includes("未送达乙"));
 });

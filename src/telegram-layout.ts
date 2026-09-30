@@ -63,6 +63,9 @@ function splitHtml(html: string): string[] {
 
 /** Parse the whole source before pagination so fences never change meaning at a split. */
 export function planTelegramText(text: string, complete = true): string[] {
+  // Reference labels/definitions can retroactively change any earlier block.
+  // Withhold early commits for bracket syntax; final rendering still supports references.
+  if (!complete && text.includes("[")) return [];
   const tokens = marked.lexer(text, { gfm: true, breaks: true });
   if (!complete && tokens.length && !(tokens.at(-1)?.type === "code" && /^ {0,3}(`{3,}|~{3,})/.test(tokens.at(-1)!.raw))) tokens.pop(); // The last block can still change interpretation.
   const parts: string[] = [];
@@ -95,8 +98,11 @@ export function previewTelegramText(text: string): string[] {
   if (last?.type === "paragraph" || last?.type === "heading") {
     const raw = last.raw;
     let suffix = "";
-    for (const marker of ["**", "__", "~~", "`"])
-      if (raw.split(marker).length % 2 === 0) suffix = marker + suffix;
+    for (const marker of ["**", "__", "~~", "`", "*", "_"]) {
+      const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const openings = raw.match(new RegExp(`(?<!\\\\)${escaped}`, "g")) ?? [];
+      if (openings.length % 2 && !new RegExp(`^\\s*${escaped}\\s`).test(raw)) suffix = marker + suffix;
+    }
     text += suffix;
   }
   return planTelegramText(text);

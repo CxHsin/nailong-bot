@@ -130,7 +130,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
       if (event.contentKind === "result") {
         const pages = events.filter((e) => e.type === "telegram_page" && e.textSegmentId === event.textSegmentId);
-        if (!pages.length || !pages.every((page) => events.some((e) => e.type === "telegram_delivery_succeeded" &&
+        const plan = events.findLast((e) => e.type === "telegram_plan_finalized" && e.textSegmentId === event.textSegmentId);
+        if (!plan || plan.parts !== pages.length || !pages.length || !pages.every((page) => events.some((e) => e.type === "telegram_delivery_succeeded" &&
           e.textSegmentId === page.textSegmentId && e.partIndex === page.partIndex))) continue;
       }
       if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&

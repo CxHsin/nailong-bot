@@ -8,6 +8,16 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
   let retryAt = 0;
   let error: unknown;
   const tasks = new Map<string, Promise<void>>();
+  const retries = new Map<string, ReturnType<typeof setTimeout>>();
+  function schedule(id: string, deadline: number) {
+    if (retries.has(id)) return;
+    const timer = setTimeout(() => {
+      retries.delete(id);
+      void reconcile(id).catch((failure: unknown) => { error = failure; });
+    }, Math.min(2_147_483_647, Math.max(10, deadline - Date.now())));
+    timer.unref();
+    retries.set(id, timer);
+  }
   let serial = Promise.resolve();
   const lock = <T>(work: () => Promise<T>): Promise<T> => {
     const next = serial.then(work);
@@ -33,6 +43,8 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     const outcome = attempt && history.findLast((event) => event.attemptId === attempt.attemptId &&
       event.type !== "telegram_delivery_attempt");
     if (attempt && (!outcome || outcome.type === "telegram_delivery_unknown")) return false;
+    if (typeof outcome?.retryAt === "number") retryAt = Math.max(retryAt, outcome.retryAt);
+    if (Date.now() < retryAt) schedule(String(page.textSegmentId), retryAt);
     if (history.filter((event) => event.type === "telegram_delivery_attempt").length >= 3 || Date.now() < retryAt) return false;
     const identity = { requestId: page.requestId, textSegmentId: page.textSegmentId as string,
       partIndex: page.partIndex, snapshotEventId: page.snapshotEventId, attemptId: randomUUID(),
@@ -44,7 +56,9 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
       const retry = options.retryAfter?.(failure);
       if (retry !== undefined) retryAt = Date.now() + retry;
       await options.log.append({ type: options.isRejected?.(failure) ? "telegram_delivery_failed" : "telegram_delivery_unknown",
-        ...identity, error: String(failure) });
+        ...identity, error: String(failure), ...(retry !== undefined ? { retryAt } : {}) });
+      if (options.isRejected?.(failure) && history.filter((event) => event.type === "telegram_delivery_attempt").length < 2)
+        schedule(String(page.textSegmentId), retryAt > Date.now() ? retryAt : Date.now() + 250);
       return false;
     }
     // If this commit fails the durable attempt becomes unknown; never send it again.
@@ -55,6 +69,8 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     return lock(async () => {
       let { snapshot, final, pages, deliveries, prefix, planFinal } = await state(id);
       if (!snapshot || snapshot.contentKind === "status") return true;
+      const pending = retries.get(id);
+      if (pending && Date.now() >= retryAt) { clearTimeout(pending); retries.delete(id); }
       if (!final && !snapshot.validatedPrefix) return false;
       const source = final?.text ?? prefix?.text ?? snapshot.text;
       const sourceHash = createHash("sha256").update(String(source)).digest("hex");

@@ -163,7 +163,8 @@ export function createApp(options: {
         for (const segment of segments) {
           const snapshot = events.findLast((event) => event.type === "text_snapshot" && event.textSegmentId === segment);
           // V2 recovery never sends old body content; only durable notices may retry known failures.
-          if (snapshot?.protocolVersion !== "json-text-v2" || snapshot.contentKind === "notice") await telegram.reconcile(segment);
+          const knownFailure = events.some((event) => event.type === "telegram_delivery_failed" && event.textSegmentId === segment);
+          if (snapshot?.protocolVersion !== "json-text-v2" || snapshot.contentKind === "notice" || knownFailure) await telegram.reconcile(segment);
         }
         const unfinished = new Set(events.filter((event) => event.type === "text_snapshot" &&
           event.protocolVersion === "json-text-v2" && event.contentKind !== "notice" && event.requestId &&
