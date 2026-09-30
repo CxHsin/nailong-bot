@@ -33,6 +33,23 @@ export function createApp(options: {
     return update.userId === options.ownerId && update.chatType === "private" && !!update.text?.trim();
   }
 
+  async function notice(requestId: string, text: string) {
+    if (!telegram) return;
+    const textSegmentId = `${requestId}:output-notice`;
+    if (!(await log.read()).some((event) => event.textSegmentId === textSegmentId)) {
+      const events = [{ type: "text_snapshot", requestId, textSegmentId, protocolVersion: "json-text-v2",
+        contentKind: "notice", text }, { type: "text_finalized", requestId, textSegmentId,
+        protocolVersion: "json-text-v2", contentKind: "notice", text }];
+      if (log.appendBatch) await log.appendBatch(events);
+      else for (const event of events) await log.append(event);
+    }
+    await telegram.reconcile(textSegmentId);
+  }
+  async function isNewOutput(requestId: string) {
+    return (await log.read()).some((event) => event.type === "text_snapshot" &&
+      event.requestId === requestId && event.protocolVersion === "json-text-v2");
+  }
+
   async function process(update: Update & { text: string }, onStarted?: () => void): Promise<void> {
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
@@ -87,7 +104,7 @@ export function createApp(options: {
         botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
         botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined, onText: telegram ? async (segment) => {
           const event = (await log.read()).findLast((e) => e.type === "text_finalized" && e.textSegmentId === segment);
-          if (event?.contentKind === "progress") await telegram.reconcile(segment);
+          if (event?.contentKind === "progress" || event?.contentKind === "result") await telegram.reconcile(segment);
           else await telegram.stream(segment);
         } : undefined });
       if (!answer.trim()) throw new Error("模型没有返回文字");
@@ -96,11 +113,12 @@ export function createApp(options: {
       const final = telegram && projectFinalAnswer(await log.read(), id, answer);
       if (final && telegram) {
         await telegram.reconcile(String(final.textSegmentId));
-        if (await telegram.finalDelivered(String(final.textSegmentId))) {
+        if (await telegram.finalDelivered(String(final.textSegmentId)) && await telegram.requestDelivered(id)) {
           await log.append({ type: "delivery_succeeded", requestId: id, textSegmentId: final.textSegmentId });
           await log.append({ type: "request_completed", requestId: id });
         } else {
           await log.append({ type: "request_failed", requestId: id, phase: "delivery" });
+          if (await isNewOutput(id)) await notice(id, "这次回复可能不完整：部分消息未确认送达。为避免重复，没有自动补发；你可以要求重新发送。");
         }
         return;
       }
@@ -129,7 +147,9 @@ export function createApp(options: {
       const safeReason = error instanceof Error &&
         /^(上下文超过预算|工具归档缺失或校验失败|模型窗口或 Projection 预算配置无效|历史摘要|模型上下文溢出|模型协议|模型连续|模型未提交)/.test(error.message)
         ? `：${error.message}` : "，请稍后重试";
-      await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
+      if (telegram && await isNewOutput(id)) {
+        await notice(id, "这次回复尚未完成，已发送内容保留。你可以要求继续或重新生成。");
+      } else await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
     }
   }
 
@@ -140,10 +160,23 @@ export function createApp(options: {
       for (const requestId of open) await log.append({ type: "request_interrupted", requestId });
       if (telegram) {
         const { segments } = projectRecoverableTelegram(events);
-        for (const segment of segments) await telegram.reconcile(segment);
+        for (const segment of segments) {
+          const snapshot = events.findLast((event) => event.type === "text_snapshot" && event.textSegmentId === segment);
+          // V2 recovery never sends old body content; only durable notices may retry known failures.
+          if (snapshot?.protocolVersion !== "json-text-v2" || snapshot.contentKind === "notice") await telegram.reconcile(segment);
+        }
+        const unfinished = new Set(events.filter((event) => event.type === "text_snapshot" &&
+          event.protocolVersion === "json-text-v2" && event.contentKind !== "notice" && event.requestId &&
+          !projectRequestState(events).delivered.has(event.requestId)).map((event) => event.requestId!));
+        for (const requestId of unfinished) {
+          const final = events.findLast((event) => event.type === "text_finalized" && event.requestId === requestId && event.contentKind === "final");
+          if (!await telegram.requestDelivered(requestId) || !final || !await telegram.finalDelivered(String(final.textSegmentId))) {
+            await notice(requestId, "这次回复可能不完整：处理曾中断。已发送内容保留；你可以要求继续或重新发送。");
+          }
+        }
         const current = await log.read();
         for (const event of projectRecoverableTelegram(current).finals) {
-          if (!await telegram.finalDelivered(String(event.textSegmentId)) ||
+          if (!await telegram.finalDelivered(String(event.textSegmentId)) || !await telegram.requestDelivered(event.requestId!) ||
             projectRequestState(current).delivered.has(event.requestId!)) continue;
           if (!current.some((item) => item.type === "answer_generated" && item.requestId === event.requestId)) {
             await log.append({ type: "answer_generated", requestId: event.requestId, text: event.text });

@@ -16,7 +16,7 @@ import { toolResultView, TOOL_RESULT_PROJECTION_VERSION } from "./tool-result-pr
 import { createBoundedRead } from "./archive-read.js";
 import { createRuntimeLog } from "./runtime-log.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
-import { EXECUTION_PROMPT, OUTPUT_PROTOCOL_VERSION, parseStructuredText, protocolText } from "./output-protocol.js";
+import { EXECUTION_PROMPT, OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames, protocolText } from "./output-protocol.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -129,8 +129,35 @@ export async function createPiAgent(options: {
             await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, systemPrompt: result.context.systemPrompt });
             const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
             let producedOutput = false;
+            let lastPreview = "";
+            let lastValidatedPrefix = "";
             for await (const event of source) {
               if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
+              if (event.type === "text_delta" && request) {
+                const rawPreview = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+                let preview: ReturnType<typeof previewStructuredText>;
+                let validatedPrefix = false;
+                try {
+                  const frames = readOutputFrames(rawPreview);
+                  const partial = previewStructuredText(frames.rest);
+                  if (frames.prefix && (!partial || partial.type === frames.prefix.type)) {
+                    preview = { ...frames.prefix, text: frames.prefix.text + (partial?.text ?? "") };
+                    validatedPrefix = frames.framed;
+                    if (frames.prefix.text && frames.prefix.text !== lastValidatedPrefix) {
+                      await request.log.append({ type: "text_validated_prefix", requestId: request.id,
+                        modelStepId, textSegmentId, text: frames.prefix.text, contentKind: frames.prefix.type });
+                      lastValidatedPrefix = frames.prefix.text;
+                    }
+                  } else preview = frames.output ?? partial;
+                } catch { /* Invalid protocol cannot publish new text or dispatch tools. */ }
+                if (preview && preview.text !== lastPreview) {
+                  await request.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
+                    textSegmentId, contentKind: preview.type, text: preview.text,
+                    protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
+                  lastPreview = preview.text;
+                  await request.onText?.(textSegmentId);
+                }
+              }
             }
             const message = await source.result();
             await request?.log.append({ type: "model_message", requestId: request.id, step,
@@ -160,22 +187,26 @@ export async function createPiAgent(options: {
               protocolVersion: OUTPUT_PROTOCOL_VERSION, valid: !invalid, error: invalid });
             const response = createAssistantMessageEventStream();
             if (invalid) {
+              await request?.log.append({ type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
+              if (request && (await request.log.read()).some((entry) => entry.textSegmentId === textSegmentId && entry.type === "telegram_delivery_attempt"))
+                throw new Error("模型协议在部分正文提交后失效，本轮未完成");
               if (++protocolErrors > 2) throw new Error("模型协议纠正次数耗尽，本轮未完成");
               await queueFeedback(`${invalid}。请遵守执行协议重新生成；被拒绝响应中的工具没有执行。`, raw);
               response.push({ type: "done", reason: "stop", message: { ...message, content: [], stopReason: "stop" } });
               return response;
             }
             if (parsed) {
-              if (parsed.type === "progress" && !toolCalls.length && ++idleProgress >= 3)
+              if (["progress", "status"].includes(parsed.type) && !toolCalls.length && ++idleProgress >= 3)
                 throw new Error("模型连续三次未推进，本轮未完成");
               if (parsed.type === "final") finalText = parsed.text;
+              if (parsed.type === "result") idleProgress = 0;
               await request?.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
-                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: OUTPUT_PROTOCOL_VERSION });
+                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
               await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
-                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: OUTPUT_PROTOCOL_VERSION });
+                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
               await request?.onText?.(textSegmentId);
-              if (parsed.type === "progress" && !toolCalls.length)
-                await queueFeedback("上一条输出是 progress，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。");
+              if (parsed.type !== "final" && !toolCalls.length)
+                await queueFeedback(`上一条输出是 ${parsed.type}，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。`);
             }
             for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
               toolCallId: part.id, toolName: part.name, args: part.arguments });

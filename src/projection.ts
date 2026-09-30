@@ -21,7 +21,7 @@ export function assistantText(text: string, model: Model<Api>, timestamp = Date.
 
 export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
   const all = await log.read();
-  const replayText = (type: "progress" | "final", text: string, timestamp: number) =>
+  const replayText = (type: "progress" | "status" | "result" | "final", text: string, timestamp: number) =>
     assistantText(structured ? protocolText(type, text) : text, model, timestamp);
   const reset = all.findLastIndex((event) => event.type === "reset");
   const events = all.slice(reset + 1);
@@ -37,7 +37,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   const used = new Set<string>();
   const calls = new Set<string>();
   const progressSteps = new Set(events.filter((event) => event.type === "text_finalized" &&
-    event.contentKind === "progress" && typeof event.modelStepId === "string")
+    ["progress", "status", "result"].includes(String(event.contentKind)) && typeof event.modelStepId === "string")
     .map((event) => event.modelStepId));
   for (const [index, event] of events.entries()) {
     if (event.type === "tool_result") {
@@ -116,21 +116,26 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
       if (kept.length) {
         const progress = events.find((e) => e.type === "text_finalized" && e.modelStepId === event.modelStepId &&
-          e.contentKind === "progress");
+          ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
           c.type === "toolCall" ? kept.includes(c) : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
         if (structured && (progress || !event.protocolVersion)) {
           const text = typeof progress?.text === "string" ? progress.text : original.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
-          if (text) assistant.content.push({ type: "text", text: protocolText("progress", text) });
+          if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "result" ? "result" : progress?.contentKind === "status" ? "status" : "progress", text) });
         }
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
           through, requestId: event.requestId, safe });
       }
-    } else if (event.type === "text_finalized" && event.contentKind === "progress" &&
+    } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
+      if (event.contentKind === "result") {
+        const pages = events.filter((e) => e.type === "telegram_page" && e.textSegmentId === event.textSegmentId);
+        if (!pages.length || !pages.every((page) => events.some((e) => e.type === "telegram_delivery_succeeded" &&
+          e.textSegmentId === page.textSegmentId && e.partIndex === page.partIndex))) continue;
+      }
       if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
         (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
-      units.push({ messages: [replayText("progress", event.text, timestamp)], through: index + 1,
+      units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", event.text, timestamp)], through: index + 1,
         requestId: event.requestId, safe: true });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);

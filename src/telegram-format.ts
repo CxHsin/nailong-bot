@@ -25,21 +25,22 @@ function inline(tokens: Token[]): string {
   }).join("");
 }
 
-function blocks(tokens: Token[]): string {
+export function renderTelegramBlocks(tokens: Token[]): string {
   return tokens.map((token) => {
     switch (token.type) {
       case "heading": return `<b>${inline(token.tokens ?? [])}</b>`;
       case "paragraph": return inline(token.tokens ?? []);
       case "text": return token.tokens ? inline(token.tokens) : escapeHtml(token.text);
       case "code": return `<pre><code>${escapeHtml(token.text)}</code></pre>`;
-      case "blockquote": return `<blockquote>${blocks(token.tokens ?? [])}</blockquote>`;
+      case "blockquote": return `<blockquote>${renderTelegramBlocks(token.tokens ?? [])}</blockquote>`;
       case "list": return token.items.map((item: Tokens.ListItem, index: number) => {
         const marker = token.ordered ? `${Number(token.start || 1) + index}.` : "•";
         const check = item.task ? (item.checked ? "☑ " : "☐ ") : "";
-        return `${marker} ${check}${blocks(item.tokens ?? [])}`;
+        return `${marker} ${check}${renderTelegramBlocks(item.tokens ?? [])}`;
       }).join("\n");
-      case "table": return [token.header, ...token.rows]
-        .map((row) => row.map((cell: Tokens.TableCell) => inline(cell.tokens ?? [])).join("  |  ")).join("\n");
+      case "table": return token.rows.length ? token.rows.map((row: Tokens.TableCell[], index: number) =>
+        `<b>${index + 1}.</b>\n` + row.map((cell: Tokens.TableCell, column: number) =>
+          `${inline(token.header[column]?.tokens ?? [])}: ${inline(cell.tokens ?? [])}`).join("\n")).join("\n\n") : token.header.map((cell: Tokens.TableCell) => inline(cell.tokens ?? [])).join("  |  ");
       case "hr": return "────";
       case "html": return escapeHtml(token.text);
       case "space": return "";
@@ -50,5 +51,5 @@ function blocks(tokens: Token[]): string {
 
 /** Telegram accepts a small HTML subset; raw model HTML is always escaped. */
 export function formatMarkdownForTelegram(text: string): string {
-  return blocks(marked.lexer(text, { gfm: true, breaks: true })).trim();
+  return renderTelegramBlocks(marked.lexer(text, { gfm: true, breaks: true })).trim();
 }

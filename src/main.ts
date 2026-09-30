@@ -3,7 +3,7 @@ import { Bot, GrammyError } from "grammy";
 import { createApp, DeliveryRejected } from "./app.js";
 import { createPiAgent } from "./pi-agent.js";
 import { createSqliteRuntimeLog } from "./sqlite-runtime-log.js";
-import { formatMarkdownForTelegram } from "./telegram-format.js";
+import { planTelegramText } from "./telegram-layout.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -68,9 +68,9 @@ async function main(): Promise<void> {
     },
     answer: agent.answer,
     send: async (text, update, onChunk) => {
-      const chunks = text.match(/[\s\S]{1,4000}/g) ?? [];
+      const chunks = planTelegramText(text);
       for (const [index, chunk] of chunks.entries()) {
-        try { await bot.api.sendMessage(update.userId, formatMarkdownForTelegram(chunk), { parse_mode: "HTML" }); }
+        try { await bot.api.sendMessage(update.userId, chunk, { parse_mode: "HTML" }); }
         catch (error) {
           if (error instanceof GrammyError) throw new DeliveryRejected(`Telegram 拒绝发送：${error.error_code}`);
           throw error;
