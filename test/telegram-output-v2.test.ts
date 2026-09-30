@@ -438,6 +438,7 @@ test("known long cooldown retries after its deadline without repeating unknown d
   await new Promise((resolve) => setTimeout(resolve, 2000));
   assert.equal(attempts, 2);
   assert.equal(await projection.finalDelivered("cool-body"), true);
+  assert.ok((await log.read()).some((event) => event.type === "delivery_succeeded"));
 });
 
 import { previewTelegramText } from "../src/telegram-layout.js";
@@ -450,6 +451,8 @@ test("unfinished emphasis previews render without exposing markers or altering e
   assert.deepEqual(previewTelegramText("**强调"), ["<b>强调</b>"]);
   assert.deepEqual(previewTelegramText("\\*原样"), ["*原样"]);
   assert.deepEqual(previewTelegramText("* 列表"), ["• 列表"]);
+  assert.deepEqual(previewTelegramText("a_b"), ["a_b"]);
+  assert.deepEqual(previewTelegramText("**强调*"), ["<b>强调</b>"]);
 });
 
 test("an incomplete result delivery plan never replays its unseen tail as a delivered stage", async (t) => {
@@ -468,4 +471,42 @@ test("an incomplete result delivery plan never replays its unseen tail as a deli
   const model = getModel("deepseek", "deepseek-v4-flash"); assert.ok(model);
   const replay = await replayEvents(log, "new", model, true);
   assert.ok(!JSON.stringify(replay.units).includes("未送达乙"));
+});
+
+test("brackets added after a committed prefix leave that prefix fixed and allow completion", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-later-link-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const sent: string[] = [];
+  const projection = createTelegramProjection({ log, chatId: 42, send: async (text) => { sent.push(text); return sent.length; }, edit: async () => {} });
+  const prefix = "甲".repeat(3500) + "\n\n" + "乙".repeat(1500) + "\n\n尾部";
+  const append = async (text: string) => log.append({ type: "text_snapshot", requestId: "later", textSegmentId: "later-link",
+    protocolVersion: "json-text-v2", contentKind: "final", validatedPrefix: true, text });
+  await append(prefix);
+  await projection.reconcile("later-link");
+  await append(prefix + " [链接](https://example.com)");
+  await projection.reconcile("later-link");
+  await log.append({ type: "text_finalized", requestId: "later", textSegmentId: "later-link",
+    protocolVersion: "json-text-v2", contentKind: "final", text: prefix + " [链接](https://example.com)" });
+  await projection.reconcile("later-link");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0], "甲".repeat(3500));
+  assert.match(sent[1]!, /<a href="https:\/\/example.com">链接<\/a>/);
+});
+
+test("discarded protocol segments cancel previously scheduled known-failure retries", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "output-discard-retry-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  let attempts = 0;
+  await log.append({ type: "text_snapshot", requestId: "discard", textSegmentId: "discard-body",
+    protocolVersion: "json-text-v2", contentKind: "final", validatedPrefix: true,
+    text: "甲".repeat(3500) + "\n\n" + "乙".repeat(1500) + "\n\n尾部" });
+  const projection = createTelegramProjection({ log, chatId: 42, send: async () => { attempts++; throw new Error("rejected"); },
+    edit: async () => {}, isRejected: () => true });
+  await projection.reconcile("discard-body");
+  await log.append({ type: "text_discarded", requestId: "discard", textSegmentId: "discard-body" });
+  await projection.stop();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  assert.equal(attempts, 1);
 });

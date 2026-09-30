@@ -13,7 +13,11 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     if (retries.has(id)) return;
     const timer = setTimeout(() => {
       retries.delete(id);
-      void reconcile(id).catch((failure: unknown) => { error = failure; });
+      void reconcile(id).then(async (delivered) => {
+        if (!delivered) return;
+        const { snapshot } = await state(id);
+        if (snapshot?.requestId) await acknowledge(snapshot.requestId);
+      }).catch((failure: unknown) => { error = failure; });
     }, Math.min(2_147_483_647, Math.max(10, deadline - Date.now())));
     timer.unref();
     retries.set(id, timer);
@@ -35,6 +39,28 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     const discarded = events.some((event) => event.type === "text_discarded" && event.textSegmentId === id);
     const planFinal = events.findLast((event) => event.type === "telegram_plan_finalized" && event.textSegmentId === id);
     return { snapshot, firstSnapshot, final, pages, deliveries, prefix, discarded, planFinal };
+  }
+  async function requestDelivered(requestId: string) {
+    const events = await options.log.read();
+    const finals = events.filter((event) => event.type === "text_finalized" && event.requestId === requestId &&
+      event.protocolVersion === "json-text-v2" && ["result", "final"].includes(String(event.contentKind)));
+    if (!finals.some((event) => event.contentKind === "final")) return false;
+    for (const final of finals) {
+      const { pages, deliveries, planFinal, discarded } = await state(String(final.textSegmentId));
+      if (discarded || !planFinal || planFinal.parts !== pages.length || !pages.length || !pages.every((page) =>
+        deliveries.some((event) => event.type === "telegram_delivery_succeeded" && event.partIndex === page.partIndex))) return false;
+    }
+    return true;
+  }
+  async function acknowledge(requestId: string) {
+    if (!await requestDelivered(requestId)) return;
+    const events = await options.log.read();
+    if (events.some((event) => event.type === "delivery_succeeded" && event.requestId === requestId)) return;
+    const final = events.findLast((event) => event.type === "text_finalized" && event.requestId === requestId && event.contentKind === "final");
+    if (!final) return;
+    if (!events.some((event) => event.type === "answer_generated" && event.requestId === requestId))
+      await options.log.append({ type: "answer_generated", requestId, text: final.text });
+    await options.log.append({ type: "delivery_succeeded", requestId, textSegmentId: final.textSegmentId, source: "retry" });
   }
   async function sendPage(page: StoredEvent, deliveries: StoredEvent[]): Promise<boolean> {
     const history = deliveries.filter((event) => event.partIndex === page.partIndex);
@@ -67,8 +93,15 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
   }
   async function reconcile(id: string): Promise<boolean> {
     return lock(async () => {
-      let { snapshot, final, pages, deliveries, prefix, planFinal } = await state(id);
+      let { snapshot, final, pages, deliveries, prefix, planFinal, discarded } = await state(id);
       if (!snapshot || snapshot.contentKind === "status") return true;
+      if (discarded) {
+        const timer = retries.get(id);
+        if (timer) clearTimeout(timer);
+        retries.delete(id);
+        return false;
+      }
+      if (snapshot.contentKind === "notice" && snapshot.requestId && await requestDelivered(snapshot.requestId)) return true;
       const pending = retries.get(id);
       if (pending && Date.now() >= retryAt) { clearTimeout(pending); retries.delete(id); }
       if (!final && !snapshot.validatedPrefix) return false;
@@ -76,8 +109,8 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
       const sourceHash = createHash("sha256").update(String(source)).digest("hex");
       if (planFinal && (planFinal.sourceHash !== sourceHash || planFinal.parts !== pages.length))
         throw new Error("正式消息分段计划与正文不一致");
-      const planned = planFinal ? pages.map((page) => String(page.html)) :
-        final ? planTelegramText(String(source)) : planTelegramText(String(source), false).slice(0, -1);
+      const computed = final ? planTelegramText(String(source)) : planTelegramText(String(source), false).slice(0, -1);
+      const planned = planFinal || !final && !computed.length ? pages.map((page) => String(page.html)) : computed;
       if (pages.some((page, index) => page.html !== planned[index])) throw new Error("已提交消息的正文边界发生变化");
       if (planned.length > pages.length || final && !planFinal) {
         const identity = snapshot.eventId ?? createHash("sha256").update(id + String(snapshot.text)).digest("hex");
@@ -152,18 +185,7 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     async stop() { stopped = true; await Promise.all(tasks.values()); },
     resume() { stopped = false; error = undefined; },
     interrupt() {},
-    async requestDelivered(requestId: string) {
-      const events = await options.log.read();
-      const ids = [...new Set(events.filter((event) => event.type === "text_finalized" && event.requestId === requestId &&
-        event.protocolVersion === "json-text-v2" && ["result", "final"].includes(String(event.contentKind)))
-        .map((event) => String(event.textSegmentId)))];
-      for (const id of ids) {
-        const { pages, deliveries, planFinal } = await state(id);
-        if (!planFinal || planFinal.parts !== pages.length || !pages.length || !pages.every((page) => deliveries.some((event) =>
-          event.type === "telegram_delivery_succeeded" && event.partIndex === page.partIndex))) return false;
-      }
-      return true;
-    },
+    requestDelivered,
     async finalDelivered(id: string) {
       const { final, pages, deliveries, planFinal } = await state(id);
       return final?.contentKind === "final" && planFinal?.parts === pages.length && pages.length > 0 && pages.every((page) =>

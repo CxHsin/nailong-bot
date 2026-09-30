@@ -118,7 +118,7 @@ export function createApp(options: {
           await log.append({ type: "request_completed", requestId: id });
         } else {
           await log.append({ type: "request_failed", requestId: id, phase: "delivery" });
-          if (await isNewOutput(id)) await notice(id, "这次回复可能不完整：部分消息未确认送达。为避免重复，没有自动补发；你可以要求重新发送。");
+          if (await isNewOutput(id)) await notice(id, "这次回复可能不完整：部分消息尚未确认送达。明确失败会重试，送达状态不明的内容不会自动重发；你可以要求重新发送。");
         }
         return;
       }

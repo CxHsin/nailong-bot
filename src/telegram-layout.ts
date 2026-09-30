@@ -100,10 +100,22 @@ export function previewTelegramText(text: string): string[] {
     let suffix = "";
     for (const marker of ["**", "__", "~~", "`", "*", "_"]) {
       const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const openings = raw.match(new RegExp(`(?<!\\\\)${escaped}`, "g")) ?? [];
+      const emphasisSource = marker.includes("_") ? raw.replace(/(?<=[\p{L}\p{N}])_(?=[\p{L}\p{N}])/gu, "") : raw;
+      const openings = emphasisSource.match(new RegExp(`(?<!\\\\)${escaped}`, "g")) ?? [];
       if (openings.length % 2 && !new RegExp(`^\\s*${escaped}\\s`).test(raw)) suffix = marker + suffix;
     }
-    text += suffix;
+    if (suffix) {
+      // Overlapping runs (e.g. **text*) need only the missing part of the run.
+      const candidates = ["", ...Array.from({ length: suffix.length }, (_, index) => suffix.slice(index))];
+      let best = text;
+      let score = Number.POSITIVE_INFINITY;
+      for (const candidate of candidates) {
+        const rendered = renderTelegramBlocks(marked.lexer(text + candidate, { gfm: true, breaks: true }));
+        const remaining = rendered.replace(/<[^>]*>/g, "").match(/[*_~`]/g)?.length ?? 0;
+        if (remaining < score) { score = remaining; best = text + candidate; }
+      }
+      text = best;
+    }
   }
   return planTelegramText(text);
 }
