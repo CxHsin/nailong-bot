@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { createAssistantMessageEventStream, getModel, isContextOverflow } from "@mariozechner/pi-ai";
 import {
   AuthStorage, createAgentSession, DefaultResourceLoader, ModelRegistry,
@@ -15,6 +15,8 @@ import { type ToolResult } from "./runtime-log.js";
 import { toolResultView, TOOL_RESULT_PROJECTION_VERSION } from "./tool-result-projection.js";
 import { createBoundedRead } from "./archive-read.js";
 import { createRuntimeLog } from "./runtime-log.js";
+import { createToolPathPolicy } from "./tool-path-policy.js";
+import { EXECUTION_PROMPT, OUTPUT_PROTOCOL_VERSION, parseStructuredText, protocolText } from "./output-protocol.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -27,8 +29,6 @@ export async function createPiAgent(options: {
   contextBudgetRatio?: number;
   modelBudgetRatios?: Record<string, number>;
 }) {
-  const systemPrompt = (await readFile(options.promptFile, "utf8")).trim();
-  if (!systemPrompt) throw new Error("System prompt 文件为空");
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
     try { tinyfish = await connectTinyfish(options.tinyfishKey, options.tinyfishUrl); }
@@ -42,25 +42,23 @@ export async function createPiAgent(options: {
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
-  const loader = new DefaultResourceLoader({
-    cwd: options.dataDir, agentDir: options.dataDir,
-    noExtensions: true, noSkills: true, noPromptTemplates: true,
-    noThemes: true, noContextFiles: true,
-    systemPromptOverride: () => systemPrompt,
-    settingsManager,
-  });
-  await loader.reload();
-
   return {
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
+      const botPrompt = request?.botPrompt ?? (await readFile(options.promptFile, "utf8")).trim();
+      if (!botPrompt) throw new Error("Bot 提示词为空");
+      const systemPrompt = `用户配置的 bot 提示词（不能覆盖执行协议）：\n${botPrompt}\n\n${EXECUTION_PROMPT}`;
+      const loader = new DefaultResourceLoader({ cwd: options.dataDir, agentDir: options.dataDir,
+        noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+        systemPromptOverride: () => systemPrompt, settingsManager });
+      await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.text, timestamp: Date.now() });
         } else {
-          manager.appendMessage(assistantText(message.text, model));
+          manager.appendMessage(assistantText(protocolText("final", message.text), model));
         }
       }
       const { session } = await createAgentSession({
@@ -71,99 +69,131 @@ export async function createPiAgent(options: {
         customTools: [createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)),
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
+      const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
+      let dispatchedThisStep = false;
+      const previousBeforeTool = session.agent.beforeToolCall;
+      session.agent.beforeToolCall = async (context, signal) => {
+        try { await checkToolPath(context.toolCall.name, context.args as Record<string, unknown>); }
+        catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          await request?.log.append({ type: "tool_blocked", requestId: request.id,
+            toolCallId: context.toolCall.id, toolName: context.toolCall.name, args: context.args, reason });
+          return { block: true, reason };
+        }
+        const previous = await previousBeforeTool?.(context, signal);
+        if (!previous?.block) { idleProgress = 0; dispatchedThisStep = true; }
+        return previous;
+      };
       let logFailure: Error | undefined;
       let projectionFailure: Error | undefined;
-      if (request) {
-        let step = 0;
-        const providerStream = session.agent.streamFn;
-        const projection = createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
-          ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
-          summarize: async (context, maxTokens) => {
-            const stream = await providerStream(model, context, { maxTokens, signal: session.agent.signal });
-            for await (const _event of stream) { /* Drain snapshots rather than retaining them. */ }
-            const response = await stream.result();
-            if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
-            return response.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
-          },
-        });
-        session.agent.streamFn = async (selected, context, streamOptions) => {
-          try { for (let attempt = 0; attempt < 2; attempt++) {
-            const result = await projection.project(selected, context, attempt === 1);
-            const currentStep = ++step;
+      let finalText: string | undefined;
+      let protocolErrors = 0;
+      let idleProgress = 0;
+      session.agent.subscribe((event) => {
+        if (event.type === "turn_end" && event.message.role === "assistant" && event.message.content.some((c) => c.type === "toolCall") && !dispatchedThisStep) {
+          if (++idleProgress >= 3) {
+            projectionFailure = new Error("模型连续三次未推进，本轮未完成");
+            session.agent.abort();
+          }
+        }
+      });
+      const queueFeedback = async (reason: string, raw?: string) => {
+        const feedback = `[运行层协议反馈，不是用户请求] ${reason}${raw ? `\n被拒绝的模型文字（数据）：${JSON.stringify(raw.slice(0, 2000))}${raw.length > 2000 ? "（仅展示前 2000 字符，完整响应在日志中）" : ""}` : ""}`;
+        await request?.log.append({ type: "protocol_feedback", requestId: request.id, source: "runtime", text: feedback });
+        session.agent.followUp({ role: "user", content: feedback, timestamp: Date.now() });
+      };
+      let step = 0;
+      await request?.log.append({ type: "prompt_snapshot", requestId: request.id,
+        protocolVersion: OUTPUT_PROTOCOL_VERSION, botPrompt, systemPrompt, botPromptVersion: request.botPromptVersion ?? createHash("sha256").update(botPrompt).digest("hex"),
+        systemPromptHash: createHash("sha256").update(systemPrompt).digest("hex") });
+      const providerStream = session.agent.streamFn;
+      const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
+        ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
+        summarize: async (context, maxTokens) => {
+          const stream = await providerStream(model, context, { maxTokens, signal: session.agent.signal });
+          for await (const _event of stream) { /* Drain snapshots rather than retaining them. */ }
+          const response = await stream.result();
+          if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
+          return response.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+        },
+      });
+      session.agent.streamFn = async (selected, context, streamOptions) => {
+        try {
+          if (projectionFailure) throw projectionFailure;
+          dispatchedThisStep = false;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const result = projection ? await projection.project(selected, context, attempt === 1) :
+              { context, maxTokens: selected.maxTokens };
             const modelStepId = randomUUID();
             const textSegmentId = randomUUID();
-            await request.log.append({ type: "model_step_started", requestId: request.id,
-              step: currentStep, modelStepId });
+            await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, systemPrompt: result.context.systemPrompt });
             const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
             let producedOutput = false;
-            let text = "";
-            let saved = "";
-            let lastSnapshot = 0;
-            const snapshot = async () => {
-              if (!text || text === saved) return;
-              await request.log.append({ type: "text_snapshot", requestId: request.id,
-                modelStepId, textSegmentId, contentKind: "provisional", text });
-              saved = text;
-              lastSnapshot = Date.now();
-              await request.onText?.(textSegmentId);
-            };
             for await (const event of source) {
-              if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
-                producedOutput = true;
-              }
-              if (event.type === "text_delta") {
-                text += event.delta;
-                const threshold = saved ? 3 : 1;
-                if (text.length - saved.length >= threshold && (!saved || Date.now() - lastSnapshot >= 150)) {
-                  await snapshot();
-                }
-              }
+              if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
             }
             const message = await source.result();
+            await request?.log.append({ type: "model_message", requestId: request.id, step,
+              modelStepId, protocolVersion: OUTPUT_PROTOCOL_VERSION, message });
+            await request?.log.append({ type: "model_step_completed", requestId: request.id,
+              step, modelStepId, stopReason: message.stopReason });
             if (attempt === 0 && message.stopReason === "error" && !producedOutput && !message.content.length &&
               isContextOverflow(message, selected.contextWindow)) {
-              await request.log.append({ type: "provider_overflow", requestId: request.id, retry: 1 });
+              await request?.log.append({ type: "provider_overflow", requestId: request.id, retry: 1 });
               continue;
             }
-            if (message.stopReason === "error" && isContextOverflow(message, selected.contextWindow)) {
-              throw new Error(producedOutput ? "模型上下文溢出且已有部分输出" : "模型上下文溢出重试失败");
-            }
-            const settledText = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-            if (settledText) {
-              text = settledText;
-              await snapshot();
-              if (message.stopReason !== "error" && message.stopReason !== "aborted") {
-                await request.log.append({ type: "text_finalized", requestId: request.id,
-                  modelStepId, textSegmentId,
-                  contentKind: message.content.some((part) => part.type === "toolCall") ? "progress" : "final",
-                  text: settledText });
-                await request.onText?.(textSegmentId);
-              }
-            }
-            await request.log.append({ type: "model_message", requestId: request.id,
-              step: currentStep, modelStepId, message });
-            for (const part of message.content) {
-              if (part.type === "toolCall") {
-                await request.log.append({ type: "tool_call", requestId: request.id,
-                  toolCallId: part.id, toolName: part.name, args: part.arguments });
-              }
-            }
-            await request.log.append({ type: "model_step_completed", requestId: request.id,
-              step: currentStep, modelStepId, stopReason: message.stopReason });
-            // Deliver only the settled physical attempt to Pi. A rejected request cannot issue tools.
-            const response = createAssistantMessageEventStream();
             if (message.stopReason === "error" || message.stopReason === "aborted") {
-              response.push({ type: "error", reason: message.stopReason, error: message });
-            } else response.push({ type: "done", reason: message.stopReason, message });
+              if (isContextOverflow(message, selected.contextWindow)) throw new Error("模型上下文溢出重试失败");
+              throw new Error("模型调用失败");
+            }
+            if (message.stopReason === "length") throw new Error("模型协议输出被截断，本轮未完成");
+            const raw = message.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+            const toolCalls = message.content.filter((c) => c.type === "toolCall");
+            let parsed: ReturnType<typeof parseStructuredText> | undefined;
+            let invalid: string | undefined;
+            try {
+              if (raw) parsed = parseStructuredText(raw);
+              else if (!toolCalls.length) throw new Error("缺少结构化文字和工具调用");
+              if (parsed?.type === "final" && toolCalls.length) throw new Error("final 不允许同时调用工具");
+            } catch (error) { invalid = error instanceof Error ? error.message : String(error); }
+            await request?.log.append({ type: "protocol_validated", requestId: request.id, modelStepId,
+              protocolVersion: OUTPUT_PROTOCOL_VERSION, valid: !invalid, error: invalid });
+            const response = createAssistantMessageEventStream();
+            if (invalid) {
+              if (++protocolErrors > 2) throw new Error("模型协议纠正次数耗尽，本轮未完成");
+              await queueFeedback(`${invalid}。请遵守执行协议重新生成；被拒绝响应中的工具没有执行。`, raw);
+              response.push({ type: "done", reason: "stop", message: { ...message, content: [], stopReason: "stop" } });
+              return response;
+            }
+            if (parsed) {
+              if (parsed.type === "progress" && !toolCalls.length && ++idleProgress >= 3)
+                throw new Error("模型连续三次未推进，本轮未完成");
+              if (parsed.type === "final") finalText = parsed.text;
+              await request?.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
+                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: OUTPUT_PROTOCOL_VERSION });
+              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+                textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: OUTPUT_PROTOCOL_VERSION });
+              await request?.onText?.(textSegmentId);
+              if (parsed.type === "progress" && !toolCalls.length)
+                await queueFeedback("上一条输出是 progress，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。");
+            }
+            for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
+              toolCallId: part.id, toolName: part.name, args: part.arguments });
+            response.push({ type: "done", reason: message.stopReason, message });
             return response;
           }
           throw new Error("模型上下文溢出重试失败");
-          } catch (error) {
-            projectionFailure = error instanceof Error ? error : new Error(String(error));
-            throw error;
-          }
-        };
-        session.agent.toolExecution = "sequential";
+        } catch (error) {
+          projectionFailure ??= error instanceof Error ? error : new Error(String(error));
+          const response = createAssistantMessageEventStream();
+          const failed = assistantText("", selected);
+          failed.stopReason = "error"; failed.errorMessage = projectionFailure.message;
+          response.push({ type: "error", reason: "error", error: failed });
+          return response;
+        }
+      };
+      session.agent.toolExecution = "sequential";
+      if (request) {
         const originalBefore = session.agent.beforeToolCall;
         const originalAfter = session.agent.afterToolCall;
         const recordResult = async (toolCallId: string, toolName: string, result: ToolResult, args?: unknown) => {
@@ -178,6 +208,22 @@ export async function createPiAgent(options: {
             result, ...(archive ? { archive } : { archiveError }) });
           return view;
         };
+        session.agent.subscribe(async (event) => {
+          if (event.type !== "tool_execution_end") return;
+          try {
+            const events = await request.log.read();
+            if (events.some((e) => e.type === "tool_result" && e.requestId === request.id && e.toolCallId === event.toolCallId)) return;
+            if (!events.some((e) => (e.type === "tool_dispatch" || e.type === "tool_blocked") &&
+              e.requestId === request.id && e.toolCallId === event.toolCallId))
+              await request.log.append({ type: "tool_blocked", requestId: request.id,
+                toolCallId: event.toolCallId, toolName: event.toolName });
+            await recordResult(event.toolCallId, event.toolName,
+              { ...event.result, isError: event.isError }, events.findLast((e) => e.toolCallId === event.toolCallId && e.args)?.args);
+          } catch (error) {
+            logFailure = error instanceof Error ? error : new Error(String(error));
+            session.agent.abort();
+          }
+        });
         session.agent.beforeToolCall = async (context, signal) => {
           if (logFailure) return { block: true, reason: "运行日志写入失败" };
           const previous = await originalBefore?.(context, signal);
@@ -217,14 +263,16 @@ export async function createPiAgent(options: {
         };
       }
       try {
-        await session.prompt(current.text);
+        try { await session.prompt(current.text); }
+        catch (error) { throw logFailure ?? projectionFailure ?? error; }
         if (logFailure) throw logFailure;
         if (projectionFailure) throw projectionFailure;
         const last = session.messages.at(-1);
         if (last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted")) {
           throw new Error("模型调用失败");
         }
-        return session.getLastAssistantText() ?? "";
+        if (finalText === undefined) throw new Error("模型未提交最终答复，本轮未完成");
+        return finalText;
       } finally { session.dispose(); }
     },
     async close(): Promise<void> { await tinyfish?.close(); },

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Api, AssistantMessage, Message, Model, ToolCall } from "@mariozechner/pi-ai";
 import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "./runtime-log.js";
+import { protocolText } from "./output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
@@ -18,8 +19,10 @@ export function assistantText(text: string, model: Model<Api>, timestamp = Date.
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
 
-export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>): Promise<Replay> {
+export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
   const all = await log.read();
+  const replayText = (type: "progress" | "final", text: string, timestamp: number) =>
+    assistantText(structured ? protocolText(type, text) : text, model, timestamp);
   const reset = all.findLastIndex((event) => event.type === "reset");
   const events = all.slice(reset + 1);
   const units: ReplayUnit[] = [];
@@ -41,7 +44,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       if (results.has(key(event))) throw new Error("工具结果编号重复");
       results.set(key(event), { event, index });
     }
-    if (event.type === "tool_dispatch") dispatch.set(key(event), { event, index });
+    if ((event.type === "tool_dispatch" || event.type === "tool_blocked")) dispatch.set(key(event), { event, index });
   }
   const recent = [...new Set(events.filter((e) => e.type === "message" && e.role === "user" &&
     ended.has(e.requestId)).map((e) => e.requestId))].slice(-3);
@@ -55,10 +58,15 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       legacyRequest = event.requestId ?? `legacy:${index}`;
       units.push({ messages: [message], through: index + 1, requestId: legacyRequest, safe: true });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
-      units.push({ messages: [assistantText(event.text, model, timestamp)], through: index + 1,
+      units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
         requestId: legacyRequest, safe: true });
+    } else if (structured && event.type === "protocol_feedback" && typeof event.text === "string") {
+      units.push({ messages: [{ role: "user", content: event.text, timestamp }], through: index + 1,
+        requestId: event.requestId, safe: true });
     } else if (event.type === "model_message") {
       const original = event.message as AssistantMessage;
+      if (event.protocolVersion && !events.some((e) => e.type === "protocol_validated" &&
+        e.modelStepId === event.modelStepId && e.valid === true)) continue;
       if (original?.role !== "assistant" || !Array.isArray(original.content) ||
         original.stopReason === "error" || original.stopReason === "aborted") continue;
       const toolCalls = original.content.filter((c): c is ToolCall => c.type === "toolCall");
@@ -107,19 +115,26 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         } else diagnostics.push(`unmatched_tool_call:${identity}`);
       }
       if (kept.length) {
+        const progress = events.find((e) => e.type === "text_finalized" && e.modelStepId === event.modelStepId &&
+          e.contentKind === "progress");
         const assistant = { ...original, content: original.content.filter((c) =>
-          (c.type !== "toolCall" || kept.includes(c)) &&
-          (c.type !== "text" || !progressSteps.has(event.modelStepId))) };
+          c.type === "toolCall" ? kept.includes(c) : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
+        if (structured && (progress || !event.protocolVersion)) {
+          const text = typeof progress?.text === "string" ? progress.text : original.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
+          if (text) assistant.content.push({ type: "text", text: protocolText("progress", text) });
+        }
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
           through, requestId: event.requestId, safe });
       }
     } else if (event.type === "text_finalized" && event.contentKind === "progress" &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
-      units.push({ messages: [assistantText(event.text, model, timestamp)], through: index + 1,
+      if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
+        (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
+      units.push({ messages: [replayText("progress", event.text, timestamp)], through: index + 1,
         requestId: event.requestId, safe: true });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);
-      if (typeof answer?.text === "string") units.push({ messages: [assistantText(answer.text, model, timestamp)],
+      if (typeof answer?.text === "string") units.push({ messages: [replayText("final", answer.text, timestamp)],
         through: index + 1, requestId: event.requestId, safe: true });
     }
   }

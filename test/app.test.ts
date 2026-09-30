@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -147,4 +147,24 @@ test("a definite Telegram rejection is recorded as failed delivery", async () =>
   const events = (await readFile(join(dir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   assert.ok(events.some((event) => event.type === "delivery_failed"));
   assert.ok(!events.some((event) => event.type === "delivery_unknown"));
+});
+
+
+test("owner can configure bot prompt without adding commands to model history", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "prompt-config-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const replies: string[] = [];
+  const prompts: Array<string | undefined> = [];
+  const appOptions = { ownerId: 42, dataDir: dir, send: async (text: string) => { replies.push(text); },
+    answer: async (_messages: unknown, request: { botPrompt?: string }) => { prompts.push(request.botPrompt); return "答案"; } };
+  const app = createApp(appOptions);
+  await app.handle({ userId: 99, chatType: "private", text: "/prompt set 不能生效", messageId: 1 });
+  await app.handle({ userId: 42, chatType: "private", text: "/prompt set 详细解释", messageId: 2 });
+  await app.handle({ userId: 42, chatType: "private", text: "/prompt", messageId: 3 });
+  assert.match(replies.at(-1) ?? "", /详细解释/);
+  await createApp(appOptions).handle({ userId: 42, chatType: "private", text: "你好", messageId: 4 });
+  assert.deepEqual(prompts, ["详细解释"]);
+  await app.handle({ userId: 42, chatType: "private", text: "/prompt reset", messageId: 5 });
+  await app.handle({ userId: 42, chatType: "private", text: "你好", messageId: 6 });
+  assert.deepEqual(prompts, ["详细解释", undefined]);
 });

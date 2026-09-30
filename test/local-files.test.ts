@@ -37,7 +37,7 @@ for (const tinyfishUnavailable of [false, true]) {
         ? { tool_calls: [{ index: 0, id: "save_1", type: "function", function: {
           name: action.name, arguments: JSON.stringify(action.args),
         } }] }
-        : { content: `文件操作结果：${last.content}` };
+        : { content: JSON.stringify({ type: "final", text: `文件操作结果：${last.content}` }) };
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta, finish_reason: action ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
     });

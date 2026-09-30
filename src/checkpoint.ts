@@ -5,10 +5,10 @@ import type { StoredEvent } from "./runtime-log.js";
 import { sourceDigest } from "./projection.js";
 
 export type Checkpoint = { version: 2; id: string; boundary: string; through: number; sourceDigest: string;
-  lastEventDigest: string; summaryStrategy: "full-result-v1";
+  lastEventDigest: string; summaryStrategy: "full-result-v1" | "structured-text-v1";
   summary: string; previousId?: string; model: string; ratio: number; createdAt: string };
 
-export function createCheckpointStore(dataDir: string) {
+export function createCheckpointStore(dataDir: string, strategy: Checkpoint["summaryStrategy"] = "full-result-v1") {
   const dir = join(dataDir, "checkpoints");
   return {
     async load(boundary: string, events: StoredEvent[]): Promise<Checkpoint | undefined> {
@@ -20,7 +20,7 @@ export function createCheckpointStore(dataDir: string) {
         try {
           const envelope = JSON.parse(await readFile(join(dir, name), "utf8"));
           const c = envelope.checkpoint as Checkpoint;
-          if (c?.version !== 2 || c.summaryStrategy !== "full-result-v1" ||
+          if (c?.version !== 2 || c.summaryStrategy !== strategy ||
             c.boundary !== boundary || !Number.isInteger(c.through) ||
             c.through < 1 || c.through > events.length || typeof c.summary !== "string" ||
             sourceDigest(c) !== envelope.sha256 || c.sourceDigest !== sourceDigest(events.slice(0, c.through)) ||

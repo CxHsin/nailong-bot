@@ -36,7 +36,7 @@ test("large tool result is durably archived, pruned, and readable with the exist
         name: "read", arguments: JSON.stringify({ path: archivePath, offset: 1, limit: 5 }),
       } }] };
     } else {
-      delta = { content: "已核对归档内容" };
+      delta = { content: JSON.stringify({ type: "final", text: "已核对归档内容" }) };
       finish_reason = "stop";
     }
     phase++;
@@ -100,7 +100,7 @@ for (const fault of ["archive", "tool_call", "tool_dispatch", "tool_result"] as 
         } }] };
       } else {
         nextContext = String(data.messages.at(-1)?.content);
-        delta = { content: "finished" };
+        delta = { content: JSON.stringify({ type: "final", text: "finished" }) };
         finish_reason = "stop";
       }
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -175,7 +175,7 @@ test("archived long Unicode line is readable through bounded continuations", asy
     }
     const call = next.path && pages < 100;
     const delta = call ? { tool_calls: [{ index: 0, id: `page-${pages}`, type: "function",
-      function: { name: "read", arguments: JSON.stringify(next) } }] } : { content: "complete" };
+      function: { name: "read", arguments: JSON.stringify(next) } }] } : { content: JSON.stringify({ type: "final", text: "complete" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
       finish_reason: call ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);

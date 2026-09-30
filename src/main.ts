@@ -32,6 +32,7 @@ async function main(): Promise<void> {
   const app = createApp({
     ownerId,
     dataDir,
+    promptFile,
     log,
     telegram: {
       draft: async (draftId, text, chatId, parseMode) => {

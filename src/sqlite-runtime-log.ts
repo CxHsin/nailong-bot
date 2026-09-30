@@ -31,6 +31,8 @@ const legacyKinds = new Set([
   "tool_call", "tool_dispatch", "tool_result", "answer_generated",
   "delivery_chunk_succeeded", "delivery_succeeded", "delivery_failed", "delivery_unknown",
   "context_projected", "projection_failed", "provider_overflow",
+  "prompt_snapshot", "bot_prompt_config", "protocol_feedback", "protocol_validated", "tool_blocked",
+  "text_snapshot", "text_finalized",
 ]);
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 

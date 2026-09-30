@@ -16,7 +16,7 @@ type Payload = { messages: WireMessage[]; tools?: unknown[]; max_tokens?: number
 function reply(res: ServerResponse, content: string, call?: { id: string; name: string; args: object }) {
   const delta = call ? { tool_calls: [{ index: 0, id: call.id, type: "function", function: {
     name: call.name, arguments: JSON.stringify(call.args),
-  } }] } : { content };
+  } }] } : { content: content.startsWith("## Goal") ? content : JSON.stringify({ type: "final", text: content }) };
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
     finish_reason: call ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
@@ -84,7 +84,7 @@ test("model window budget folds old history, preserves three requests, and reuse
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
       summaries++; reply(res, summary);
     } else reply(res, "finished");
-  }, { contextWindow: 6000 });
+  }, { contextWindow: 6600 });
   const events = Array.from({ length: 6 }, (_, i) => [
     { type: "message", role: "user", text: `old-${i}:` + "x".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
     { type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
@@ -100,7 +100,7 @@ test("model window budget folds old history, preserves three requests, and reuse
   assert.match(history, /old-3:/);
   assert.match(history, /old-5:/);
   const outputLimit = normal.max_tokens ?? normal.max_completion_tokens;
-  assert.ok(outputLimit! <= 6000 && outputLimit! > 0);
+  assert.ok(outputLimit! <= 6600 && outputLimit! > 0);
   const before = summaries;
   await f.restart();
   await f.send("again");
@@ -353,4 +353,24 @@ test("legacy archive-only events fail clearly when their copy is missing", async
   await f.send("continue");
   assert.equal(f.seen.length, 0);
   assert.match(f.replies.at(-1)!, /工具归档缺失或校验失败/);
+});
+
+
+test("legacy tool progress without text segments gains protocol identity on replay", async (t) => {
+  const f = await fixture(t, (_data, res) => reply(res, "checked"));
+  const message = assistantText("准备查看目录。", getModel("deepseek", "deepseek-v4-flash"));
+  message.content.push({ type: "toolCall", id: "legacy-ls", name: "ls", arguments: { path: "." } });
+  const events = [
+    { type: "message", role: "user", text: "查看目录", requestId: "old" },
+    { type: "model_message", requestId: "old", message },
+    { type: "tool_dispatch", requestId: "old", toolCallId: "legacy-ls", toolName: "ls" },
+    { type: "tool_result", requestId: "old", toolCallId: "legacy-ls", toolName: "ls",
+      result: { content: [{ type: "text", text: "note.md" }], details: {}, isError: false } },
+    { type: "request_failed", requestId: "old" },
+  ];
+  await writeFile(join(f.dir, "events.jsonl"), events.map((event) => JSON.stringify({ ...event, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.send("继续");
+  const assistant = f.seen.at(-1)!.messages.find((m) => m.tool_calls?.some((c) => c.id === "legacy-ls"));
+  assert.deepEqual(JSON.parse(assistant!.content!), { type: "progress", text: "准备查看目录。" });
+  assert.equal(JSON.stringify(f.seen.at(-1)!.messages).split("准备查看目录。").length - 1, 1);
 });

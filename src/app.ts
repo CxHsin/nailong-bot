@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRuntimeLog, type RuntimeLog } from "./runtime-log.js";
 import { createTelegramProjection, type TelegramTransport } from "./telegram-projection.js";
@@ -6,7 +8,7 @@ import { projectDeliveredChat, projectFinalAnswer, projectRecoverableTelegram,
 
 export type Update = { userId: number; chatType: string; text?: string; messageId: number };
 export type Message = { role: "user" | "assistant"; text: string };
-export type Request = { id: string; log: RuntimeLog; onText?: (textSegmentId: string) => Promise<void> };
+export type Request = { id: string; log: RuntimeLog; botPrompt?: string; botPromptVersion?: string; onText?: (textSegmentId: string) => Promise<void> };
 export class DeliveryRejected extends Error {
   constructor(message: string, readonly retryAfterMs?: number) { super(message); }
 }
@@ -15,6 +17,7 @@ export function createApp(options: {
   ownerId: number;
   dataDir: string;
   log?: RuntimeLog;
+  promptFile?: string;
   telegram?: TelegramTransport;
   send: (text: string, update: Update, onChunk?: (index: number, total: number) => Promise<void>) => Promise<void>;
   answer: (messages: Message[], request: Request) => Promise<string>;
@@ -34,6 +37,21 @@ export function createApp(options: {
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text.trim();
+    if (/^\/prompt(?:\s|$)/.test(text)) {
+      onStarted?.();
+      if (text === "/prompt") {
+        const configured = (await log.read()).findLast((e) => e.type === "bot_prompt_config" && e.chatId === update.userId);
+        const prompt = typeof configured?.text === "string" ? configured.text :
+          (await readFile(options.promptFile ?? resolve("system-prompt.md"), "utf8")).trim();
+        await options.send(`当前 bot 提示词：\n${prompt}`, update);
+      } else if (text === "/prompt reset" || text.startsWith("/prompt set ")) {
+        const prompt = text === "/prompt reset" ? undefined : text.slice("/prompt set ".length).trim();
+        if (prompt !== undefined && !prompt) { await options.send("请在 /prompt set 后提供非空提示词。", update); return; }
+        await log.append({ type: "bot_prompt_config", chatId: update.userId, version: randomUUID(), text: prompt });
+        await options.send(prompt === undefined ? "已恢复默认 bot 提示词，下一请求生效。" : "已设置当前聊天的 bot 提示词，下一请求生效。", update);
+      } else await options.send("查看：/prompt；设置：/prompt set 提示词；恢复默认：/prompt reset", update);
+      return;
+    }
     if (text === "/reset") {
       const batch = [{ type: "message", role: "user", text, messageId: update.messageId },
         { type: "reset" }];
@@ -64,7 +82,14 @@ export function createApp(options: {
     }
     const messages = projectDeliveredChat(history);
     try {
-      const answer = await options.answer(messages, { id, log, onText: telegram?.stream.bind(telegram) });
+      const configured = history.findLast((e) => e.type === "bot_prompt_config" && e.chatId === update.userId);
+      const answer = await options.answer(messages, { id, log,
+        botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
+        botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined, onText: telegram ? async (segment) => {
+          const event = (await log.read()).findLast((e) => e.type === "text_finalized" && e.textSegmentId === segment);
+          if (event?.contentKind === "progress") await telegram.reconcile(segment);
+          else await telegram.stream(segment);
+        } : undefined });
       if (!answer.trim()) throw new Error("模型没有返回文字");
       await telegram?.finish();
       await log.append({ type: "answer_generated", requestId: id, text: answer });
@@ -102,7 +127,7 @@ export function createApp(options: {
       }
       catch { /* Preserve the original storage failure. */ }
       const safeReason = error instanceof Error &&
-        /^(上下文超过预算|工具归档缺失或校验失败|模型窗口或 Projection 预算配置无效|历史摘要|模型上下文溢出)/.test(error.message)
+        /^(上下文超过预算|工具归档缺失或校验失败|模型窗口或 Projection 预算配置无效|历史摘要|模型上下文溢出|模型协议|模型连续|模型未提交)/.test(error.message)
         ? `：${error.message}` : "，请稍后重试";
       await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
     }

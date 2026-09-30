@@ -9,20 +9,23 @@ import { createPiAgent } from "../src/pi-agent.js";
 import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
 import { formatMarkdownForTelegram } from "../src/telegram-format.js";
 
-test("short model deltas appear in readable Telegram updates", { timeout: 30_000 }, async (t) => {
+test("structured deltas remain hidden until complete protocol validation", { timeout: 30_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-cadence-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const log = createSqliteRuntimeLog(dir);
   const delta = "这是一段";
   const complete = delta.repeat(24);
+  let generationComplete = false;
   const server = createServer(async (req, res) => {
     for await (const _chunk of req) { /* Consume model request. */ }
     res.writeHead(200, { "content-type": "text/event-stream" });
-    for (let index = 0; index < 24; index++) {
+    const encoded = JSON.stringify({ type: "final", text: complete });
+    for (let index = 0; index < encoded.length; index += 10) {
       res.write(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0,
-        delta: { content: delta }, finish_reason: null }] })}\n\n`);
-      await new Promise((resolve) => setTimeout(resolve, 90));
+        delta: { content: encoded.slice(index, index + 10) }, finish_reason: null }] })}\n\n`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    generationComplete = true;
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0,
       delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
@@ -41,7 +44,7 @@ test("short model deltas appear in readable Telegram updates", { timeout: 30_000
   const app = createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer,
     send: async () => { throw new Error("answer must be finalized in place"); },
     telegram: {
-      send: async (text, _chatId, mode) => { modes.push(mode); visible.set(++sends, text);
+      send: async (text, _chatId, mode) => { assert.ok(generationComplete); modes.push(mode); visible.set(++sends, text);
         updates.push(text); return sends; },
       edit: async (messageId, text, _chatId, mode) => { modes.push(mode); edits++; visible.set(messageId, text);
         updates.push(text); },
@@ -49,10 +52,8 @@ test("short model deltas appear in readable Telegram updates", { timeout: 30_000
   });
   await app.handle({ userId: 42, chatType: "private", text: "说明情况", messageId: 1 });
   assert.equal(sends, 1);
-  assert.ok(updates.length >= 4, `reply did not visibly progress: ${updates.length}`);
-  assert.ok(updates[0]!.length <= 12, `first fragment was delayed: ${updates[0]!.length}`);
-  assert.ok(updates.every((item, index) => index === 0 || item.length > updates[index - 1]!.length));
-  assert.ok(edits < complete.length, `an edit was made for every character: ${edits}`);
+  assert.ok(updates.every((text) => complete.startsWith(text)));
+  assert.ok(!updates.some((text) => text.includes("\"type\"")));
   assert.equal(visible.get(1), complete);
   assert.ok(modes.every((mode) => mode === "HTML"));
 });
