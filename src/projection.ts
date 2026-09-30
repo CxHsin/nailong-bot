@@ -25,6 +25,12 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     assistantText(structured ? protocolText(type, text) : text, model, timestamp);
   const reset = all.findLastIndex((event) => event.type === "reset");
   const events = all.slice(reset + 1);
+  const resultDelivered = (segmentId: unknown) => {
+    const pages = events.filter((event) => event.type === "telegram_page" && event.textSegmentId === segmentId);
+    const plan = events.findLast((event) => event.type === "telegram_plan_finalized" && event.textSegmentId === segmentId);
+    return !!plan && plan.parts === pages.length && pages.length > 0 && pages.every((page) => events.some((event) =>
+      event.type === "telegram_delivery_succeeded" && event.textSegmentId === segmentId && event.partIndex === page.partIndex));
+  };
   const units: ReplayUnit[] = [];
   const diagnostics: string[] = [];
   const key = (e: StoredEvent) => `${e.requestId}:${String(e.toolCallId)}`;
@@ -119,20 +125,34 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
           c.type === "toolCall" ? kept.includes(c) : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
-        if (structured && (progress || !event.protocolVersion)) {
+        if (progress?.contentKind === "result") {
+          // Keep execution facts regardless of UI delivery, but never imply unseen text was delivered.
+          assistant.content = assistant.content.filter((part) => part.type !== "text");
+          const text = String(progress.text);
+          if (resultDelivered(progress.textSegmentId)) {
+            assistant.content.push({ type: "text", text: structured ? protocolText("result", text) : text });
+          } else if (event.requestId === currentId && !ended.has(currentId)) {
+            const work = `内部工作成果（尚未确认送达用户）：\n${text}`;
+            assistant.content.push({ type: "text", text: structured ? protocolText("status", work) : work });
+          }
+        } else if (structured && (progress || !event.protocolVersion)) {
           const text = typeof progress?.text === "string" ? progress.text : original.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
-          if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "result" ? "result" : progress?.contentKind === "status" ? "status" : "progress", text) });
+          if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "status" ? "status" : "progress", text) });
         }
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
           through, requestId: event.requestId, safe });
       }
     } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
-      if (event.contentKind === "result") {
-        const pages = events.filter((e) => e.type === "telegram_page" && e.textSegmentId === event.textSegmentId);
-        const plan = events.findLast((e) => e.type === "telegram_plan_finalized" && e.textSegmentId === event.textSegmentId);
-        if (!plan || plan.parts !== pages.length || !pages.length || !pages.every((page) => events.some((e) => e.type === "telegram_delivery_succeeded" &&
-          e.textSegmentId === page.textSegmentId && e.partIndex === page.partIndex))) continue;
+      if (event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
+        if (event.requestId !== currentId || ended.has(currentId)) continue;
+        const work = `内部工作成果（尚未确认送达用户）：\n${event.text}`;
+        if (!events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
+          (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) {
+          units.push({ messages: [replayText("status", work, timestamp)], through: index + 1,
+            requestId: event.requestId, safe: true });
+        }
+        continue;
       }
       if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
         (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
