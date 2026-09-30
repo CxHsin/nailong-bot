@@ -44,6 +44,8 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     const events = await options.log.read();
     const finals = events.filter((event) => event.type === "text_finalized" && event.requestId === requestId &&
       event.protocolVersion === "json-text-v2" && ["result", "final"].includes(String(event.contentKind)));
+    if (!finals.length && !events.some((event) => event.type === "text_snapshot" && event.requestId === requestId &&
+      event.protocolVersion === "json-text-v2" && event.contentKind !== "notice")) return true;
     if (!finals.some((event) => event.contentKind === "final")) return false;
     for (const final of finals) {
       const { pages, deliveries, planFinal, discarded } = await state(String(final.textSegmentId));
