@@ -1,23 +1,16 @@
-import { createHash } from "node:crypto";
+import { assistantText } from "../agent/model-message.js";
+import { segmentDelivery } from "../runtime/delivery-facts.js";
+import { sourceDigest } from "../runtime/event-digest.js";
 import type { Api, AssistantMessage, ImageContent, Message, Model, ToolCall } from "@mariozechner/pi-ai";
 import { type RuntimeLog, type StoredEvent, type ToolArchive,
-  type ToolResult } from "./runtime-log.js";
-import { protocolText } from "./output-protocol.js";
+  type ToolResult } from "../runtime/runtime-types.js";
+import { protocolText } from "../agent/output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean };
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
   diagnostics: string[] };
-const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const sourceDigest = digest;
-
-export function assistantText(text: string, model: Model<Api>, timestamp = Date.now()): AssistantMessage {
-  return { role: "assistant", content: [{ type: "text", text }], api: model.api,
-    provider: model.provider, model: model.id, stopReason: "stop", timestamp,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
-}
 
 export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
   const all = await log.read();
@@ -25,12 +18,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     assistantText(structured ? protocolText(type, text) : text, model, timestamp);
   const reset = all.findLastIndex((event) => event.type === "reset");
   const events = all.slice(reset + 1);
-  const resultDelivered = (segmentId: unknown) => {
-    const pages = events.filter((event) => event.type === "telegram_page" && event.textSegmentId === segmentId);
-    const plan = events.findLast((event) => event.type === "telegram_plan_finalized" && event.textSegmentId === segmentId);
-    return !!plan && plan.parts === pages.length && pages.length > 0 && pages.every((page) => events.some((event) =>
-      event.type === "telegram_delivery_succeeded" && event.textSegmentId === segmentId && event.partIndex === page.partIndex));
-  };
+  const resultDelivered = (segmentId: unknown) => segmentDelivery(events, segmentId).complete;
   const units: ReplayUnit[] = [];
   const diagnostics: string[] = [];
   const key = (e: StoredEvent) => `${e.requestId}:${String(e.toolCallId)}`;
@@ -168,5 +156,5 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   }
   for (const identity of results.keys()) if (!used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);
   if (!current) throw new Error("缺少当前用户消息");
-  return { events, boundary: reset < 0 ? "initial" : digest(all.slice(0, reset + 1)), units, current, diagnostics };
+  return { events, boundary: reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1)), units, current, diagnostics };
 }

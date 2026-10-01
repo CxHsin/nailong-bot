@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
-import { createTelegramProjection } from "../src/telegram-projection.js";
-import { formatMarkdownForTelegram } from "../src/telegram-format.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
+import { createTelegramProjection } from "../src/telegram/telegram-projection.js";
+import { formatMarkdownForTelegram } from "../src/telegram/telegram-format.js";
 
 test("committed snapshots grow one Telegram message and finalize in place", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-projection-"));

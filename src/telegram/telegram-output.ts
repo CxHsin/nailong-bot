@@ -1,6 +1,7 @@
+import { requestDelivered as isRequestDelivered, finalDelivered as isFinalDelivered } from "../runtime/delivery-facts.js";
 import { randomUUID, createHash } from "node:crypto";
-import type { RuntimeLog, StoredEvent } from "./runtime-log.js";
-import type { TelegramTransport } from "./telegram-projection.js";
+import type { RuntimeLog, StoredEvent } from "../runtime/runtime-types.js";
+import type { TelegramTransport } from "./telegram-types.js";
 import { planTelegramText, previewTelegramText, TELEGRAM_PRESENTATION_VERSION } from "./telegram-layout.js";
 
 export function createTelegramOutput(options: { log: RuntimeLog; chatId: number } & TelegramTransport) {
@@ -41,18 +42,7 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     return { snapshot, firstSnapshot, final, pages, deliveries, prefix, discarded, planFinal };
   }
   async function requestDelivered(requestId: string) {
-    const events = await options.log.read();
-    const finals = events.filter((event) => event.type === "text_finalized" && event.requestId === requestId &&
-      event.protocolVersion === "json-text-v2" && ["result", "final"].includes(String(event.contentKind)));
-    if (!finals.length && !events.some((event) => event.type === "text_snapshot" && event.requestId === requestId &&
-      event.protocolVersion === "json-text-v2" && event.contentKind !== "notice")) return true;
-    if (!finals.some((event) => event.contentKind === "final")) return false;
-    for (const final of finals) {
-      const { pages, deliveries, planFinal, discarded } = await state(String(final.textSegmentId));
-      if (discarded || !planFinal || planFinal.parts !== pages.length || !pages.length || !pages.every((page) =>
-        deliveries.some((event) => event.type === "telegram_delivery_succeeded" && event.partIndex === page.partIndex))) return false;
-    }
-    return true;
+    return isRequestDelivered(await options.log.read(), requestId);
   }
   async function acknowledge(requestId: string) {
     if (!await requestDelivered(requestId)) return;
@@ -189,9 +179,7 @@ export function createTelegramOutput(options: { log: RuntimeLog; chatId: number 
     interrupt() {},
     requestDelivered,
     async finalDelivered(id: string) {
-      const { final, pages, deliveries, planFinal } = await state(id);
-      return final?.contentKind === "final" && planFinal?.parts === pages.length && pages.length > 0 && pages.every((page) =>
-        deliveries.some((event) => event.type === "telegram_delivery_succeeded" && event.partIndex === page.partIndex));
+      return isFinalDelivered(await options.log.read(), id);
     },
   };
 }

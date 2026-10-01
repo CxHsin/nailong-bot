@@ -1,6 +1,6 @@
 import type { Bot } from "grammy";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { Update } from "./app.js";
+import type { Update } from "../application/app-types.js";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export async function downloadTelegramPhoto(bot: Bot, token: string, fileId: string, fetchFile: typeof fetch = fetch): Promise<ImageContent> {

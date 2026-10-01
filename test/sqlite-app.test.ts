@@ -4,9 +4,9 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 
 test("private Telegram requests use one SQLite source across restart and reset", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "sqlite-app-"));

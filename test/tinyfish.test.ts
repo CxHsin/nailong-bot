@@ -3,9 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { tinyfishResultText } from "../src/tinyfish.js";
-import { createRuntimeLog, readableResult } from "../src/runtime-log.js";
-import { toolResultView } from "../src/tool-result-projection.js";
+import { tinyfishResultText } from "../src/agent/tinyfish.js";
+import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { readableResult } from "../src/runtime/tool-archive.js";
+import { toolResultView } from "../src/context/tool-result-projection.js";
 
 test("long web results retain their tail through extraction, archival and reconstruction", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "web-result-"));

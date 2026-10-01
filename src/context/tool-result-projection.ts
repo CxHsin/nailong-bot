@@ -1,4 +1,5 @@
-import { archivePlaceholder, shouldPrune, type ToolArchive, type ToolResult } from "./runtime-log.js";
+import { archivePlaceholder, shouldPrune } from "../runtime/tool-archive.js";
+import type { ToolArchive, ToolResult } from "../runtime/runtime-types.js";
 
 // A durable decision records what the active model step saw. Replay honors it.
 export const TOOL_RESULT_PROJECTION_VERSION = 1;

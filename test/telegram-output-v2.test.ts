@@ -3,9 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createTelegramProjection } from "../src/telegram-projection.js";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
+import { createApp } from "../src/application/app.js";
+import { createTelegramProjection } from "../src/telegram/telegram-projection.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 
 const update = { userId: 42, chatType: "private", text: "分析", messageId: 1 };
 
@@ -41,7 +41,7 @@ test("long Telegram code remains code and following prose remains formatted pros
 
 // Run through the real model adapter and observe only Telegram's public transport.
 import { createServer } from "node:http";
-import { createPiAgent } from "../src/pi-agent.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
 
 test("model status stays temporary, results are separate, and the final draft appears before generation ends", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "output-stream-"));
@@ -441,8 +441,8 @@ test("known long cooldown retries after its deadline without repeating unknown d
   assert.ok((await log.read()).some((event) => event.type === "delivery_succeeded"));
 });
 
-import { previewTelegramText } from "../src/telegram-layout.js";
-import { replayEvents } from "../src/projection.js";
+import { previewTelegramText } from "../src/telegram/telegram-layout.js";
+import { replayEvents } from "../src/context/projection.js";
 import { getModel } from "@mariozechner/pi-ai";
 
 test("unfinished emphasis previews render without exposing markers or altering escaped text and lists", () => {
@@ -511,7 +511,7 @@ test("discarded protocol segments cancel previously scheduled known-failure retr
   assert.equal(attempts, 1);
 });
 
-import { assistantText } from "../src/projection.js";
+import { assistantText } from "../src/agent/model-message.js";
 
 for (const delivery of ["none", "prefix", "complete", "active"] as const) {
   test(`tool-associated result replay respects ${delivery} delivery while preserving tool facts`, async (t) => {
@@ -556,3 +556,42 @@ for (const delivery of ["none", "prefix", "complete", "active"] as const) {
     }
   });
 }
+
+
+test("independent Telegram and model views refresh and rebuild regardless of read order", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "independent-views-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const model = getModel("deepseek", "deepseek-v4-flash");
+  await log.append({ type: "message", role: "user", text: "旧问题", requestId: "old" });
+  await log.append({ type: "text_snapshot", requestId: "old", textSegmentId: "stage",
+    protocolVersion: "json-text-v2", contentKind: "result", text: "独立视图成果" });
+  await log.append({ type: "text_finalized", requestId: "old", textSegmentId: "stage",
+    protocolVersion: "json-text-v2", contentKind: "result", text: "独立视图成果" });
+  await log.append({ type: "message", role: "user", text: "当前问题", requestId: "current" });
+  const sent: string[] = [];
+  const transport = { send: async (text: string) => { sent.push(text); return sent.length; }, edit: async () => {} };
+  const telegram = createTelegramProjection({ log, chatId: 42, ...transport });
+  const replay = () => replayEvents(log, "current", model, true);
+  const before = await replay();
+  assert.ok(!JSON.stringify(before.units).includes("独立视图成果"));
+  await telegram.reconcile("stage");
+  const after = await replay();
+  assert.ok(JSON.stringify(after.units).includes("独立视图成果"));
+  assert.ok(!JSON.stringify(before.units).includes("独立视图成果"));
+  await createTelegramProjection({ log, chatId: 42, ...transport }).reconcile("stage");
+  assert.deepEqual((await replay()).units, after.units);
+  assert.deepEqual(sent, ["独立视图成果"]);
+  await log.append({ type: "text_snapshot", requestId: "old", textSegmentId: "next-stage",
+    protocolVersion: "json-text-v2", contentKind: "result", text: "追加成果" });
+  await log.append({ type: "text_finalized", requestId: "old", textSegmentId: "next-stage",
+    protocolVersion: "json-text-v2", contentKind: "result", text: "追加成果" });
+  // The existing Telegram reader refreshes even after another view reads the new prefix.
+  assert.ok(!JSON.stringify((await replay()).units).includes("追加成果"));
+  await telegram.reconcile("next-stage");
+  const refreshed = await replay();
+  assert.ok(JSON.stringify(refreshed.units).includes("追加成果"));
+  await createTelegramProjection({ log, chatId: 42, ...transport }).reconcile("next-stage");
+  assert.deepEqual((await replay()).units, refreshed.units);
+  assert.deepEqual(sent, ["独立视图成果", "追加成果"]);
+});

@@ -4,9 +4,9 @@ import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createRuntimeLog } from "../src/runtime-log.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 
 test("structured progress continues within the same request", async () => {
   let calls = 0;

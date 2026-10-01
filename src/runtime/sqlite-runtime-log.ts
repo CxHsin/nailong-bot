@@ -2,8 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { StoredEvent } from "./runtime-log.js";
-import { createRuntimeLog } from "./runtime-log.js";
+import type { StoredEvent } from "./runtime-types.js";
+import { createToolArchive } from "./tool-archive.js";
 
 export type EventInput = Omit<StoredEvent, "at"> & { at?: string };
 export type SqliteEvent = StoredEvent & {
@@ -197,7 +197,7 @@ function validateLegacy(events: StoredEvent[]): void {
 export function createSqliteRuntimeLog(dataDir: string) {
   const databaseFile = join(dataDir, "events.sqlite");
   const legacyFile = join(dataDir, "events.jsonl");
-  const archive = createRuntimeLog(dataDir);
+  const archive = createToolArchive(dataDir);
 
   async function withDatabase<T>(work: (db: DatabaseSync) => T): Promise<T> {
     await mkdir(dataDir, { recursive: true });

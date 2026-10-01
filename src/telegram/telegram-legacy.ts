@@ -1,16 +1,8 @@
-import { createTelegramOutput } from "./telegram-output.js";
 import { randomUUID } from "node:crypto";
-import { createEventReader, type RuntimeLog } from "./runtime-log.js";
-import { projectTelegramSegment } from "./runtime-projections.js";
+import type { RuntimeLog } from "../runtime/runtime-types.js";
+import { projectTelegramSegment } from "./telegram-events.js";
 import { formatMarkdownForTelegram } from "./telegram-format.js";
-
-export type TelegramTransport = {
-  send(text: string, chatId: number, parseMode?: "HTML"): Promise<number>;
-  edit(messageId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
-  draft?(draftId: number, text: string, chatId: number, parseMode?: "HTML"): Promise<void>;
-  isRejected?: (error: unknown) => boolean;
-  retryAfter?: (error: unknown) => number | undefined;
-};
+import type { TelegramTransport } from "./telegram-types.js";
 
 export function splitTelegramText(text: string): string[] {
   const parts: string[] = [];
@@ -26,7 +18,7 @@ export function splitTelegramText(text: string): string[] {
   return parts;
 }
 
-function createLegacyTelegramProjection(options: { log: RuntimeLog; chatId: number } & TelegramTransport) {
+export function createLegacyTelegramProjection(options: { log: RuntimeLog; chatId: number } & TelegramTransport) {
   const updateIntervalMs = 500;
   const charactersPerUpdate = 10; // 20 visible characters/second without a backlog.
   const backlogLimit = 60;
@@ -219,30 +211,5 @@ function createLegacyTelegramProjection(options: { log: RuntimeLog; chatId: numb
         deliveries.findLast((event) => event.partIndex === partIndex &&
           event.type === "telegram_delivery_succeeded")?.text === part);
     },
-  };
-}
-
-
-/** Old records keep their original delivery semantics; new records use immutable pages. */
-export function createTelegramProjection(options: { log: RuntimeLog; chatId: number } & TelegramTransport) {
-  options = { ...options, log: { ...options.log, read: createEventReader(options.log) } };
-  const legacy = createLegacyTelegramProjection(options);
-  const current = createTelegramOutput(options);
-  async function output(id: string) {
-    const snapshot = (await options.log.read()).findLast((event) => event.type === "text_snapshot" && event.textSegmentId === id);
-    return snapshot?.protocolVersion === "json-text-v2" ? current : legacy;
-  }
-  return {
-    async reconcile(id: string, visibleText?: string) {
-      const selected = await output(id);
-      return selected === legacy ? legacy.reconcile(id, visibleText) : current.reconcile(id);
-    },
-    async stream(id: string) { await (await output(id)).stream(id); },
-    async finalDelivered(id: string) { return (await output(id)).finalDelivered(id); },
-    async requestDelivered(id: string) { return current.requestDelivered(id); },
-    async finish() { await Promise.all([legacy.finish(), current.finish()]); },
-    async stop() { await Promise.all([legacy.stop(), current.stop()]); },
-    interrupt() { legacy.interrupt(); current.interrupt(); },
-    resume() { legacy.resume(); current.resume(); },
   };
 }

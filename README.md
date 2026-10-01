@@ -17,17 +17,30 @@ Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊
 
 `data/events.sqlite` 中按序追加的 Runtime Event Log 是运行事实源。用户消息、模型步骤与文字、工具派发与结果、Telegram 投递尝试与结果分别记录；已经生成的回答与已经送达的回答不是同一件事。运行时从同一份已提交日志生成不同视图：
 
-- **Model Context Projection**（`src/projection.ts`、`src/context-budget.ts`）：重放用户、模型和工具历史，构造下一次模型调用。已定稿的进展文字会进入上下文；最终回答只有完整送达后才作为用户已收到的答复回放。
-- **Telegram UI Projection**（`src/runtime-projections.ts`、`src/telegram-projection.ts`）：读取已提交的文字快照和投递状态。生成期间随模型输出更新 Telegram 原生草稿；临时状态只用于预览，每项阶段性成果和最终正文独立发送。长正文先解析 Markdown，再按结构及解析后的长度拆分；已校验的稳定前缀可以提前发送，其余继续预览。正式消息发送后固定，分段计划和实际投递结果均持久记录。
-- **运行与恢复视图**（`src/runtime-projections.ts`）：推导请求终态和重启后的待核对内容。重启时未结束的请求标为中断，不自动重做已经派发但结果未知的工具操作。
+- **Model Context Projection**（`src/context/projection.ts`、`src/context/context-budget.ts`）：重放用户、模型和工具历史，构造下一次模型调用。已定稿的进展文字会进入上下文；最终回答只有完整送达后才作为用户已收到的答复回放。
+- **Telegram UI Projection**（`src/telegram/telegram-events.ts`、`src/telegram/telegram-projection.ts`）：读取已提交的文字快照和投递状态。生成期间随模型输出更新 Telegram 原生草稿；临时状态只用于预览，每项阶段性成果和最终正文独立发送。长正文先解析 Markdown，再按结构及解析后的长度拆分；已校验的稳定前缀可以提前发送，其余继续预览。正式消息发送后固定，分段计划和实际投递结果均持久记录。
+- **运行与恢复视图**（`src/application/runtime-projections.ts`、`src/telegram/telegram-events.ts`）：推导请求终态和重启后的待核对内容。重启时未结束的请求标为中断，不自动重做已经派发但结果未知的工具操作。
 
-`src/runtime-projections.ts` 中的简化聊天视图仅服务于 `answer(messages)` 适配器；正式 pi 会话使用完整事件重放。`src/tool-result-projection.ts` 集中定义工具结果给模型的原文或归档引用视图，并在新事件中记录投影版本与当时的选择。投影和摘要都不改写原始运行事件。
+`src/application/runtime-projections.ts` 中的简化聊天视图仅服务于 `answer(messages)` 适配器；正式 pi 会话使用完整事件重放。`src/context/tool-result-projection.ts` 集中定义工具结果给模型的原文或归档引用视图，并在新事件中记录投影版本与当时的选择。投影和摘要都不改写原始运行事件。
 
 `.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。启动时如发现旧版 `data/events.jsonl`，会校验并幂等导入 SQLite，旧文件保留。完整工具结果存于 `data/tool-results/`，历史摘要 checkpoint 存于 `data/checkpoints/`。这些数据可能包含图片、私人文件内容和工具参数，请按私人数据管理。
 
 每次模型调用前会估算上下文大小，默认输入预算为模型上下文窗口的 86%。可用 `PROJECTION_BUDGET_RATIOS` 按模型覆盖，例如 `{"deepseek/deepseek-flash":0.8}`。超预算时，较早的完整历史会折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 只改变续聊边界，不删除旧事件。
 
 较大的工具结果会先完整归档，再把包含路径、大小和校验值的引用交给模型。模型可用 `read` 分段取回归档文本。归档失败时仍使用原始结果；日志写入失败则停止后续工具或模型步骤。重复阶段性成果会触发停滞保护；连续十二步未执行工具或提交最终答复时也会结束本轮，避免持续占用请求队列。工具已执行但结果未成功入库时，下一轮只标记结果未知，避免盲目重试。
+
+## 代码结构与依赖边界
+
+- `src/application/`：输入去重、命令、排队和请求流程，以及请求状态视图。
+- `src/agent/`：pi 会话装配、执行协议与控制、工具事实记录和工具访问策略。
+- `src/context/`：Model Context Projection 的回放、预算、摘要、checkpoint 和工具结果视图。
+- `src/telegram/`：输入、排版、独立事件视图、交付与恢复；旧版交付语义集中保留。
+- `src/runtime/`：事件契约、SQLite／JSONL 存储、归档、增量读取及纯事件解释规则。
+- `src/main.ts`：配置和依赖装配、启动及关闭。
+
+Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一份已提交日志，不调用其他 Projection，也不读取其他视图的缓存或派生状态。共享的送达与事件身份规则只解释事件，不维护额外事实。模型上下文内的回放、预算和摘要属于同一视图的实现步骤；checkpoint 依据日志校验后才能复用。Telegram 交付与应用恢复是写入事实的编排，和只读事件视图区分。
+
+测试保留在 `test/`，通过应用入口、可控模型／MCP 服务、临时存储和模拟 Telegram 验证行为。目录调整不改变启动命令、数据路径、事件格式或依赖版本。
 
 ## 本机文件工具
 

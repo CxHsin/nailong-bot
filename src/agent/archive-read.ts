@@ -1,6 +1,7 @@
+import { readableResult } from "../runtime/tool-archive.js";
 import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import type { RuntimeLog, StoredEvent, ToolArchive, ToolResult } from "./runtime-log.js";
+import type { RuntimeLog, StoredEvent, ToolArchive, ToolResult } from "../runtime/runtime-types.js";
 
 const MAX_RESPONSE_BYTES = 7500;
 
@@ -21,7 +22,7 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
       const result = await log.recoverArchive(archive, source);
       const serialized = JSON.stringify(result);
       if (source && serialized !== JSON.stringify(source)) throw new Error("工具归档与事件结果不一致");
-      const lines = (await import("./runtime-log.js")).readableResult(result).split("\n");
+      const lines = readableResult(result).split("\n");
       const offset = args.offset ?? 1;
       const limit = args.limit ?? 120;
       if (!Number.isInteger(offset) || offset < 1 || !Number.isInteger(limit) || limit < 1) {

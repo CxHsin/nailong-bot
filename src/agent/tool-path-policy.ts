@@ -26,7 +26,7 @@ function inside(root: string, path: string) {
 }
 export async function createToolPathPolicy(dataDir: string, promptFile: string) {
   const data = await physicalPath(dataDir);
-  const program = await physicalPath(dirname(fileURLToPath(import.meta.url)));
+  const program = await physicalPath(resolve(dirname(fileURLToPath(import.meta.url)), ".."));
   const application = dirname(program);
   const prompt = await physicalPath(promptFile);
   return async (tool: string, args: Record<string, unknown>) => {

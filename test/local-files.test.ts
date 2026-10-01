@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
 
 for (const tinyfishUnavailable of [false, true]) {
   test(`owner can use local files through real pi when TinyFish is ${tinyfishUnavailable ? "unavailable" : "not configured"}`, { timeout: 60_000 }, async (t) => {

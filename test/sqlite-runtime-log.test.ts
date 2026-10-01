@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 
 test("SQLite log commits ordered batches with stable identities across readers and restart", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "sqlite-log-"));

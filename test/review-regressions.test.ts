@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test, { type TestContext } from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createRuntimeLog } from "../src/runtime-log.js";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
-import { planTelegramText } from "../src/telegram-layout.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
+import { planTelegramText } from "../src/telegram/telegram-layout.js";
 
 const update = { userId: 42, chatType: "private", text: "处理消息", messageId: 100 };
 async function directory(t: TestContext) {

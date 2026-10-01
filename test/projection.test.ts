@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { assistantText } from "../src/projection.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { assistantText } from "../src/agent/model-message.js";
 import { getModel } from "@mariozechner/pi-ai";
-import { createRuntimeLog } from "../src/runtime-log.js";
+import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] };

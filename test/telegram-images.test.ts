@@ -6,11 +6,12 @@ import { join } from "node:path";
 import { Bot } from "grammy";
 import { Response as ApiResponse } from "node-fetch";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
-import { registerTelegramInput, downloadTelegramPhoto } from "../src/telegram-input.js";
-import { estimateInput, summaryInput } from "../src/context-budget.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
+import { registerTelegramInput, downloadTelegramPhoto } from "../src/telegram/telegram-input.js";
+import { estimateInput } from "../src/context/input-budget.js";
+import { summaryInput } from "../src/context/history-summary.js";
 
 const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1cAAAAASUVORK5CYII=" };
 function update(id: number, owner = 42, caption?: string, text?: string) {

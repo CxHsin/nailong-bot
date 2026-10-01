@@ -1,22 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import type { ToolResultMessage } from "@mariozechner/pi-ai";
-
-export type StoredEvent = {
-  type: string;
-  at: string;
-  requestId?: string;
-  [key: string]: unknown;
-};
-
-export type ToolResult = {
-  content: ToolResultMessage["content"];
-  details: unknown;
-  isError: boolean;
-};
-export type ToolArchive = { path: string; bytes: number; sha256: string;
-  rawPath: string; rawBytes: number; rawSha256: string };
+import type { ToolArchive, ToolResult } from "./runtime-types.js";
 
 export function archivePlaceholder(toolName: string, archive: ToolArchive): ToolResult["content"] {
   return [{ type: "text", text: `工具结果已归档。工具：${toolName}；可读取的 JSONL 归档路径：${archive.path}；该归档文件字节数：${archive.bytes}；该归档文件 SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }];
@@ -35,35 +20,9 @@ export function readableResult(result: ToolResult): string {
     .map((part, index) => JSON.stringify({ part: index + 1, text: part })).join("\n");
 }
 
-export function createRuntimeLog(dataDir: string) {
-  const eventFile = join(dataDir, "events.jsonl");
+export function createToolArchive(dataDir: string) {
   const archiveDir = resolve(dataDir, "tool-results");
-
   return {
-    async bytes(): Promise<number> {
-      try { return (await stat(eventFile)).size; }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
-        throw error;
-      }
-    },
-    async read(): Promise<StoredEvent[]> {
-      let content: string;
-      try { content = await readFile(eventFile, "utf8"); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
-      return content.split("\n").filter(Boolean).map((line) => JSON.parse(line) as StoredEvent);
-    },
-    async append(event: Omit<StoredEvent, "at">): Promise<void> {
-      await mkdir(dataDir, { recursive: true });
-      const file = await open(eventFile, "a");
-      try {
-        await file.writeFile(`${JSON.stringify({ ...event, at: new Date().toISOString() })}\n`, "utf8");
-        await file.sync();
-      } finally { await file.close(); }
-    },
     async archive(result: ToolResult) {
       const serialized = JSON.stringify(result);
       const rawSha256 = createHash("sha256").update(serialized).digest("hex");
@@ -145,32 +104,5 @@ export function createRuntimeLog(dataDir: string) {
       const inside = relative(archiveDir, resolve(dataDir, pathname));
       return !!inside && !inside.startsWith("..") && !isAbsolute(inside) && pathname.endsWith(".txt");
     },
-  };
-}
-
-export type RuntimeLog = Omit<ReturnType<typeof createRuntimeLog>, "append"> & {
-  append(event: Omit<StoredEvent, "at">): Promise<unknown>;
-  appendBatch?(events: Array<Omit<StoredEvent, "at">>): Promise<unknown>;
-  readSince?(afterSequence: number): Promise<StoredEvent[]>;
-};
-
-/** Read a fresh committed prefix while decoding each SQLite event only once per view. */
-export function createEventReader(log: RuntimeLog): () => Promise<StoredEvent[]> {
-  if (!log.readSince) return () => log.read();
-  const events: StoredEvent[] = [];
-  let cursor = 0;
-  let queue = Promise.resolve();
-  return () => {
-    const next = queue.then(async () => {
-      const additions = await log.readSince!(cursor);
-      if (additions.length) {
-        events.push(...additions);
-        cursor = Number(additions.at(-1)!.sequence);
-      }
-      // Readers retain their own prefix even when later reads observe newly committed events.
-      return events.slice();
-    });
-    queue = next.then(() => {}, () => {});
-    return next;
   };
 }

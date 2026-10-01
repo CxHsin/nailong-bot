@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
-import type { StoredEvent } from "./runtime-log.js";
-import { sourceDigest } from "./projection.js";
+import type { StoredEvent } from "../runtime/runtime-types.js";
+import { sourceDigest } from "../runtime/event-digest.js";
 
 export type Checkpoint = { version: 2; id: string; boundary: string; through: number; sourceDigest: string;
   lastEventDigest: string; summaryStrategy: "full-result-v1" | "structured-text-v1";

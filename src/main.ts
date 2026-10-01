@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
 import { Bot, GrammyError } from "grammy";
-import { createApp, DeliveryRejected } from "./app.js";
-import { createPiAgent } from "./pi-agent.js";
-import { createSqliteRuntimeLog } from "./sqlite-runtime-log.js";
-import { planTelegramText } from "./telegram-layout.js";
-import { registerTelegramInput, downloadTelegramPhoto } from "./telegram-input.js";
+import { createApp, DeliveryRejected } from "./application/app.js";
+import { createPiAgent } from "./agent/pi-agent.js";
+import { createSqliteRuntimeLog } from "./runtime/sqlite-runtime-log.js";
+import { planTelegramText } from "./telegram/telegram-layout.js";
+import { registerTelegramInput, downloadTelegramPhoto } from "./telegram/telegram-input.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();

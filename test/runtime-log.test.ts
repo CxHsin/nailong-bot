@@ -5,9 +5,9 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createRuntimeLog } from "../src/runtime-log.js";
+import { createApp } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 
 test("large tool result is durably archived, pruned, and readable with the existing read tool", { timeout: 60_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-runtime-log-"));

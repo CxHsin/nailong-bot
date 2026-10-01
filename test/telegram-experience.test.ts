@@ -4,10 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp, DeliveryRejected } from "../src/app.js";
-import { createPiAgent } from "../src/pi-agent.js";
-import { createSqliteRuntimeLog } from "../src/sqlite-runtime-log.js";
-import { formatMarkdownForTelegram } from "../src/telegram-format.js";
+import { createApp, DeliveryRejected } from "../src/application/app.js";
+import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
+import { formatMarkdownForTelegram } from "../src/telegram/telegram-format.js";
 
 test("structured deltas remain hidden until complete protocol validation", { timeout: 30_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-cadence-"));

@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectDeliveredChat, projectRequestState, projectTelegramSegment } from "../src/runtime-projections.js";
-import { replayToolResultView, toolResultView } from "../src/tool-result-projection.js";
-import type { StoredEvent, ToolResult } from "../src/runtime-log.js";
+import { projectDeliveredChat, projectRequestState } from "../src/application/runtime-projections.js";
+import { projectTelegramSegment } from "../src/telegram/telegram-events.js";
+import { replayToolResultView, toolResultView } from "../src/context/tool-result-projection.js";
+import type { StoredEvent, ToolResult } from "../src/runtime/runtime-types.js";
 
 const at = "2026-01-01T00:00:00Z";
 const event = (value: { type: string; [key: string]: unknown }): StoredEvent => ({ ...value, at });

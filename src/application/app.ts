@@ -1,18 +1,18 @@
+import { createDeliveryLifecycle } from "../telegram/telegram-delivery.js";
+import { handleCommand } from "./commands.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { ImageContent } from "@mariozechner/pi-ai";
 import { randomUUID } from "node:crypto";
-import { createRuntimeLog, createEventReader, type RuntimeLog } from "./runtime-log.js";
-import { createTelegramProjection, type TelegramTransport } from "./telegram-projection.js";
-import { projectDeliveredChat, projectFinalAnswer, projectRecoverableTelegram,
+import { createRuntimeLog } from "../runtime/runtime-log.js";
+import { createEventReader } from "../runtime/event-reader.js";
+import type { RuntimeLog } from "../runtime/runtime-types.js";
+import { createTelegramProjection } from "../telegram/telegram-projection.js";
+import type { TelegramTransport } from "../telegram/telegram-types.js";
+import { projectDeliveredChat, projectFinalAnswer,
   projectRequestState } from "./runtime-projections.js";
 
-export type Update = { userId: number; chatType: string; text?: string; images?: ImageContent[]; messageId: number };
-export type Message = { role: "user" | "assistant"; text: string; images?: ImageContent[] };
-export type Request = { id: string; log: RuntimeLog; botPrompt?: string; botPromptVersion?: string; onText?: (textSegmentId: string) => Promise<void> };
-export class DeliveryRejected extends Error {
-  constructor(message: string, readonly retryAfterMs?: number) { super(message); }
-}
+import { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
+export { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
 
 export function createApp(options: {
   ownerId: number;
@@ -26,7 +26,7 @@ export function createApp(options: {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
   const readEvents = createEventReader(log);
   const telegram = options.telegram && createTelegramProjection({
-    log: { ...log, read: readEvents, readSince: undefined }, chatId: options.ownerId, ...options.telegram,
+    log, chatId: options.ownerId, ...options.telegram,
   });
   let queue = Promise.resolve();
   let pendingRequests = 0;
@@ -35,22 +35,8 @@ export function createApp(options: {
     return update.userId === options.ownerId && update.chatType === "private" && (!!update.text?.trim() || !!update.images?.length);
   }
 
-  async function notice(requestId: string, text: string) {
-    if (!telegram) return;
-    const textSegmentId = `${requestId}:output-notice`;
-    if (!(await log.read()).some((event) => event.textSegmentId === textSegmentId)) {
-      const events = [{ type: "text_snapshot", requestId, textSegmentId, protocolVersion: "json-text-v2",
-        contentKind: "notice", text }, { type: "text_finalized", requestId, textSegmentId,
-        protocolVersion: "json-text-v2", contentKind: "notice", text }];
-      if (log.appendBatch) await log.appendBatch(events);
-      else for (const event of events) await log.append(event);
-    }
-    await telegram.reconcile(textSegmentId);
-  }
-  async function isNewOutput(requestId: string) {
-    return (await log.read()).some((event) => event.type === "text_snapshot" &&
-      event.requestId === requestId && event.protocolVersion === "json-text-v2");
-  }
+  const delivery = createDeliveryLifecycle(log, telegram);
+  const { notice, isNewOutput } = delivery;
 
   async function process(update: Update, onStarted?: () => void): Promise<void> {
     let previous: Awaited<ReturnType<typeof log.read>>;
@@ -68,40 +54,10 @@ export function createApp(options: {
       catch { /* Preserve the storage failure. */ }
       throw error;
     }
-    const receipt = { type: "input_received", chatId: update.userId, messageId: update.messageId };
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text?.trim() || "请分析这张图片。";
-    if (!update.images?.length && /^\/prompt(?:\s|$)/.test(text)) {
-      const changesPrompt = text === "/prompt reset" || text.startsWith("/prompt set ");
-      const prompt = text === "/prompt reset" ? undefined : text.slice("/prompt set ".length).trim();
-      const events = changesPrompt && (prompt === undefined || prompt)
-        ? [receipt, { type: "bot_prompt_config", chatId: update.userId, version: randomUUID(), text: prompt }]
-        : [receipt];
-      if (log.appendBatch) await log.appendBatch(events);
-      else for (const event of events) await log.append(event);
-      onStarted?.();
-      if (text === "/prompt") {
-        const configured = (await log.read()).findLast((e) => e.type === "bot_prompt_config" && e.chatId === update.userId);
-        const prompt = typeof configured?.text === "string" ? configured.text :
-          (await readFile(options.promptFile ?? resolve("system-prompt.md"), "utf8")).trim();
-        await options.send(`当前 bot 提示词：\n${prompt}`, update);
-      } else if (text === "/prompt reset" || text.startsWith("/prompt set ")) {
-        const prompt = text === "/prompt reset" ? undefined : text.slice("/prompt set ".length).trim();
-        if (prompt !== undefined && !prompt) { await options.send("请在 /prompt set 后提供非空提示词。", update); return; }
-        await options.send(prompt === undefined ? "已恢复默认 bot 提示词，下一请求生效。" : "已设置当前聊天的 bot 提示词，下一请求生效。", update);
-      } else await options.send("查看：/prompt；设置：/prompt set 提示词；恢复默认：/prompt reset", update);
-      return;
-    }
-    if (!update.images?.length && text === "/reset") {
-      const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId },
-        { type: "reset" }];
-      if (log.appendBatch) await log.appendBatch(batch);
-      else for (const event of batch) await log.append(event);
-      onStarted?.();
-      await options.send("已开始新对话，旧记录仍保留在本地。", update);
-      return;
-    }
+    if (await handleCommand(log, options, update, text, onStarted)) return;
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
     try {
@@ -178,39 +134,7 @@ export function createApp(options: {
   }
 
   return {
-    async recover(): Promise<void> {
-      const events = await log.read();
-      const open = projectRequestState(events).open;
-      for (const requestId of open) await log.append({ type: "request_interrupted", requestId });
-      if (telegram) {
-        const { segments } = projectRecoverableTelegram(events);
-        for (const segment of segments) {
-          const snapshot = events.findLast((event) => event.type === "text_snapshot" && event.textSegmentId === segment);
-          // V2 recovery never sends old body content; only durable notices may retry known failures.
-          const knownFailure = events.some((event) => event.type === "telegram_delivery_failed" && event.textSegmentId === segment);
-          if (snapshot?.protocolVersion !== "json-text-v2" || snapshot.contentKind === "notice" || knownFailure) await telegram.reconcile(segment);
-        }
-        const unfinished = new Set(events.filter((event) => event.type === "text_snapshot" &&
-          event.protocolVersion === "json-text-v2" && event.contentKind !== "notice" && event.requestId &&
-          !projectRequestState(events).delivered.has(event.requestId)).map((event) => event.requestId!));
-        for (const requestId of unfinished) {
-          const final = events.findLast((event) => event.type === "text_finalized" && event.requestId === requestId && event.contentKind === "final");
-          if (!await telegram.requestDelivered(requestId) || !final || !await telegram.finalDelivered(String(final.textSegmentId))) {
-            await notice(requestId, "这次回复可能不完整：处理曾中断。已发送内容保留；你可以要求继续或重新发送。");
-          }
-        }
-        const current = await log.read();
-        for (const event of projectRecoverableTelegram(current).finals) {
-          if (!await telegram.finalDelivered(String(event.textSegmentId)) || !await telegram.requestDelivered(event.requestId!) ||
-            projectRequestState(current).delivered.has(event.requestId!)) continue;
-          if (!current.some((item) => item.type === "answer_generated" && item.requestId === event.requestId)) {
-            await log.append({ type: "answer_generated", requestId: event.requestId, text: event.text });
-          }
-          await log.append({ type: "delivery_succeeded", requestId: event.requestId,
-            textSegmentId: event.textSegmentId });
-        }
-      }
-    },
+    recover: delivery.recover,
     handle(update: Update, onStarted?: () => void): Promise<void> {
       if (!accepts(update)) return Promise.resolve();
       pendingRequests++;

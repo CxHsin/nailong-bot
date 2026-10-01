@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createApp, DeliveryRejected } from "../src/app.js";
+import { createApp, DeliveryRejected } from "../src/application/app.js";
 
 test("owner can chat, restart, and reset without deleting the event log", async () => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-agent-"));
