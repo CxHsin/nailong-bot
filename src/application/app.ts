@@ -10,6 +10,8 @@ import { createTelegramProjection } from "../telegram/telegram-projection.js";
 import type { TelegramTransport } from "../telegram/telegram-types.js";
 import { projectDeliveredChat, projectFinalAnswer,
   projectRequestState } from "./runtime-projections.js";
+import { commitMemoryLearning } from "./memory-learning.js";
+import type { MemoryDynamics } from "../memory/dynamics.js";
 
 import { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
 export { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
@@ -22,6 +24,8 @@ export function createApp(options: {
   telegram?: TelegramTransport;
   send: (text: string, update: Update, onChunk?: (index: number, total: number) => Promise<void>) => Promise<void>;
   answer: (messages: Message[], request: Request) => Promise<string>;
+  memoryDynamics?: Partial<MemoryDynamics>;
+  memoryVector?: (text: string) => number[] | undefined;
 }) {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
   const readEvents = createEventReader(log);
@@ -131,11 +135,19 @@ export function createApp(options: {
       if (telegram && await isNewOutput(id)) {
         await notice(id, "这次回复尚未完成，已发送内容保留。你可以要求继续或重新生成。");
       } else await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
+    } finally {
+      await commitMemoryLearning(log, options.ownerId, options.memoryDynamics, options.memoryVector).catch(async () => {
+        await log.append({ type: "memory_degraded", requestId: id, reason: "learning_commit_unavailable" }).catch(() => undefined);
+      });
     }
   }
 
   return {
-    recover: delivery.recover,
+    recover(): Promise<void> {
+      const next = queue.then(async () => { await delivery.recover(); await commitMemoryLearning(log, options.ownerId, options.memoryDynamics, options.memoryVector); });
+      queue = next.catch(() => undefined);
+      return next;
+    },
     handle(update: Update, onStarted?: () => void): Promise<void> {
       if (!accepts(update)) return Promise.resolve();
       pendingRequests++;

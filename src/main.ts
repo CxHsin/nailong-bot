@@ -74,6 +74,7 @@ async function main(): Promise<void> {
       retryAfter: (error) => error instanceof DeliveryRejected ? error.retryAfterMs : undefined,
     },
     answer: agent.answer,
+    memoryVector: agent.memoryVector,
     send: async (text, update, onChunk) => {
       const chunks = planTelegramText(text);
       for (const [index, chunk] of chunks.entries()) {

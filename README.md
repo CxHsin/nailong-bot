@@ -58,6 +58,8 @@ Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一�
 
 可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`，使用独立的 OpenAI 兼容 embeddings 服务；地址填写到 `/v1` 等基础路径，不包含 `/embeddings`。`EMBEDDING_TIMEOUT_MS` 默认 3000，超时或服务错误降级为本地字面查询，后台逐步补齐向量。向量缓存位于 `data/embeddings.sqlite`，按服务、模型和预处理版本隔离；不完整配置时不启用语义召回。密钥不写入运行日志。
 
+`akasha-v1` 只强化自动融合排名前八个且确实展示原话的节点，不以工具补查的第九名补位。请求结束并确认至少一段成果或最终正文完整送达后，先追加 `memory_learned` 事实，再重放图状态；重启补提交不会重复学习。纯查询不扣资源，排序分数不是概率，学习增量使用有界单调映射。节点强度、边权的指数时间常数分别为 7 天、14 天，短期资源按 30 分钟时间常数恢复，不是半衰期；原话不会因自然衰减删除。
+
 ## 验证
 
 `npm run typecheck`、`npm test`、`npm run build`。

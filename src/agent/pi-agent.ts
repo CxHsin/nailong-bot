@@ -18,6 +18,7 @@ import { createMemoryProjection } from "../memory/projection.js";
 import { memoryTools } from "../memory/tools.js";
 import type { MemoryBudget } from "../application/memory-context.js";
 import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
+import type { MemoryDynamics } from "../memory/dynamics.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -31,6 +32,8 @@ export async function createPiAgent(options: {
   modelBudgetRatios?: Record<string, number>;
   memoryBudget?: MemoryBudget;
   embedding?: EmbeddingConfig;
+  memoryDynamics?: Partial<MemoryDynamics>;
+  memoryNow?: () => number;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -47,6 +50,7 @@ export async function createPiAgent(options: {
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
   const embedding = options.embedding ? createEmbeddingClient(options.dataDir, options.embedding) : undefined;
   return {
+    memoryVector: (text: string) => embedding?.cached(text),
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
@@ -59,7 +63,7 @@ export async function createPiAgent(options: {
       await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
       const userId = request ? (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user")?.chatId : undefined;
-      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding }) : undefined;
+      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding, dynamics: options.memoryDynamics, now: options.memoryNow }) : undefined;
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });

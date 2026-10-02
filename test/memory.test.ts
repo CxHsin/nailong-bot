@@ -10,10 +10,10 @@ import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 
 type Payload = { messages: Array<{ role: string; content?: unknown }>; tools?: unknown[] };
 let toolSequence = 0;
-function answer(res: ServerResponse, text: string, tool?: { name: string; args: unknown }) {
+function answer(res: ServerResponse, text: string, tool?: { name: string; args: unknown }, kind = "final") {
   const delta = tool ? { tool_calls: [{ index: 0, id: `memory-call-${++toolSequence}`, type: "function",
     function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] } :
-    { content: JSON.stringify({ type: "final", text }) };
+    { content: JSON.stringify({ type: kind, text }) };
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: tool ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
 }
@@ -32,12 +32,13 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, ...extra };
   let agent = await createPiAgent(options);
   const sent: string[] = [];
-  const makeApp = () => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, send: async (text) => { sent.push(text); } });
+  const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, send: async (text) => { sent.push(text); }, ...overrides });
   let app = makeApp(); let id = 0;
   t.after(async () => { await agent.close(); server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
-  return { dir, log, seen, sent,
+  return { dir, log, seen, sent, makeApp,
+    recover: () => app.recover(),
     send: (text: string) => app.handle({ userId: 42, chatType: "private", text, messageId: ++id }),
-    async restart() { await agent.close(); agent = await createPiAgent(options); app = makeApp(); },
+    async restart(clearCaches: string[] = []) { await agent.close(); for (const name of clearCaches) await rm(join(dir, name), { force: true }); agent = await createPiAgent(options); app = makeApp(); },
   };
 }
 
@@ -309,4 +310,137 @@ test("background long-message indexing is not limited by the foreground total ti
   await fixture.send("索引"); await eventually(() => completed >= 4);
   await fixture.send("/reset"); await fixture.send("异义");
   assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /🪐/);
+});
+
+test("delivery reinforces only the automatic top eight actually shown and recovery never repeats it", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { memoryBudget: { maxTokens: 1500 } });
+  for (let index = 0; index < 12; index++) await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `activation-${index}`, text: `limboo 战士${index}` });
+  await fixture.send("/reset"); await fixture.send("limboo");
+  const events = await fixture.log.read();
+  const snapshot = events.findLast((event) => event.type === "memory_recalled")!;
+  const shown = events.findLast((event) => event.type === "memory_presented")!.shown as Array<{ nodeId: string }>;
+  assert.ok(shown.length > 8);
+  const learning = events.filter((event) => event.type === "memory_learned" && event.requestId === snapshot.requestId);
+  assert.equal(learning.length, 1);
+  const expected = (snapshot.candidates as Array<{ nodeId: string }>).slice(0, 8).map((candidate) => candidate.nodeId);
+  assert.deepEqual((learning[0]!.activated as Array<{ nodeId: string }>).map((candidate) => candidate.nodeId), expected);
+  await fixture.restart(); await fixture.recover(); await fixture.recover();
+  assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_learned" && event.requestId === snapshot.requestId).length, 1);
+});
+
+test("unshown top-eight candidates are skipped without substituting the ninth", async (t) => {
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (data.messages.at(-1)!.role === "tool") answer(res, "答复");
+    else answer(res, "", { name: "memory_search", args: { query: "private_ninth", limit: 1 } });
+  }, { memoryBudget: { maxTokens: 350 } });
+  for (let index = 0; index < 9; index++) await fixture.log.append({ type: "message", role: "user", chatId: 42,
+    requestId: `unshown-${index === 8 ? 9 : index}`, text: index === 8 ? "limboo private_ninth" : `limboo rare_private ${index}` });
+  await fixture.send("/reset"); await fixture.send("limboo rare_private");
+  const events = await fixture.log.read();
+  assert.equal((events.findLast((event) => event.type === "memory_recalled")!.candidates as Array<{ nodeId: string }>)[8]!.nodeId, "unshown-9");
+  const activated = events.findLast((event) => event.type === "memory_learned")!.activated as Array<{ nodeId: string }>;
+  assert.ok(activated.length > 0 && activated.length < 8);
+  assert.ok(!activated.some((item) => item.nodeId === "unshown-9"));
+  assert.ok(events.some((event) => event.type === "memory_presented" && (event.shown as Array<{ nodeId: string }>).some((item) => item.nodeId === "unshown-9")));
+});
+
+test("failed final delivery does not learn, but a delivered result in a failed request does", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "old-failure", text: "limboo" });
+  const rejected = fixture.makeApp({ send: async (text) => { if (text === "答复") throw new Error("transport failure"); } });
+  await rejected.handle({ userId: 42, chatType: "private", text: "limboo", messageId: 100 });
+  assert.ok(!(await fixture.log.read()).some((event) => event.type === "memory_learned"));
+  let calls = 0;
+  const partial = await memoryFixture(t, (_data, res) => {
+    if (++calls === 1) answer(res, "已送达的阶段成果", undefined, "result");
+    else { res.writeHead(401); res.end(JSON.stringify({ error: { message: "failure" } })); }
+  });
+  await partial.log.append({ type: "message", role: "user", chatId: 42, requestId: "old-partial", text: "limboo" });
+  let telegramId = 0;
+  const app = partial.makeApp({ telegram: { send: async () => ++telegramId, edit: async () => {} } });
+  await app.handle({ userId: 42, chatType: "private", text: "limboo", messageId: 200 });
+  const events = await partial.log.read();
+  assert.ok(events.some((event) => event.type === "request_failed"));
+  const learning = events.findLast((event) => event.type === "memory_learned")!;
+  assert.ok(learning);
+  assert.deepEqual((learning.activated as Array<{ nodeId: string }>).map((item) => item.nodeId), ["old-partial"]);
+});
+
+test("recovery supplements an interrupted learning commit once, using the recorded snapshot", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "old-recovery", text: "limboo" });
+  const interrupted = fixture.makeApp({ log: { ...fixture.log, append: async (event) => {
+    if (event.type === "memory_learned") throw new Error("simulated interruption");
+    return fixture.log.append(event);
+  } } });
+  await interrupted.handle({ userId: 42, chatType: "private", text: "limboo", messageId: 100 });
+  assert.ok(!(await fixture.log.read()).some((event) => event.type === "memory_learned"));
+  await fixture.log.append({ type: "memory_excluded", nodeId: "old-recovery" });
+  await fixture.recover(); await fixture.recover();
+  const learning = (await fixture.log.read()).filter((event) => event.type === "memory_learned");
+  assert.equal(learning.length, 1);
+  assert.deepEqual(learning[0]!.activated, []);
+});
+
+test("late delivered messages and vector-cache removal never rewrite learned initialization", async (t) => {
+  const indexed = new Set<string>();
+  const now = Date.now() + 60_000;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    input.forEach((text) => indexed.add(text));
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: text.includes("surgery") ? [0, 1] : [1, 0] })) }));
+  });
+  const fixture = await memoryFixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "tool") answer(res, String(last.content));
+    else if (last.content === "查状态") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else answer(res, "答复");
+  }, { embedding: { baseUrl, model: "frozen", apiKey: "test" }, memoryNow: () => now });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "frozen", text: "limboo daily" });
+  await fixture.send("索引"); await eventually(() => indexed.has("limboo daily"));
+  await fixture.send("limboo");
+  const initial = (await fixture.log.read()).find((event) => event.type === "memory_initialized" && event.nodeId === "frozen")!;
+  assert.equal(initial.salience, 0);
+  await fixture.log.append({ type: "text_finalized", requestId: "frozen", textSegmentId: "late-frozen", contentKind: "final", text: "surgery" });
+  await fixture.log.append({ type: "delivery_succeeded", requestId: "frozen" });
+  await fixture.send("查状态"); await eventually(() => indexed.has("surgery"));
+  const inspect = async (messageId: number) => {
+    const app = fixture.makeApp({ send: async (text) => { if (text.startsWith("[")) throw new Error("no inspection delivery"); } });
+    await app.handle({ userId: 42, chatType: "private", messageId, text: "查状态" });
+    const output = fixture.seen.at(-1)!.messages.findLast((message) => message.role === "tool")!;
+    return JSON.parse(String(output.content)).find((item: { nodeId: string }) => item.nodeId === "frozen").state;
+  };
+  const state = await inspect(1000);
+  assert.equal(state.salience, 0);
+  assert.ok(state.resource < 1);
+  assert.ok(state.strength > 2.1 * Math.exp(-(now - Number(initial.initializedAt)) / (7 * 86400_000)));
+  await fixture.restart(["memory.sqlite", "embeddings.sqlite"]);
+  const rebuilt = await inspect(1001);
+  assert.equal(rebuilt.salience, 0);
+  assert.equal(rebuilt.strength, state.strength); assert.equal(rebuilt.resource, state.resource);
+  assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_initialized" && event.nodeId === "frozen").length, 1);
+});
+
+test("existing original context qualifies for learning but summary-only history does not", async (t) => {
+  const summary = "## Goal\nContinue.\n## Progress\nPast limboo discussion.\n## Constraints\nPreserve evidence.\n## Decisions\nUse sources.\n## Next Steps\nAnswer.\n## Critical Context\nSummary is lossy.";
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (JSON.stringify(data.messages).includes("HISTORY_COMPACTION")) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: summary }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    } else answer(res, "答复");
+  }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
+  for (let index = 0; index < 5; index++) {
+    const requestId = `summary-source-${index}`;
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId, text: `limboo original_marker_${index} ` + "x".repeat(2500) });
+    await fixture.log.append({ type: "answer_generated", requestId, text: "y".repeat(2500) });
+    await fixture.log.append({ type: "delivery_succeeded", requestId });
+    await fixture.log.append({ type: "request_completed", requestId });
+  }
+  await fixture.send("limboo");
+  const events = await fixture.log.read();
+  const shown = events.findLast((event) => event.type === "memory_presented")!.shown as Array<{ nodeId: string; existing: boolean }>;
+  const activated = events.findLast((event) => event.type === "memory_learned")!.activated as Array<{ nodeId: string }>;
+  assert.ok(shown.length > 0 && shown.every((item) => item.existing));
+  assert.ok(activated.length > 0 && activated.length < 5);
+  assert.deepEqual(new Set(activated.map((item) => item.nodeId)), new Set(shown.map((item) => item.nodeId)));
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /历史摘要/);
 });
