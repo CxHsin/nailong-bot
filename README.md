@@ -50,6 +50,10 @@ Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一�
 
 文件工具不依赖 TinyFish。没有配置 TinyFish 或连接失败时仍可使用；`find` 和 `grep` 使用 pi 管理的 fd／ripgrep，缺失时 pi 会尝试下载。
 
+## 长期记忆
+
+私聊 Agent 可用 `memory_search` 搜索中文或混合专名，再用 `memory_read` 按节点及消息引用分段读取原话。节点保存 User 与确认送达的 Assistant 正文来源，不包含状态、草稿和未送达文字。`/reset` 不删除长期记忆，`data/memory.sqlite` 是可由运行日志重建的派生索引，不是另一份运行事实源。查询本身不会强化记忆。
+
 ## 验证
 
 `npm run typecheck`、`npm test`、`npm run build`。

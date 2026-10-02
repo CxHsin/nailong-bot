@@ -66,6 +66,7 @@ export function createApp(options: {
       // Requests are serialized by this app. An older open request cannot still be running here.
       for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
       const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId, requestId: id,
+        originalText: update.text ?? null,
         ...(update.images?.length ? { images: update.images } : {}) },
         { type: "request_started", requestId: id }];
       if (log.appendBatch) await log.appendBatch(batch);

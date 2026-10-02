@@ -14,6 +14,8 @@ import { createBoundedRead } from "./archive-read.js";
 import { createRuntimeLog } from "../runtime/runtime-log.js";
 import { attachExecution } from "./execution.js";
 import { EXECUTION_PROMPT, protocolText } from "./output-protocol.js";
+import { createMemoryProjection } from "../memory/projection.js";
+import { memoryTools } from "../memory/tools.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -51,6 +53,8 @@ export async function createPiAgent(options: {
         systemPromptOverride: () => systemPrompt, settingsManager });
       await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
+      const userId = request ? (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user")?.chatId : undefined;
+      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId }) : undefined;
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });
@@ -62,8 +66,9 @@ export async function createPiAgent(options: {
         cwd: options.dataDir, agentDir: options.dataDir,
         authStorage, modelRegistry: ModelRegistry.create(authStorage),
         settingsManager, resourceLoader: loader, model, thinkingLevel: "off",
-        tools: ["read", "write", "edit", "ls", "find", "grep", ...(tinyfish ? ["web_search", "web_fetch"] : [])],
+        tools: ["read", "write", "edit", "ls", "find", "grep", ...(memory ? ["memory_search", "memory_read"] : []), ...(tinyfish ? ["web_search", "web_fetch"] : [])],
         customTools: [createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)),
+          ...(memory && request ? memoryTools(memory, request.id) : []),
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
       const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request);

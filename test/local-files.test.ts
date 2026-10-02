@@ -58,7 +58,7 @@ for (const tinyfishUnavailable of [false, true]) {
     await app.handle({ userId: 42, chatType: "private", text: "将上述结论保存到本地", messageId: 1 });
     assert.equal(await readFile(note, "utf8"), "# Idea\n把有趣的结论保留下来。\n");
     assert.match(replies.at(-1) ?? "", /Successfully wrote/);
-    assert.deepEqual([...offeredTools].sort(), ["edit", "find", "grep", "ls", "read", "write"]);
+    assert.deepEqual([...offeredTools].sort(), ["edit", "find", "grep", "ls", "memory_read", "memory_search", "read", "write"]);
     for (const [index, action] of actions.slice(1).entries()) {
       await app.handle({ userId: 42, chatType: "private", text: action.text, messageId: index + 2 });
       assert.match(replies.at(-1) ?? "", action.expected, action.name);
