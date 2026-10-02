@@ -10,6 +10,18 @@ export function eventIdentity(event: StoredEvent, index: number): string {
 export function memoryExclusions(events: StoredEvent[]): Set<string> {
   return new Set(events.filter((e) => e.type === "memory_excluded" && typeof e.nodeId === "string").map((e) => String(e.nodeId)));
 }
+export function memoryQualification(events: StoredEvent[], node: MemoryNode) {
+  const assistant = node.messages.filter((message) => message.role === "assistant");
+  if (!assistant.length) return undefined;
+  const terminal = node.requestId ? events.find((event) => event.requestId === node.requestId &&
+    ["request_completed", "request_failed", "request_interrupted"].includes(event.type)) : undefined;
+  if (node.requestId && !terminal) return undefined;
+  const position = Math.max(terminal ? events.indexOf(terminal) : -1,
+    Math.min(...assistant.map((message) => message.availableSequence ?? -1)));
+  const settledAt = events[position]?.at;
+  if (!settledAt || !Number.isFinite(Date.parse(settledAt))) return undefined;
+  return { position, settledAt, deliveredSources: assistant.filter((message) => (message.availableSequence ?? -1) <= position).map((message) => message.id) };
+}
 export function memoryNodes(events: StoredEvent[], userId: number): MemoryNode[] {
   const excluded = memoryExclusions(events);
   const nodes: MemoryNode[] = [];

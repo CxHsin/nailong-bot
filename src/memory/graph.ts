@@ -36,7 +36,7 @@ export function memoryGraph(events: StoredEvent[], userId: number, vector?: (tex
   const initializations = [...states.values()].map((state): MemoryInitialization => ({ nodeId: state.id, userId, algorithm: MEMORY_ALGORITHM,
     salience: state.salience, strength: state.strength, resource: 1, at: state.at, mode: complete ? "semantic" : "semantic_unavailable" }));
   const applied = new Set<string>();
-  for (const event of events) {
+  for (const event of events.filter((item) => item.type === "memory_learned").sort((left, right) => Date.parse(String(left.settledAt)) - Date.parse(String(right.settledAt)))) {
     if (event.type !== "memory_learned" || event.userId !== userId || event.algorithm !== MEMORY_ALGORITHM ||
       !event.requestId || applied.has(event.requestId) || !states.has(event.requestId) || !Array.isArray(event.activated)) continue;
     const now = Date.parse(String(event.settledAt)); if (!Number.isFinite(now)) continue;

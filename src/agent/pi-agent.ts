@@ -20,6 +20,8 @@ import type { MemoryBudget } from "../application/memory-context.js";
 import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
 import type { MemoryDynamics } from "../memory/dynamics.js";
 import type { RecallConfig } from "../memory/recall.js";
+import { createMemoryBootstrap } from "../application/memory-bootstrap.js";
+import type { RuntimeLog } from "../runtime/runtime-types.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -36,6 +38,7 @@ export async function createPiAgent(options: {
   memoryDynamics?: Partial<MemoryDynamics>;
   memoryNow?: () => number;
   memoryRecall?: Partial<RecallConfig>;
+  memoryBootstrap?: boolean;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -51,8 +54,11 @@ export async function createPiAgent(options: {
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
   const embedding = options.embedding ? createEmbeddingClient(options.dataDir, options.embedding) : undefined;
+  const bootstrap = createMemoryBootstrap({ dataDir: options.dataDir, model, embedding, dynamics: options.memoryDynamics, recall: options.memoryRecall,
+    budget: options.memoryBudget, ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios });
   return {
     memoryVector: (text: string) => embedding?.cached(text),
+    initializeMemory: (log: RuntimeLog, userId: number) => bootstrap.start(log, userId),
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
@@ -83,6 +89,8 @@ export async function createPiAgent(options: {
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
       const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request, memory);
+      if (request && typeof userId === "number" && options.memoryBootstrap !== false)
+        void bootstrap.start(request.log, userId, request.id, { systemPrompt: session.agent.state.systemPrompt, messages: [], tools: session.agent.state.tools });
       session.agent.toolExecution = "sequential";
       const toolFailure = request ? attachToolRecording(session.agent, request) : () => undefined;
       try {
@@ -98,6 +106,6 @@ export async function createPiAgent(options: {
         return execution.finalText()!;
       } finally { session.dispose(); }
     },
-    async close(): Promise<void> { await embedding?.close(); await tinyfish?.close(); },
+    async close(): Promise<void> { await bootstrap.close(); await embedding?.close(); await tinyfish?.close(); },
   };
 }

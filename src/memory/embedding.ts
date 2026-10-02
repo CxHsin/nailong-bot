@@ -147,7 +147,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
     for (const job of jobs) if (job.text && !cached(job.text)) queued.set(sourceDigest(job.text), job);
     runWorker();
   }
-  return { cached, get, enqueue, turn, namespace, status: () => status,
+  return { cached, get, enqueue, turn, namespace, identity: baseNamespace, status: () => status,
     async close() { stopped = true; if (retry) clearTimeout(retry); queued.clear(); controllers.forEach((controller) => controller.abort());
       await Promise.allSettled([...pending.values()]); await worker; db.close(); },
   };

@@ -29,13 +29,14 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const log = createSqliteRuntimeLog(dir);
-  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, ...extra };
+  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, ...extra };
   let agent = await createPiAgent(options);
   const sent: string[] = [];
   const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, send: async (text) => { sent.push(text); }, ...overrides });
   let app = makeApp(); let id = 0;
   t.after(async () => { await agent.close(); server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
   return { dir, log, seen, sent, makeApp,
+    initializeMemory: () => agent.initializeMemory(log, 42),
     recover: () => app.recover(),
     send: (text: string) => app.handle({ userId: 42, chatType: "private", text, messageId: ++id }),
     async restart(clearCaches: string[] = []) { await agent.close(); for (const name of clearCaches) await rm(join(dir, name), { force: true }); agent = await createPiAgent(options); app = makeApp(); },
@@ -492,4 +493,157 @@ test("a greeting hub and unrelated noise cannot outrank a direct personal-name f
   assert.equal(results[0]!.nodeId, "specific");
   assert.ok(results.every((item) => Number.isFinite(item.score) && item.score >= 0));
   assert.ok(results.every((item) => item.paths.length <= 4 && item.paths.every((path) => path.length <= 4)));
+});
+
+async function historicalTurn(log: ReturnType<typeof createSqliteRuntimeLog>, requestId: string, text: string, at: number) {
+  await log.append({ type: "message", role: "user", chatId: 42, requestId, text, at: new Date(at).toISOString() });
+  await log.append({ type: "answer_generated", requestId, text: "历史答复", at: new Date(at + 100).toISOString() });
+  await log.append({ type: "delivery_succeeded", requestId, at: new Date(at + 200).toISOString() });
+  await log.append({ type: "request_completed", requestId, at: new Date(at + 300).toISOString() });
+}
+
+test("historical initialization causally learns old associations at original times, without future names", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  const old = Date.now() - 3 * 86400_000;
+  await historicalTurn(fixture.log, "history-game", "limboo 是我的朋友", old);
+  await historicalTurn(fixture.log, "history-care", "引流条每天换药", old + 60_000);
+  await historicalTurn(fixture.log, "history-link", "limboo 引流条", old + 120_000);
+  await historicalTurn(fixture.log, "history-future", "未来专名 zxyz", old + 180_000);
+  await fixture.initializeMemory();
+  const simulated = (await fixture.log.read()).filter((event) => event.type === "memory_learned" && event.origin === "historical");
+  assert.equal(simulated.length, 4);
+  assert.ok(simulated.every((event) => Date.parse(String(event.settledAt)) < old + 200_000));
+  const link = simulated.find((event) => event.requestId === "history-link")!;
+  assert.deepEqual(new Set((link.activated as Array<{ nodeId: string }>).map((item) => item.nodeId)), new Set(["history-game", "history-care"]));
+  assert.ok(simulated.filter((event) => event.requestId !== "history-future").every((event) =>
+    !(event.candidates as Array<{ nodeId: string }>).some((item) => item.nodeId === "history-future")));
+  await fixture.send("/reset"); await fixture.send("limboo");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /引流条每天换药/);
+  await fixture.restart(); await fixture.initializeMemory();
+  assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_learned" && event.origin === "historical").length, 4);
+});
+
+test("a stalled background initialization never blocks new chat and resumes its fixed boundary after restart", async (t) => {
+  let available = false;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    if (!available) { res.writeHead(503); res.end(); }
+    else embeddingResponse(res, input, [1, 0]);
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "bootstrap", apiKey: "test", timeoutMs: 30 } });
+  const old = Date.now() - 86400_000;
+  await historicalTurn(fixture.log, "resume-game", "limboo 是我的朋友", old);
+  await historicalTurn(fixture.log, "resume-care", "引流条每天换药", old + 60_000);
+  await historicalTurn(fixture.log, "resume-link", "limboo 引流条", old + 120_000);
+  const pendingInitialization = fixture.initializeMemory();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const started = performance.now(); await fixture.send("独立的新聊天");
+  assert.ok(performance.now() - started < 1000);
+  const onlineBefore = (await fixture.log.read()).filter((event) => event.type === "memory_learned" && event.origin === "online");
+  assert.equal(onlineBefore.length, 1);
+  await fixture.restart(); await pendingInitialization;
+  available = true; await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  assert.equal(events.filter((event) => event.type === "memory_bootstrap_started").length, 1);
+  assert.equal(events.filter((event) => event.type === "memory_learned" && event.origin === "online").length, 1);
+  const simulated = events.filter((event) => event.type === "memory_learned" && event.origin === "historical");
+  assert.equal(simulated.length, 3);
+  assert.ok(simulated.every((event) => event.requestId !== onlineBefore[0]!.requestId));
+});
+
+test("historical progress resumes after partial simulation and skips excluded and already-online requests", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  const old = Date.now() - 86400_000;
+  for (let index = 0; index < 12; index++) await historicalTurn(fixture.log, `partial-${index}`, `limboo 旧经历${index}`, old + index * 60_000);
+  await fixture.log.append({ type: "memory_excluded", nodeId: "partial-3" });
+  await fixture.log.append({ type: "memory_learned", userId: 42, requestId: "partial-7", algorithm: "akasha-v1", origin: "online", activated: [],
+    settledAt: new Date(old + 7 * 60_000 + 300).toISOString() });
+  const running = fixture.initializeMemory();
+  for (let tick = 0; tick < 200; tick++) {
+    if ((await fixture.log.read()).some((event) => event.type === "memory_bootstrap_progress")) break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await fixture.restart(); await running; await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  const simulated = events.filter((event) => event.type === "memory_learned" && event.origin === "historical");
+  assert.equal(simulated.length, 10); assert.equal(new Set(simulated.map((event) => event.requestId)).size, 10);
+  assert.ok(simulated.every((event) => event.requestId !== "partial-3" && event.requestId !== "partial-7"));
+  assert.ok(simulated.every((event) => !(event.activated as Array<{ nodeId: string }>).some((item) => item.nodeId === "partial-3")));
+  assert.equal(events.filter((event) => event.type === "memory_bootstrap_completed").length, 1);
+});
+
+test("legacy message-only history initializes stable original turn associations", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  const old = Date.now() - 86400_000;
+  for (const [index, text] of ["limboo 是我的朋友", "引流条每天换药", "limboo 引流条"].entries()) {
+    await fixture.log.append({ type: "message", role: "user", text, at: new Date(old + index * 60_000).toISOString() });
+    await fixture.log.append({ type: "message", role: "assistant", text: "旧版原话答复", at: new Date(old + index * 60_000 + 100).toISOString() });
+  }
+  await fixture.initializeMemory();
+  assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_learned" && event.origin === "historical").length, 3);
+  await fixture.send("/reset"); await fixture.send("limboo");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /引流条每天换药/);
+});
+
+test("late historical delivery warms its settlement prefix while retrieval remains causal", async (t) => {
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: text === "daily" ? [1, 0] : [0, 1] })) }));
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "late-history", apiKey: "test" } });
+  const old = Date.now() - 86400_000;
+  await fixture.log.append({ type: "message", role: "user", requestId: "late-a", chatId: 42, text: "daily", at: new Date(old).toISOString() });
+  await fixture.log.append({ type: "text_finalized", requestId: "late-a", textSegmentId: "late-a-final", contentKind: "final", text: "surgery", at: new Date(old + 100).toISOString() });
+  await historicalTurn(fixture.log, "early-b", "different", old + 1000);
+  await fixture.log.append({ type: "delivery_succeeded", requestId: "late-a", at: new Date(old + 2000).toISOString() });
+  await fixture.log.append({ type: "request_completed", requestId: "late-a", at: new Date(old + 2100).toISOString() });
+  await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  const initialized = events.find((event) => event.type === "memory_initialized" && event.nodeId === "late-a")!;
+  assert.ok(Math.abs(Number(initialized.salience) - 0.2111456180001683) < 1e-12);
+  const simulation = events.find((event) => event.type === "memory_learned" && event.requestId === "late-a")!;
+  assert.deepEqual(simulation.candidates, []);
+  const early = events.find((event) => event.type === "memory_learned" && event.requestId === "early-b")!;
+  assert.deepEqual(early.activated, []);
+});
+
+test("changed embedding configuration creates a new simulation identity without replaying committed learning twice", async (t) => {
+  const baseUrl = await embeddingService(t, (input, _model, res) => embeddingResponse(res, input, [1, 0]));
+  const config = { baseUrl, model: "old-history-model", apiKey: "test" };
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: config });
+  for (let index = 0; index < 12; index++) await historicalTurn(fixture.log, `model-history-${index}`, "limboo", Date.now() - 86400_000 + index * 60_000);
+  const running = fixture.initializeMemory();
+  for (let tick = 0; tick < 300; tick++) {
+    if ((await fixture.log.read()).some((event) => event.type === "memory_bootstrap_progress")) break;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  const partial = (await fixture.log.read()).filter((event) => event.type === "memory_learned");
+  assert.ok(partial.length > 0 && partial.length < 12);
+  config.model = "new-history-model";
+  await fixture.restart(); await running; await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  const starts = events.filter((event) => event.type === "memory_bootstrap_started");
+  assert.equal(starts.length, 2); assert.notEqual(starts[0]!.simulationId, starts[1]!.simulationId);
+  assert.equal(starts[0]!.through, starts[1]!.through);
+  const learning = events.filter((event) => event.type === "memory_learned");
+  assert.equal(learning.length, 12); assert.equal(new Set(learning.map((event) => event.requestId)).size, 12);
+  const progress = events.find((event) => event.type === "memory_bootstrap_progress" && event.simulationId === starts[1]!.simulationId)!;
+  assert.equal(progress.cursor, 3);
+});
+
+test("historical early reinforcement freezes a user-only baseline before a late assistant arrives", async (t) => {
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: text === "surgery" ? [0, 1] : [1, 0] })) }));
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "early-frozen", apiKey: "test" } });
+  const old = Date.now() - 86400_000;
+  await fixture.log.append({ type: "message", role: "user", requestId: "frozen-late-a", chatId: 42, text: "daily", at: new Date(old).toISOString() });
+  await fixture.log.append({ type: "text_finalized", requestId: "frozen-late-a", textSegmentId: "frozen-late-a-final", contentKind: "final", text: "surgery", at: new Date(old + 100).toISOString() });
+  await historicalTurn(fixture.log, "frozen-early-b", "different", old + 1000);
+  await fixture.log.append({ type: "delivery_succeeded", requestId: "frozen-late-a", at: new Date(old + 2000).toISOString() });
+  await fixture.log.append({ type: "request_completed", requestId: "frozen-late-a", at: new Date(old + 2100).toISOString() });
+  await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  const initial = events.find((event) => event.type === "memory_initialized" && event.nodeId === "frozen-late-a")!;
+  assert.equal(initial.salience, 0);
+  assert.deepEqual((events.find((event) => event.type === "memory_learned" && event.requestId === "frozen-early-b")!.activated as Array<{ nodeId: string }>).map((item) => item.nodeId), ["frozen-late-a"]);
+  assert.equal(events.filter((event) => event.type === "memory_initialized" && event.nodeId === "frozen-late-a").length, 1);
 });
