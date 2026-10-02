@@ -15,7 +15,7 @@ export async function recallMemory(memory: ReturnType<typeof createMemoryProject
     const candidates = await memory.search(query, 72, request.id);
     const snapshotId = randomUUID();
     await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId, query, version: "memory-v1",
-      candidates: candidates.map((c) => ({ nodeId: c.node.id, score: c.score, sources: c.sources })) });
+      degraded: memory.diagnostics(), candidates: candidates.map((c) => ({ nodeId: c.node.id, score: c.score, sources: c.sources })) });
     return { snapshotId, candidates };
   } catch {
     await request.log.append({ type: "memory_degraded", requestId: request.id, reason: "recall_unavailable" }).catch(() => undefined);

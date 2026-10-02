@@ -147,3 +147,166 @@ test("a rejected provider call never commits a memory presentation", async (t) =
   await f.log.append({ type: "reset" }); await f.send("limboo");
   assert.equal((await f.log.read()).some((e) => e.type === "memory_presented"), false);
 });
+
+test("remote embeddings recall a paraphrase after background indexing and reuse cached vectors", async (t) => {
+  let requests = 0; const indexed = new Set<string>();
+  const embeddingServer = createServer(async (req, res) => {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const input: string[] = JSON.parse(body).input; requests++;
+    input.forEach((text) => indexed.add(text));
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: /睡眠|作息/.test(text) ? [1, 0, 0] : [0, 1, 0] })) }));
+  });
+  await new Promise<void>((resolve) => embeddingServer.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => { embeddingServer.closeAllConnections(); embeddingServer.close(() => resolve()); }));
+  const address = embeddingServer.address(); assert.ok(address && typeof address !== "string");
+  const f = await memoryFixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "tool") answer(res, String(last.content));
+    else if (last.content === "有何作息规律") answer(res, "", { name: "memory_search", args: { query: "有何作息规律" } });
+    else answer(res, "已处理");
+  }, {
+    embedding: { baseUrl: `http://127.0.0.1:${address.port}/v1`, model: "test-embed", apiKey: "secret", timeoutMs: 100 },
+  });
+  await f.log.append({ type: "message", role: "user", chatId: 42, requestId: "sleep", text: "我的睡眠时间是晚上十一点" });
+  await f.log.append({ type: "reset" }); await f.send("启动索引");
+  for (let tick = 0; tick < 100 && !indexed.has("我的睡眠时间是晚上十一点"); tick++) await new Promise((resolve) => setTimeout(resolve, 10));
+  await f.send("有何作息规律");
+  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /我的睡眠时间是晚上十一点/);
+  assert.match(f.sent.at(-1)!, /dense/);
+  assert.equal(JSON.parse(f.sent.at(-1)!)[0].similarity, 1);
+  const before = requests; await f.send("有何作息规律");
+  assert.ok(requests - before < 3);
+  assert.doesNotMatch(JSON.stringify(await f.log.read()), /secret/);
+});
+
+test("embedding timeout preserves literal recall and records a safe degradation", async (t) => {
+  const stalled = createServer((_req, _res) => {});
+  await new Promise<void>((resolve) => stalled.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => { stalled.closeAllConnections(); stalled.close(() => resolve()); }));
+  const address = stalled.address(); assert.ok(address && typeof address !== "string");
+  const f = await memoryFixture(t, (_data, res) => answer(res, "答复"), {
+    embedding: { baseUrl: `http://127.0.0.1:${address.port}`, model: "test", apiKey: "private-key", timeoutMs: 30 },
+  });
+  await f.log.append({ type: "message", role: "user", chatId: 42, requestId: "old", text: "limboo 是战士" });
+  await f.log.append({ type: "reset" });
+  const started = performance.now(); await f.send("limboo");
+  assert.ok(performance.now() - started < 1000);
+  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /limboo 是战士/);
+  const events = await f.log.read(); assert.ok(events.some((e) => e.type === "memory_recalled" && e.degraded === "embedding_unavailable"));
+  assert.doesNotMatch(JSON.stringify(events), /private-key/);
+});
+
+async function embeddingService(t: TestContext, respond: (input: string[], model: string, res: ServerResponse) => void) {
+  const server = createServer(async (req, res) => {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const data = JSON.parse(body); respond(data.input, data.model, res);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  return `http://127.0.0.1:${address.port}`;
+}
+function embeddingResponse(res: ServerResponse, input: string[], vector: number[]) {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ data: input.map((_text, index) => ({ index, embedding: vector })) }));
+}
+async function eventually(predicate: () => boolean) {
+  for (let tick = 0; tick < 200 && !predicate(); tick++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(predicate());
+}
+
+test("background embedding batches recover without another query and skip newly excluded nodes", async (t) => {
+  let available = false; const inputs: string[][] = [];
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    inputs.push(input);
+    if (!available) { res.writeHead(503); res.end(); }
+    else embeddingResponse(res, input, [1, 0]);
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), {
+    embedding: { baseUrl, model: "retry", apiKey: "test", timeoutMs: 100 },
+  });
+  for (let index = 0; index < 6; index++) await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `retry-${index}`, text: `待索引原话${index}` });
+  await fixture.send("触发");
+  await eventually(() => inputs.some((batch) => batch.length > 1));
+  await fixture.log.append({ type: "memory_excluded", nodeId: "retry-3" });
+  const boundary = inputs.length; available = true;
+  await eventually(() => inputs.slice(boundary).some((batch) => batch.includes("待索引原话5")));
+  assert.ok(inputs.slice(boundary).every((batch) => !batch.includes("待索引原话3")));
+  await fixture.send("/reset"); await fixture.send("查询");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /待索引原话5/);
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /待索引原话3/);
+});
+
+test("long Unicode embeddings and turn vectors are cached in dimension and model namespaces", async (t) => {
+  let dimension = 2; const inputs: string[][] = [];
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    inputs.push(input); embeddingResponse(res, input, Array.from({ length: dimension }, (_value, index) => index === 0 ? 1 : 0));
+  });
+  const config = { baseUrl, model: "first", apiKey: "test", maxInputChars: 4, timeoutMs: 1000 };
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: config });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "unicode", text: "🎮".repeat(19) });
+  await fixture.log.append({ type: "reset" }); await fixture.send("启动");
+  await eventually(() => inputs.flat().includes("🎮".repeat(3)));
+  await fixture.send("异义");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /🎮/);
+  assert.ok(inputs.flat().every((text) => Array.from(text).length <= 4));
+  const before = inputs.length;
+  dimension = 3; await fixture.send("维度切换");
+  await eventually(() => inputs.slice(before).flat().includes("🎮".repeat(3)));
+  await fixture.send("/reset"); await fixture.send("另一问");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /🎮/);
+  const afterDimension = inputs.length; config.model = "second"; await fixture.restart(); await fixture.send("新模型");
+  await eventually(() => inputs.slice(afterDimension).flat().includes("🎮".repeat(3)));
+  await fixture.send("/reset"); await fixture.send("再一问");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /🎮/);
+});
+
+test("invalid zero vectors degrade safely and recover in the background", async (t) => {
+  let valid = false; let filled = false;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    if (valid && input.includes("旧记忆")) filled = true;
+    embeddingResponse(res, input, valid ? [1, 0] : [0, 0]);
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), {
+    embedding: { baseUrl, model: "invalid", apiKey: "test", timeoutMs: 100 },
+  });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "invalid", text: "旧记忆" });
+  await fixture.log.append({ type: "reset" }); await fixture.send("旧记忆");
+  assert.ok((await fixture.log.read()).some((event) => event.type === "memory_recalled" && event.degraded === "embedding_unavailable"));
+  valid = true; await eventually(() => filled);
+  await fixture.send("改写查询");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /旧记忆/);
+});
+
+test("a JSON message cannot collide with a cached turn embedding", async (t) => {
+  const indexed = new Set<string>();
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    input.forEach((text) => indexed.add(text));
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: text.startsWith("{") ? [0, 1] : [1, 0] })) }));
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "collision", apiKey: "test" } });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "hello", text: "hello" });
+  await fixture.send("索引"); await eventually(() => indexed.has("hello"));
+  await fixture.send("读一次"); await fixture.send("/reset");
+  await fixture.send('{"turn":["hello"]}');
+  assert.ok(indexed.has('{"turn":["hello"]}'));
+  const snapshot = (await fixture.log.read()).findLast((event) => event.type === "memory_recalled")!;
+  const candidate = (snapshot.candidates as Array<{ nodeId: string; sources: string[] }>).find((item) => item.nodeId === "hello")!;
+  assert.ok(candidate.sources.includes("literal"));
+  assert.ok(!candidate.sources.includes("dense"));
+});
+
+test("background long-message indexing is not limited by the foreground total timeout", async (t) => {
+  let completed = 0;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    setTimeout(() => { embeddingResponse(res, input, [1, 0]); completed++; }, 20);
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), {
+    embedding: { baseUrl, model: "long", apiKey: "test", maxInputChars: 4, timeoutMs: 60 },
+  });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "slow-long", text: "🪐".repeat(192) });
+  await fixture.send("索引"); await eventually(() => completed >= 4);
+  await fixture.send("/reset"); await fixture.send("异义");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /🪐/);
+});

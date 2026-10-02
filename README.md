@@ -56,6 +56,8 @@ Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一�
 
 每次请求自动召回一次，编排层与当前对话按消息身份去重。自动注入的原文与来源包装总额不超过 4,096 个估算 token，且不超过输入预算的 10%；长节点使用连续原文片段，可继续读完整来源。候选快照和实际展示引用写入运行日志，工具循环不会重新召回。
 
+可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`，使用独立的 OpenAI 兼容 embeddings 服务；地址填写到 `/v1` 等基础路径，不包含 `/embeddings`。`EMBEDDING_TIMEOUT_MS` 默认 3000，超时或服务错误降级为本地字面查询，后台逐步补齐向量。向量缓存位于 `data/embeddings.sqlite`，按服务、模型和预处理版本隔离；不完整配置时不启用语义召回。密钥不写入运行日志。
+
 ## 验证
 
 `npm run typecheck`、`npm test`、`npm run build`。

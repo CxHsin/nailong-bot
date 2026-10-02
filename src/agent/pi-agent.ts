@@ -17,6 +17,7 @@ import { EXECUTION_PROMPT, protocolText } from "./output-protocol.js";
 import { createMemoryProjection } from "../memory/projection.js";
 import { memoryTools } from "../memory/tools.js";
 import type { MemoryBudget } from "../application/memory-context.js";
+import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -29,6 +30,7 @@ export async function createPiAgent(options: {
   contextBudgetRatio?: number;
   modelBudgetRatios?: Record<string, number>;
   memoryBudget?: MemoryBudget;
+  embedding?: EmbeddingConfig;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -43,6 +45,7 @@ export async function createPiAgent(options: {
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  const embedding = options.embedding ? createEmbeddingClient(options.dataDir, options.embedding) : undefined;
   return {
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
@@ -56,7 +59,7 @@ export async function createPiAgent(options: {
       await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
       const userId = request ? (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user")?.chatId : undefined;
-      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId }) : undefined;
+      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding }) : undefined;
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });
@@ -89,6 +92,6 @@ export async function createPiAgent(options: {
         return execution.finalText()!;
       } finally { session.dispose(); }
     },
-    async close(): Promise<void> { await tinyfish?.close(); },
+    async close(): Promise<void> { await embedding?.close(); await tinyfish?.close(); },
   };
 }

@@ -21,11 +21,17 @@ async function main(): Promise<void> {
   const promptFile = resolve("system-prompt.md");
   const log = createSqliteRuntimeLog(dataDir);
   await log.importLegacy();
+  if (!process.env.EMBEDDING_BASE_URL?.trim() || !process.env.EMBEDDING_MODEL?.trim() || !process.env.EMBEDDING_API_KEY?.trim())
+    console.error("Embedding 配置不完整，语义记忆未启用；普通聊天与字面记忆查询仍可使用。");
   const agent = await createPiAgent({
     dataDir,
     promptFile,
     deepseekKey,
     tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
+    embedding: process.env.EMBEDDING_BASE_URL?.trim() && process.env.EMBEDDING_MODEL?.trim() && process.env.EMBEDDING_API_KEY?.trim() ? {
+      baseUrl: process.env.EMBEDDING_BASE_URL, model: process.env.EMBEDDING_MODEL, apiKey: process.env.EMBEDDING_API_KEY,
+      timeoutMs: process.env.EMBEDDING_TIMEOUT_MS ? Number(process.env.EMBEDDING_TIMEOUT_MS) : undefined,
+    } : undefined,
     modelBudgetRatios: process.env.PROJECTION_BUDGET_RATIOS
       ? JSON.parse(process.env.PROJECTION_BUDGET_RATIOS) : undefined,
   });
