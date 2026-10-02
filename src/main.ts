@@ -5,6 +5,8 @@ import { createPiAgent } from "./agent/pi-agent.js";
 import { createSqliteRuntimeLog } from "./runtime/sqlite-runtime-log.js";
 import { planTelegramText } from "./telegram/telegram-layout.js";
 import { registerTelegramInput, downloadTelegramPhoto } from "./telegram/telegram-input.js";
+import { memoryDynamics } from "./memory/dynamics.js";
+import { recallConfig } from "./memory/recall.js";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -20,6 +22,8 @@ async function main(): Promise<void> {
   const dataDir = resolve("data");
   const promptFile = resolve("system-prompt.md");
   const log = createSqliteRuntimeLog(dataDir);
+  const dynamics = memoryDynamics(process.env.MEMORY_DYNAMICS ? JSON.parse(process.env.MEMORY_DYNAMICS) : undefined);
+  const recall = recallConfig(process.env.MEMORY_RECALL ? JSON.parse(process.env.MEMORY_RECALL) : undefined);
   await log.importLegacy();
   if (!process.env.EMBEDDING_BASE_URL?.trim() || !process.env.EMBEDDING_MODEL?.trim() || !process.env.EMBEDDING_API_KEY?.trim())
     console.error("Embedding 配置不完整，语义记忆未启用；普通聊天与字面记忆查询仍可使用。");
@@ -31,9 +35,12 @@ async function main(): Promise<void> {
     embedding: process.env.EMBEDDING_BASE_URL?.trim() && process.env.EMBEDDING_MODEL?.trim() && process.env.EMBEDDING_API_KEY?.trim() ? {
       baseUrl: process.env.EMBEDDING_BASE_URL, model: process.env.EMBEDDING_MODEL, apiKey: process.env.EMBEDDING_API_KEY,
       timeoutMs: process.env.EMBEDDING_TIMEOUT_MS ? Number(process.env.EMBEDDING_TIMEOUT_MS) : undefined,
+      maxInputChars: process.env.EMBEDDING_MAX_INPUT_CHARS ? Number(process.env.EMBEDDING_MAX_INPUT_CHARS) : undefined,
     } : undefined,
     modelBudgetRatios: process.env.PROJECTION_BUDGET_RATIOS
       ? JSON.parse(process.env.PROJECTION_BUDGET_RATIOS) : undefined,
+    memoryBudget: { maxTokens: process.env.MEMORY_MAX_TOKENS ? Number(process.env.MEMORY_MAX_TOKENS) : undefined },
+    memoryDynamics: dynamics, memoryRecall: recall,
   });
   const bot = new Bot(token);
   const app = createApp({
@@ -75,6 +82,7 @@ async function main(): Promise<void> {
     },
     answer: agent.answer,
     memoryVector: agent.memoryVector,
+    memoryDynamics: dynamics,
     purgeEmbeddingCache: agent.purgeEmbeddingCache,
     send: async (text, update, onChunk) => {
       const chunks = planTelegramText(text);

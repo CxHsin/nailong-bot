@@ -14,12 +14,14 @@ import { createBoundedRead } from "./archive-read.js";
 import { createRuntimeLog } from "../runtime/runtime-log.js";
 import { attachExecution } from "./execution.js";
 import { EXECUTION_PROMPT, protocolText } from "./output-protocol.js";
-import { createMemoryProjection } from "../memory/projection.js";
+import { createMemoryProjection, type MemoryMode } from "../memory/projection.js";
 import { memoryTools } from "../memory/tools.js";
 import type { MemoryBudget } from "../application/memory-context.js";
 import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
-import type { MemoryDynamics } from "../memory/dynamics.js";
-import type { RecallConfig } from "../memory/recall.js";
+import { memoryDynamics, type MemoryDynamics } from "../memory/dynamics.js";
+import { recallConfig, type RecallConfig } from "../memory/recall.js";
+import { memoryBudget } from "../application/memory-context.js";
+import { modelInputBudget } from "../context/input-budget.js";
 import { createMemoryBootstrap } from "../application/memory-bootstrap.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 
@@ -39,6 +41,7 @@ export async function createPiAgent(options: {
   memoryNow?: () => number;
   memoryRecall?: Partial<RecallConfig>;
   memoryBootstrap?: boolean;
+  memoryMode?: MemoryMode;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -50,6 +53,8 @@ export async function createPiAgent(options: {
   const model = { ...defaultModel, id: "deepseek-flash", name: "deepseek-flash", input: ["text", "image"] as ("text" | "image")[],
     ...(options.modelBaseUrl ? { baseUrl: options.modelBaseUrl } : {}),
     ...(options.contextWindow === undefined ? {} : { contextWindow: options.contextWindow }) };
+  memoryBudget(modelInputBudget(model, options.contextBudgetRatio, options.modelBudgetRatios).budget, options.memoryBudget);
+  memoryDynamics(options.memoryDynamics); recallConfig(options.memoryRecall);
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   authStorage.setRuntimeApiKey("deepseek", options.deepseekKey);
   const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
@@ -59,7 +64,7 @@ export async function createPiAgent(options: {
   return {
     memoryVector: (text: string) => embedding?.cached(text),
     purgeEmbeddingCache: () => embedding?.purge(),
-    initializeMemory: (log: RuntimeLog, userId: number) => bootstrap.start(log, userId),
+    initializeMemory: (log: RuntimeLog, userId: number) => options.memoryMode === "dense" ? Promise.resolve() : bootstrap.start(log, userId),
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
@@ -72,7 +77,7 @@ export async function createPiAgent(options: {
       await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
       const userId = request ? (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user")?.chatId : undefined;
-      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding, dynamics: options.memoryDynamics, now: options.memoryNow, recall: options.memoryRecall }) : undefined;
+      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding, dynamics: options.memoryDynamics, now: options.memoryNow, recall: options.memoryRecall, mode: options.memoryMode }) : undefined;
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });
@@ -90,7 +95,7 @@ export async function createPiAgent(options: {
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
       const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request, memory);
-      if (request && typeof userId === "number" && options.memoryBootstrap !== false)
+      if (request && typeof userId === "number" && options.memoryBootstrap !== false && options.memoryMode !== "dense")
         void bootstrap.start(request.log, userId, request.id, { systemPrompt: session.agent.state.systemPrompt, messages: [], tools: session.agent.state.tools });
       session.agent.toolExecution = "sequential";
       const toolFailure = request ? attachToolRecording(session.agent, request) : () => undefined;

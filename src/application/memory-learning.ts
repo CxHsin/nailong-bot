@@ -33,7 +33,8 @@ export function commitMemoryLearning(log: RuntimeLog, userId: number, config?: P
       const request = events.filter((event) => event.requestId === current.requestId);
       const qualification = memoryQualification(events, current);
       const snapshot = request.find((event) => event.type === "memory_recalled");
-      if (!qualification || !snapshot || !Array.isArray(snapshot.candidates)) continue;
+      if (!qualification || !snapshot || snapshot.mode === "dense" || !Array.isArray(snapshot.candidates)) continue;
+      const parameters = memoryDynamics((snapshot.dynamics ?? config) as Partial<MemoryDynamics> | undefined);
       const presentations = request.filter((event) => event.type === "memory_presented" && event.snapshotId === snapshot.snapshotId);
       const shown = presentations.flatMap((event) => Array.isArray(event.shown) ? event.shown : []) as Array<{ nodeId: string; messageId: string; offset: number; end: number }>;
       const candidates = snapshot.candidates as Array<{ nodeId: string; score: number; initialization?: MemoryInitialization }>;
@@ -45,12 +46,12 @@ export function commitMemoryLearning(log: RuntimeLog, userId: number, config?: P
         const signal = learningSignal(candidate.score);
         return original && references.length && signal ? [{ nodeId: original.id, score: candidate.score, signal, shown: references }] : [];
       });
-      const initialization = memoryGraph(events.slice(0, qualification.position + 1), userId, vector, memoryDynamics(config)).initializations.find((item) => item.nodeId === current.id);
+      const initialization = memoryGraph(events.slice(0, qualification.position + 1), userId, vector, parameters).initializations.find((item) => item.nodeId === current.id);
       const initializations = [initialization, ...activated.map((item) => candidates.find((candidate) => candidate.nodeId === item.nodeId)?.initialization)]
         .filter((item): item is MemoryInitialization => !!item);
       await persistMemoryLearning(log, { type: "memory_learned", requestId: current.requestId, userId, algorithm: MEMORY_ALGORITHM, origin: "online",
         snapshotId: String(snapshot.snapshotId), settledAt: qualification.settledAt, activated,
-        dynamics: memoryDynamics(config), deliveredSources: qualification.deliveredSources }, initializations);
+        dynamics: parameters, deliveredSources: qualification.deliveredSources }, initializations);
       committed.add(current.requestId);
     }
   })();

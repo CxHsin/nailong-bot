@@ -1,7 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { sourceDigest } from "../runtime/event-digest.js";
+import { openMemoryCache } from "./cache.js";
 
 export type EmbeddingConfig = { baseUrl: string; model: string; apiKey: string; timeoutMs?: number; maxInputChars?: number };
 export function normalizeVector(vector: number[]): number[] {
@@ -25,12 +23,10 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
     !Number.isSafeInteger(maxChars) || maxChars < 1) throw new Error("embedding 配置无效");
   const url = new URL(config.baseUrl.replace(/\/$/, "") + "/embeddings");
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("embedding 地址无效");
-  mkdirSync(dataDir, { recursive: true });
-  const db = new DatabaseSync(join(dataDir, "embeddings.sqlite"));
-  db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS vectors (key TEXT PRIMARY KEY, namespace TEXT NOT NULL, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS embedding_meta (namespace TEXT PRIMARY KEY, dimension INTEGER NOT NULL)");
+  const { db, recovered } = openMemoryCache(dataDir, "embedding");
   const baseNamespace = sourceDigest({ url: url.href, model: config.model, maxChars, version: 2 });
   const savedDimension = db.prepare("SELECT dimension FROM embedding_meta WHERE namespace=?").get(baseNamespace) as { dimension: number } | undefined;
-  let dimension = savedDimension?.dimension;
+  let dimension = savedDimension && Number.isSafeInteger(savedDimension.dimension) && savedDimension.dimension > 0 ? savedDimension.dimension : undefined;
   const namespace = () => sourceDigest({ baseNamespace, dimension });
   const controllers = new Set<AbortController>();
   type Job = { text: string; eligible?: () => Promise<boolean> };
@@ -149,7 +145,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
     for (const job of jobs) if (job.text && !cached(job.text)) queued.set(sourceDigest(job.text), job);
     runWorker();
   }
-  return { cached, get, enqueue, turn, namespace, identity: baseNamespace, status: () => status,
+  return { cached, get, enqueue, turn, namespace, identity: baseNamespace, dimension: () => dimension, status: () => status ?? (recovered ? "embedding_cache_rebuilt" : undefined),
     purge() { cacheEpoch++; db.exec("DELETE FROM vectors"); },
     async close() { stopped = true; if (retry) clearTimeout(retry); queued.clear(); controllers.forEach((controller) => controller.abort());
       await Promise.allSettled([...pending.values()]); await worker; db.close(); },

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createApp } from "../src/application/app.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 import type { ToolResult } from "../src/runtime/runtime-types.js";
+import { EVALUATION_START, EVALUATION_NOW, evaluationCases, evaluationCorpus, evaluationVector } from "./fixtures/memory-evaluation.js";
+import { DEFAULT_DYNAMICS } from "../src/memory/dynamics.js";
+import { closeFixture } from "./fixtures/cleanup.js";
 
 type Payload = { messages: Array<{ role: string; content?: unknown }>; tools?: unknown[] };
 let toolSequence = 0;
@@ -33,14 +37,15 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, ...extra };
   let agent = await createPiAgent(options);
   const sent: string[] = [];
-  const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, purgeEmbeddingCache: agent.purgeEmbeddingCache, send: async (text) => { sent.push(text); }, ...overrides });
+  const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, memoryDynamics: extra.memoryDynamics, purgeEmbeddingCache: agent.purgeEmbeddingCache, send: async (text) => { sent.push(text); }, ...overrides });
   let app = makeApp(); let id = 0;
-  t.after(async () => { await agent.close(); server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
+  t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   return { dir, log, seen, sent, makeApp,
+    memoryVector: (text: string) => agent.memoryVector(text),
     initializeMemory: () => agent.initializeMemory(log, 42),
     recover: () => app.recover(),
     send: (text: string) => app.handle({ userId: 42, chatType: "private", text, messageId: ++id }),
-    async restart(clearCaches: string[] = []) { await agent.close(); for (const name of clearCaches) await rm(join(dir, name), { force: true }); agent = await createPiAgent(options); app = makeApp(); },
+    async restart(clearCaches: string[] = [], beforeOpen?: () => Promise<void>) { await agent.close(); for (const name of clearCaches) await rm(join(dir, name), { force: true }); await beforeOpen?.(); agent = await createPiAgent(options); app = makeApp(); },
   };
 }
 
@@ -214,9 +219,9 @@ function embeddingResponse(res: ServerResponse, input: string[], vector: number[
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ data: input.map((_text, index) => ({ index, embedding: vector })) }));
 }
-async function eventually(predicate: () => boolean) {
-  for (let tick = 0; tick < 200 && !predicate(); tick++) await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.ok(predicate());
+async function eventually(predicate: () => boolean | Promise<boolean>) {
+  for (let tick = 0; tick < 200 && !await predicate(); tick++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(await predicate());
 }
 
 test("background embedding batches recover without another query and skip newly excluded nodes", async (t) => {
@@ -819,4 +824,215 @@ test("forgetting invalidates affected summaries and regenerates them only from r
   await fixture.send("/forget forget-summary-0"); await fixture.send("再继续");
   assert.ok(summaries > before);
   assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /alpha_sensitive/);
+});
+
+test("corrupt and incompatible derived caches rebuild frozen learning and exclusions without changing original facts", async (t) => {
+  const now = Date.now() + 60_000;
+  const baseUrl = await embeddingService(t, (input, _model, res) => embeddingResponse(res, input, [1, 0]));
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (data.messages.at(-1)!.role === "tool") answer(res, String(data.messages.at(-1)!.content));
+    else if (data.messages.at(-1)!.content === "查状态") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else answer(res, "答复");
+  }, { embedding: { baseUrl, model: "repair", apiKey: "test" }, memoryNow: () => now });
+  await fixture.send("limboo 保留的原话");
+  await fixture.send("limboo 后续关联");
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "repair-excluded", text: "limboo 排除的原话" });
+  await fixture.send("/forget repair-excluded");
+  const target = (await fixture.log.read()).find((event) => event.type === "message" && event.text === "limboo 保留的原话")!.requestId!;
+  const inspect = async (messageId: number) => {
+    const app = fixture.makeApp({ send: async (text) => { if (text.startsWith("[")) throw new Error("inspection not delivered"); } });
+    await app.handle({ userId: 42, chatType: "private", text: "查状态", messageId });
+    const items = JSON.parse(String(fixture.seen.at(-1)!.messages.findLast((message) => message.role === "tool")!.content));
+    assert.ok(items.every((item: { nodeId: string }) => item.nodeId !== "repair-excluded"));
+    return items.find((item: { nodeId: string }) => item.nodeId === target).state;
+  };
+  const state = await inspect(600);
+  const facts = (await fixture.log.read()).filter((event) => ["memory_initialized", "memory_learned", "memory_excluded"].includes(event.type));
+  await fixture.restart([], async () => {
+    for (const name of ["memory.sqlite", "embeddings.sqlite"]) await writeFile(join(fixture.dir, name), "not a SQLite database");
+  });
+  assert.deepEqual(await inspect(601), state);
+  await fixture.restart([], async () => {
+    for (const name of ["memory.sqlite", "embeddings.sqlite"]) {
+      const db = new DatabaseSync(join(fixture.dir, name));
+      try { db.exec("PRAGMA user_version=999; DROP TABLE IF EXISTS memory_nodes; CREATE TABLE memory_nodes (wrong TEXT)"); } finally { db.close(); }
+    }
+  });
+  assert.deepEqual(await inspect(602), state);
+  await fixture.restart([], async () => {
+    const db = new DatabaseSync(join(fixture.dir, "memory.sqlite"));
+    try { db.exec("DROP TABLE memory_nodes; CREATE TABLE memory_nodes (id TEXT PRIMARY KEY, payload TEXT NOT NULL) WITHOUT ROWID"); } finally { db.close(); }
+  });
+  assert.deepEqual(await inspect(603), state);
+  assert.deepEqual((await fixture.log.read()).filter((event) => ["memory_initialized", "memory_learned", "memory_excluded"].includes(event.type)), facts);
+  assert.ok((await fixture.log.read()).some((event) => event.type === "message" && event.text === "limboo 排除的原话"));
+});
+
+test("a changed embedding dimension gets a separate historical progress baseline without repeating committed learning", async (t) => {
+  let dimension = 2;
+  const baseUrl = await embeddingService(t, (input, _model, res) => embeddingResponse(res, input, dimension === 2 ? [1, 0] : [1, 0, 0]));
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "dimensions-history", apiKey: "test" } });
+  for (let index = 0; index < 12; index++) await historicalTurn(fixture.log, `dimension-history-${index}`, "limboo", Date.now() - 86400_000 + index * 60_000);
+  const running = fixture.initializeMemory();
+  await eventually(async () => (await fixture.log.read()).some((event) => event.type === "memory_bootstrap_progress"));
+  await fixture.restart(); await running;
+  dimension = 3;
+  await fixture.send("更换维度后的新查询");
+  await fixture.initializeMemory();
+  const events = await fixture.log.read();
+  const starts = events.filter((event) => event.type === "memory_bootstrap_started");
+  assert.equal(starts.length, 2);
+  assert.notEqual(starts[0]!.simulationId, starts[1]!.simulationId);
+  assert.equal(starts[0]!.through, starts[1]!.through);
+  const learning = events.filter((event) => event.type === "memory_learned");
+  assert.equal(new Set(learning.map((event) => event.requestId)).size, learning.length);
+  assert.equal(learning.filter((event) => event.origin === "historical").length, 12);
+});
+
+test("background backfill, late delivery and forgetting coexist across restart without duplicate learning or future leakage", async (t) => {
+  let available = false;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    if (!available) { res.writeHead(503); res.end(); } else embeddingResponse(res, input, [1, 0]);
+  });
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { embedding: { baseUrl, model: "coexist", apiKey: "test", timeoutMs: 100 } });
+  const old = Date.now() - 86400_000;
+  for (let index = 0; index < 5; index++) await historicalTurn(fixture.log, `coexist-${index}`, "limboo 旧事实", old + index * 60_000);
+  const failed = fixture.makeApp({ telegram: { send: async () => { throw new Error("late confirmation"); }, edit: async () => {} } });
+  await failed.handle({ userId: 42, chatType: "private", text: "limboo 迟到送达轮次", messageId: 701 });
+  const late = (await fixture.log.read()).findLast((event) => event.type === "text_finalized" && event.contentKind === "final")!;
+  const running = fixture.initializeMemory();
+  await eventually(async () => (await fixture.log.read()).some((event) => event.type === "memory_bootstrap_started"));
+  await fixture.send("/forget coexist-1");
+  await fixture.send("未来专名 future_zxyz");
+  await fixture.restart(); await running;
+  available = true;
+  const pages = (await fixture.log.read()).filter((event) => event.type === "telegram_page" && event.textSegmentId === late.textSegmentId);
+  assert.ok(pages.length > 0);
+  for (const page of pages) await fixture.log.append({ type: "telegram_delivery_succeeded", requestId: late.requestId, textSegmentId: late.textSegmentId, partIndex: page.partIndex, telegramMessageId: 800 + Number(page.partIndex) });
+  await fixture.log.append({ type: "delivery_succeeded", requestId: late.requestId });
+  await fixture.recover(); await fixture.initializeMemory(); await fixture.recover();
+  const learning = (await fixture.log.read()).filter((event) => event.type === "memory_learned");
+  assert.equal(learning.filter((event) => event.requestId === late.requestId && event.origin === "online").length, 1);
+  assert.equal(learning.filter((event) => event.origin === "historical").length, 4);
+  assert.equal(new Set(learning.map((event) => event.requestId)).size, learning.length);
+  assert.ok(learning.every((event) => event.requestId !== "coexist-1" && !(event.activated as Array<{ nodeId: string }>).some((item) => item.nodeId === "coexist-1")));
+  assert.ok(learning.filter((event) => event.origin === "historical").every((event) =>
+    !(event.candidates as Array<{ nodeId: string }>).some((item) => item.nodeId === late.requestId)));
+});
+
+test("pure dense comparison uses identical synthetic originals, vectors, time and budgets with grounded coverage and error metrics", async (t) => {
+  let embeddingRequests = 0;
+  const baseUrl = await embeddingService(t, (input, _model, res) => {
+    embeddingRequests++;
+    res.end(JSON.stringify({ data: input.map((text, index) => ({ index, embedding: evaluationVector(text) })) }));
+  });
+  for (const scenario of evaluationCases) for (const mode of ["dense", "akasha"] as const) {
+    const started = performance.now();
+    const requestsBefore = embeddingRequests;
+    const budget = scenario.budget ?? 900;
+    const fixture = await memoryFixture(t, (_data, res) => answer(res, "评估完成"), {
+      memoryMode: mode, memoryNow: () => scenario.now ?? EVALUATION_NOW, memoryBudget: { maxTokens: budget }, contextWindow: 18000,
+      embedding: { baseUrl, model: "synthetic-fixed-v1", apiKey: "synthetic" },
+    });
+    for (const item of evaluationCorpus) {
+      const at = EVALUATION_START + item.minutes * 60_000;
+      await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: item.id, text: item.text, at: new Date(at).toISOString() });
+      if (item.assistant) {
+        await fixture.log.append({ type: "text_finalized", requestId: item.id, textSegmentId: `${item.id}:final`, contentKind: "final", text: item.assistant, at: new Date(at + 100).toISOString() });
+        await fixture.log.append({ type: "delivery_succeeded", requestId: item.id, at: new Date(at + 200).toISOString() });
+      }
+      await fixture.log.append({ type: "request_completed", requestId: item.id, at: new Date(at + 300).toISOString() });
+      await fixture.log.append({ type: "memory_initialized", nodeId: item.id, userId: 42, algorithm: "akasha-v1", salience: 0, strength: 2.1, initializedAt: at });
+      if (item.activated) await fixture.log.append({ type: "memory_learned", origin: "online", requestId: item.id, userId: 42, algorithm: "akasha-v1", settledAt: new Date(at + 300).toISOString(),
+        dynamics: DEFAULT_DYNAMICS, activated: item.activated.map((nodeId) => ({ nodeId, signal: 1 })) });
+      if (item.excluded) await fixture.log.append({ type: "memory_excluded", nodeId: item.id, userId: 42 });
+    }
+    await fixture.send("/evaluation-warm");
+    await eventually(() => evaluationCorpus.filter((item) => !item.excluded).every((item) => fixture.memoryVector(item.text) && (!item.assistant || fixture.memoryVector(item.assistant))));
+    await fixture.send("/reset");
+    const queryStarted = performance.now();
+    const queryRequests = embeddingRequests;
+    await fixture.send(scenario.query);
+    const elapsedMs = performance.now() - queryStarted;
+    const events = await fixture.log.read();
+    const recalled = events.findLast((event) => event.type === "memory_recalled")!;
+    const presented = events.findLast((event) => event.type === "memory_presented")!;
+    const shown = new Set((presented.shown as Array<{ nodeId: string }>).map((item) => item.nodeId));
+    const top8 = (recalled.candidates as Array<{ nodeId: string }>).slice(0, 8).map((item) => item.nodeId);
+    const allowed = [...scenario.required, ...scenario.background];
+    const covered = scenario.required.filter((nodeId) => shown.has(nodeId)).length;
+    const background = scenario.background.filter((nodeId) => shown.has(nodeId)).length;
+    const errors = [...shown].filter((nodeId) => !allowed.includes(nodeId));
+    if (mode === "akasha") assert.equal(covered, scenario.required.length, scenario.name);
+    const payload = fixture.seen.at(-1)!;
+    const wireInputTokens = Math.ceil(Buffer.byteLength(JSON.stringify({ messages: payload.messages, tools: payload.tools ?? [] })) / 3) +
+      12 * (payload.messages.length + (payload.tools?.length ?? 0) + 1);
+    assert.ok(wireInputTokens <= Math.floor(18000 * 0.86));
+    const quoteMessage = payload.messages.find((message) => typeof message.content === "string" && message.content.startsWith("长期记忆原文引用"));
+    const quotes = quoteMessage ? JSON.parse(String(quoteMessage.content).split("\n").slice(1).join("\n")) as Array<{ nodeId: string; role: string; text: string; offset: number; end: number }> : [];
+    for (const quote of quotes) {
+      const source = evaluationCorpus.find((item) => item.id === quote.nodeId)!;
+      const original = quote.role === "user" ? source.text : source.assistant!;
+      assert.equal(quote.text, Array.from(original).slice(quote.offset, quote.end).join(""));
+    }
+    assert.ok(Number(presented.tokens) <= budget);
+    assert.ok(events.filter((event) => event.type === "context_projected").every((event) => Number(event.estimatedTokens) <= Number(event.budget)));
+    assert.ok(!shown.has("old-place"));
+    assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /old_hidden/);
+    if (scenario.akashaQuote && mode === "akasha") assert.ok(JSON.stringify(fixture.seen.at(-1)!.messages).includes(scenario.akashaQuote));
+    if (scenario.quote) assert.ok(JSON.stringify(fixture.seen.at(-1)!.messages).includes(scenario.quote));
+    if (mode === "dense") assert.ok(!events.some((event) => event.type === "memory_learned" && !evaluationCorpus.some((item) => item.id === event.requestId)));
+    else assert.ok(events.filter((event) => event.type === "memory_learned" && !evaluationCorpus.some((item) => item.id === event.requestId)).every((event) =>
+      (event.activated as Array<{ nodeId: string }>).every((item) => top8.includes(item.nodeId) && shown.has(item.nodeId))));
+    if (scenario.inspectExcluded) {
+      const modelCalls = fixture.seen.length;
+      await fixture.send(`/memory log ${scenario.inspectExcluded}`);
+      assert.match(fixture.sent.at(-1)!, /old_hidden/);
+      assert.equal(fixture.seen.length, modelCalls);
+      assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_learned").length, events.filter((event) => event.type === "memory_learned").length);
+    }
+    t.diagnostic(JSON.stringify({ scenario: scenario.name, mode, covered, required: scenario.required.length, top8Covered: scenario.required.filter((nodeId) => top8.includes(nodeId)).length,
+      background, errors, shown: [...shown], tokens: presented.tokens, budget, elapsedMs: Math.round(elapsedMs), queryEmbeddingRequests: embeddingRequests - queryRequests,
+      totalEmbeddingRequests: embeddingRequests - requestsBefore, setupMs: Math.round(queryStarted - started), wireInputTokens }));
+  }
+});
+
+test("ordinary file tools cannot overwrite memory, embedding or historical initialization stores", async (t) => {
+  let path = "";
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (data.messages.at(-1)!.role === "tool") answer(res, "已检查工具结果");
+    else answer(res, "", { name: "write", args: { path, content: "overwrite-memory-attack" } });
+  });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "protected-memory", text: "limboo 原始原话" });
+  for (const name of ["memory.sqlite", "EMBEDDINGS.SQLITE", "memory-initialization/memory.sqlite"]) {
+    path = join(fixture.dir, name); await fixture.send("尝试普通写入");
+    const result = (await fixture.log.read()).findLast((event) => event.type === "tool_result")!.result as ToolResult;
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result.content), /受保护/);
+  }
+  assert.ok((await fixture.log.read()).some((event) => event.type === "message" && event.requestId === "protected-memory" && event.text === "limboo 原始原话"));
+});
+
+test("recovery uses the request's recorded dynamics even when current configuration changes", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"), { memoryDynamics: { strengthRate: 0.05 } });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "config-old", text: "limboo" });
+  const interrupted = fixture.makeApp({ log: { ...fixture.log, append: async (event) => {
+    if (event.type === "memory_learned") throw new Error("stop before commit");
+    return fixture.log.append(event);
+  } } });
+  await interrupted.handle({ userId: 42, chatType: "private", text: "limboo", messageId: 751 });
+  const recovered = fixture.makeApp({ memoryDynamics: { strengthRate: 0.8 } });
+  await recovered.recover(); await recovered.recover();
+  const learning = (await fixture.log.read()).filter((event) => event.type === "memory_learned");
+  assert.equal(learning.length, 1);
+  assert.equal((learning[0]!.dynamics as { strengthRate: number }).strengthRate, 0.05);
+});
+
+test("invalid memory budgets and algorithm settings fail configuration before a model call", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "memory-settings-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test" };
+  await assert.rejects(createPiAgent({ ...options, memoryBudget: { maxTokens: 4097 } }), /预算无效/);
+  await assert.rejects(createPiAgent({ ...options, memoryDynamics: { strengthMs: 0 } }), /动力学配置无效/);
+  await assert.rejects(createPiAgent({ ...options, memoryRecall: { iterations: 100 } }), /召回配置无效/);
 });

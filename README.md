@@ -70,6 +70,8 @@ Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一�
 
 ## 验证
 
+记忆的环境配置、初始化与故障重建见 [操作与诊断](docs/memory-operations.md)；相同原话/向量/时间/预算的 dense 对照、已观察到的错误关联及复现命令见 [对照验收](docs/memory-evaluation.md)。完整集成回归可串行运行 `node --import tsx --test --test-concurrency=1 test/*.test.ts`，避免短时间窗测试受并行 SDK 负载影响。
+
 `npm run typecheck`、`npm test`、`npm run build`。
 
 配置真实凭据后，分别验证普通聊天、图片配文与后续追问、需要搜索的问题、包含网址的问题、流式草稿与最终消息、重启续聊，以及 `/reset` 后的新对话。再在普通对话中要求保存一个结论，检查回复涉及的文件是否实际存在、内容是否可读。TinyFish 不可用时 Bot 仍能进行普通聊天和文件操作，启动日志会说明网页查询工具未启用。Telegram 原生草稿的具体渐入效果由客户端呈现，自动化测试不能替代真实聊天中的视觉检查。

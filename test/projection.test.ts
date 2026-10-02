@@ -9,6 +9,7 @@ import { createPiAgent } from "../src/agent/pi-agent.js";
 import { assistantText } from "../src/agent/model-message.js";
 import { getModel } from "@mariozechner/pi-ai";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { closeFixture } from "./fixtures/cleanup.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
@@ -24,7 +25,6 @@ function reply(res: ServerResponse, content: string, call?: { id: string; name: 
 async function fixture(t: TestContext, respond: (data: Payload, res: ServerResponse) => void,
   options: Partial<Parameters<typeof createPiAgent>[0]> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "projection-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const promptFile = join(dir, "prompt.md");
   await writeFile(promptFile, "Be helpful.");
   const seen: Payload[] = [];
@@ -36,13 +36,12 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
     respond(data, res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const agentOptions = { dataDir: dir, promptFile, deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}`, ...options };
   let agent = await createPiAgent(agentOptions);
-  t.after(() => agent.close());
+  t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const replies: string[] = [];
   const makeApp = () => createApp({ ownerId: 42, dataDir: dir, answer: agent.answer,
     send: async (text) => { replies.push(text); } });

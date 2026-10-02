@@ -30,7 +30,10 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
     const inputBudget = modelInputBudget(options.model, options.ratio, options.ratios).budget;
     const configDigest = sourceDigest({ version: "causal-settlement-v2", model: `${options.model.provider}/${options.model.id}`, embedding: options.embedding?.identity,
       dynamics: memoryDynamics(options.dynamics), recall: recallConfig(options.recall), inputBudget, budget: memoryBudget(inputBudget, options.budget) });
-    let start = all.findLast((event) => event.type === "memory_bootstrap_started" && event.userId === userId && event.algorithm === MEMORY_ALGORITHM && event.configDigest === configDigest);
+    const namespaceBinding = (events: Awaited<ReturnType<RuntimeLog["read"]>>, simulationId: unknown) =>
+      events.findLast((event) => event.type === "memory_bootstrap_namespace" && event.simulationId === simulationId);
+    let start = all.findLast((event) => event.type === "memory_bootstrap_started" && event.userId === userId && event.algorithm === MEMORY_ALGORITHM && event.configDigest === configDigest &&
+      (!options.embedding?.dimension() || !namespaceBinding(all, event.simulationId) || namespaceBinding(all, event.simulationId)!.embedding === options.embedding.namespace()));
     if (!start) {
       const previousStart = all.find((event) => event.type === "memory_bootstrap_started" && event.userId === userId);
       const through = previousStart ? Number(previousStart.through) : cutoff < 0 ? all.length : cutoff;
@@ -44,11 +47,20 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
     const source = all.slice(0, Number(start.through));
     if (sourceDigest(source) !== start.prefixDigest) throw new Error("历史记忆源前缀不一致");
     const simulationId = String(start.simulationId);
+    const bindNamespace = async () => {
+      if (!options.embedding?.dimension()) return true;
+      const events = await log.read();
+      const bound = namespaceBinding(events, simulationId);
+      if (bound) return bound.embedding === options.embedding.namespace();
+      await log.append({ type: "memory_bootstrap_namespace", userId, simulationId, embedding: options.embedding.namespace(), dimension: options.embedding.dimension() });
+      return true;
+    };
     const previous = all.findLast((event) => event.type === "memory_bootstrap_progress" && event.simulationId === simulationId);
     let cursor = Number(previous?.cursor ?? -1);
     const order = (node: ReturnType<typeof memoryNodes>[number]) => memoryQualification(source, node)?.position ?? node.messages[0]?.availableSequence ?? -1;
     const historical = memoryNodes(source, userId).sort((left, right) => order(left) - order(right));
     while (!stopped) {
+      if (!await bindNamespace()) return run(log, userId, beforeRequest, context);
       const live = await log.read();
       const excluded = memoryExclusions(live);
       const current = historical.find((node) => order(node) > cursor);
@@ -77,6 +89,7 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
         const projection = createMemoryProjection({ log: historicalLog, dataDir: join(options.dataDir, MEMORY_INITIALIZATION_DIR), userId,
           embedding: options.embedding, dynamics: options.dynamics, recall: options.recall, now: () => at });
         const candidates = await projection.search(current.messages[0]!.text, 72, current.id);
+        if (!await bindNamespace()) return run(log, userId, beforeRequest, context);
         const replaySource = [...source.slice(0, position + 1), ...controls];
         if (!current.requestId) replaySource[position] = { ...replaySource[position]!, requestId: current.id };
         const replay = await replayEvents({ ...log, read: async () => replaySource }, current.id, options.model, true);

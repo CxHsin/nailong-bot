@@ -7,14 +7,14 @@ import type { Request } from "./app-types.js";
 export type MemoryBudget = { maxTokens?: number; ratio?: number };
 export function memoryBudget(inputBudget: number, config: MemoryBudget = {}): number {
   const max = config.maxTokens ?? 4096; const ratio = config.ratio ?? 0.1;
-  if (!Number.isSafeInteger(max) || max < 0 || !Number.isFinite(ratio) || ratio < 0 || ratio > 0.1) throw new Error("记忆预算无效");
+  if (!Number.isSafeInteger(max) || max < 0 || max > 4096 || !Number.isFinite(ratio) || ratio < 0 || ratio > 0.1) throw new Error("记忆预算无效");
   return Math.floor(Math.min(max, inputBudget * ratio));
 }
 export async function recallMemory(memory: ReturnType<typeof createMemoryProjection>, request: Request, query: string) {
   try {
     const candidates = await memory.search(query, 72, request.id);
     const snapshotId = randomUUID();
-    await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId, query, version: "memory-v1",
+    await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId, query, version: "memory-v1", mode: memory.mode, dynamics: memory.dynamics,
       degraded: memory.diagnostics(), candidates: candidates.map((c) => ({ nodeId: c.node.id, score: c.score, sources: c.sources, paths: c.paths, initialization: c.initialization })) });
     return { snapshotId, candidates };
   } catch {

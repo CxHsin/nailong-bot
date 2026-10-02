@@ -12,6 +12,7 @@ import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 import { registerTelegramInput, downloadTelegramPhoto } from "../src/telegram/telegram-input.js";
 import { estimateInput } from "../src/context/input-budget.js";
 import { summaryInput } from "../src/context/history-summary.js";
+import { closeFixture } from "./fixtures/cleanup.js";
 
 const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1cAAAAASUVORK5CYII=" };
 function update(id: number, owner = 42, caption?: string, text?: string) {
@@ -35,7 +36,6 @@ function bot(notices?: string[]) { return new Bot("123:test", { botInfo: {
 
 test("actual Telegram photo updates keep caption and images through model calls, restart and reset", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "telegram-image-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "请分析用户图片。");
   const payloads: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
   const server = createServer(async (req, res) => {
@@ -45,18 +45,21 @@ test("actual Telegram photo updates keep caption and images through model calls,
     res.end("data: " + JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: "图片已分析" }) }, finish_reason: "stop" }] }) + "\n\ndata: [DONE]\n\n");
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const options = { dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: "http://127.0.0.1:" + address.port };
-  let agent = await createPiAgent(options); t.after(() => agent.close());
+  const inputs: Array<ReturnType<typeof registerTelegramInput>> = [];
+  let agent = await createPiAgent(options);
+  t.after(() => closeFixture({ server, dir, shutdown: async () => {
+    try { await Promise.all(inputs.map((input) => input.finish())); } finally { await agent.close(); }
+  } }));
   const log = createSqliteRuntimeLog(dir);
   const replies: string[] = [];
   let downloads = 0;
   const install = () => {
     const b = bot();
     const app = createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, send: async (text) => { replies.push(text); } });
-    registerTelegramInput(b, { ownerId: 42, download: async (fileId) => { assert.equal(fileId, "large"); downloads++; return image; },
-      handle: (input, started) => app.handle(input, started), reportFailure: () => {} });
+    inputs.push(registerTelegramInput(b, { ownerId: 42, download: async (fileId) => { assert.equal(fileId, "large"); downloads++; return image; },
+      handle: (input, started) => app.handle(input, started), reportFailure: () => {} }));
     return b;
   };
   let b = install();
@@ -71,7 +74,7 @@ test("actual Telegram photo updates keep caption and images through model calls,
   await b.handleUpdate(update(2, 42, undefined, "再解释一下图中的文字"));
   for (let i = 0; i < 100 && replies.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
-  await agent.close(); agent = await createPiAgent(options); b = install();
+  await inputs.at(-1)!.finish(); await agent.close(); agent = await createPiAgent(options); b = install();
   await b.handleUpdate(update(3, 42, undefined, "继续分析这张图"));
   for (let i = 0; i < 100 && replies.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 10));
   assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
