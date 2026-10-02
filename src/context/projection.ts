@@ -6,9 +6,10 @@ import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "../runtime/runtime-types.js";
 import { protocolText } from "../agent/output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
+import { eventIdentity } from "../runtime/memory-facts.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
-  through: number; requestId?: string; safe: boolean };
+  through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
   diagnostics: string[] };
 
@@ -52,10 +53,10 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         ? [{ type: "text", text: event.text }, ...images] : event.text, timestamp };
       if (event.requestId === currentId) current = message;
       legacyRequest = event.requestId ?? `legacy:${index}`;
-      units.push({ messages: [message], through: index + 1, requestId: legacyRequest, safe: true });
+      units.push({ messages: [message], through: index + 1, requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
       units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
-        requestId: legacyRequest, safe: true });
+        requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
     } else if (structured && event.type === "protocol_feedback" && typeof event.text === "string") {
       units.push({ messages: [{ role: "user", content: event.text, timestamp }], through: index + 1,
         requestId: event.requestId, safe: true });
@@ -130,7 +131,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "status" ? "status" : "progress", text) });
         }
         units.push({ messages: [assistant, ...responses], summaryMessages: [assistant, ...summaryResponses],
-          through, requestId: event.requestId, safe });
+          through, requestId: event.requestId, safe, sourceIds: progress?.contentKind === "result" && resultDelivered(progress.textSegmentId)
+            ? [eventIdentity(progress, all.indexOf(progress))] : [] });
       }
     } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
@@ -147,11 +149,15 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
         (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
       units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", event.text, timestamp)], through: index + 1,
-        requestId: event.requestId, safe: true });
+        requestId: event.requestId, safe: true, sourceIds: event.contentKind === "result" ? [eventIdentity(event, all.indexOf(event))] : [] });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);
-      if (typeof answer?.text === "string") units.push({ messages: [replayText("final", answer.text, timestamp)],
-        through: index + 1, requestId: event.requestId, safe: true });
+      if (typeof answer?.text === "string") {
+        const finalized = events.findLast((e) => e.type === "text_finalized" && e.requestId === event.requestId && e.contentKind === "final" && e.text === answer.text);
+        const source = finalized ?? answer;
+        units.push({ messages: [replayText("final", answer.text, timestamp)], through: index + 1, requestId: event.requestId,
+          safe: true, sourceIds: [eventIdentity(source, all.indexOf(source))] });
+      }
     }
   }
   for (const identity of results.keys()) if (!used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);

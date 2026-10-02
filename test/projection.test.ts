@@ -85,7 +85,7 @@ test("model window budget folds old history, preserves three requests, and reuse
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
       summaries++; reply(res, summary);
     } else reply(res, "finished");
-  }, { contextWindow: 6600 });
+  }, { contextWindow: 7600 });
   const events = Array.from({ length: 6 }, (_, i) => [
     { type: "message", role: "user", text: `old-${i}:` + "x".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
     { type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
@@ -101,7 +101,7 @@ test("model window budget folds old history, preserves three requests, and reuse
   assert.match(history, /old-3:/);
   assert.match(history, /old-5:/);
   const outputLimit = normal.max_tokens ?? normal.max_completion_tokens;
-  assert.ok(outputLimit! <= 6600 && outputLimit! > 0);
+  assert.ok(outputLimit! <= 7600 && outputLimit! > 0);
   const before = summaries;
   await f.restart();
   await f.send("again");

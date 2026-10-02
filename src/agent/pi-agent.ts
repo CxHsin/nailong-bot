@@ -16,6 +16,7 @@ import { attachExecution } from "./execution.js";
 import { EXECUTION_PROMPT, protocolText } from "./output-protocol.js";
 import { createMemoryProjection } from "../memory/projection.js";
 import { memoryTools } from "../memory/tools.js";
+import type { MemoryBudget } from "../application/memory-context.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -27,6 +28,7 @@ export async function createPiAgent(options: {
   contextWindow?: number;
   contextBudgetRatio?: number;
   modelBudgetRatios?: Record<string, number>;
+  memoryBudget?: MemoryBudget;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -71,7 +73,7 @@ export async function createPiAgent(options: {
           ...(memory && request ? memoryTools(memory, request.id) : []),
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
-      const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request);
+      const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request, memory);
       session.agent.toolExecution = "sequential";
       const toolFailure = request ? attachToolRecording(session.agent, request) : () => undefined;
       try {

@@ -7,8 +7,11 @@ import { createContextProjection } from "../context/context-budget.js";
 import { assistantText } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
 import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames } from "./output-protocol.js";
+import { composeMemory, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
+import type { createMemoryProjection } from "../memory/projection.js";
+import { estimateInput, modelInputBudget } from "../context/input-budget.js";
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number> }, botPrompt: string, systemPrompt: string, request?: Request) {
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
   let dispatchedThisStep = false;
   const previousBeforeTool = session.agent.beforeToolCall;
@@ -54,6 +57,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     protocolVersion: OUTPUT_PROTOCOL_VERSION, botPrompt, systemPrompt, botPromptVersion: request.botPromptVersion ?? createHash("sha256").update(botPrompt).digest("hex"),
     systemPromptHash: createHash("sha256").update(systemPrompt).digest("hex") });
   const providerStream = session.agent.streamFn;
+  const user = request && (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user");
+  const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
     summarize: async (context, maxTokens) => {
@@ -69,12 +74,17 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const result = projection ? await projection.project(selected, context, attempt === 1) :
-          { context, maxTokens: selected.maxTokens };
+        const inputBudget = modelInputBudget(selected, options.contextBudgetRatio, options.modelBudgetRatios).budget;
+        const reserve = recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0;
+        const result = projection ? await projection.project(selected, context, attempt === 1, reserve) :
+          { context, maxTokens: selected.maxTokens, sourceIds: [] as string[] };
+        const combined = composeMemory(result.context, result.sourceIds, recalled?.candidates ?? [], reserve, String(user?.text ?? ""));
+        if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
         await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, systemPrompt: result.context.systemPrompt });
-        const source = await providerStream(selected, result.context, { ...streamOptions, maxTokens: result.maxTokens });
+        const source = await providerStream(selected, combined.context, { ...streamOptions,
+          maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) });
         let producedOutput = false;
         let lastPreview = "";
         let lastPreviewAt = -Infinity;
@@ -112,6 +122,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           }
         }
         const message = await source.result();
+        if (request && recalled?.snapshotId && message.stopReason !== "error" && message.stopReason !== "aborted")
+          await request.log.append({ type: "memory_presented", requestId: request.id,
+            modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, tokens: combined.tokens, budget: reserve });
         await request?.log.append({ type: "model_message", requestId: request.id, step,
           modelStepId, protocolVersion: OUTPUT_PROTOCOL_VERSION, message });
         await request?.log.append({ type: "model_step_completed", requestId: request.id,
