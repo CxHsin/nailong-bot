@@ -13,6 +13,7 @@ import { replayEvents } from "../context/projection.js";
 import { estimateInput, modelInputBudget } from "../context/input-budget.js";
 import { composeMemory, memoryBudget, type MemoryBudget } from "./memory-context.js";
 import { persistMemoryLearning } from "./memory-learning.js";
+import { MEMORY_INITIALIZATION_DIR } from "../memory/cache.js";
 
 export function createMemoryBootstrap(options: { dataDir: string; model: Model<Api>; embedding?: ReturnType<typeof createEmbeddingClient>;
   dynamics?: Partial<MemoryDynamics>; recall?: Partial<RecallConfig>; budget?: MemoryBudget; ratio?: number; ratios?: Record<string, number> }) {
@@ -73,7 +74,7 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
           }
         }
         const historicalLog: RuntimeLog = { ...log, read: async () => before };
-        const projection = createMemoryProjection({ log: historicalLog, dataDir: join(options.dataDir, "memory-initialization"), userId,
+        const projection = createMemoryProjection({ log: historicalLog, dataDir: join(options.dataDir, MEMORY_INITIALIZATION_DIR), userId,
           embedding: options.embedding, dynamics: options.dynamics, recall: options.recall, now: () => at });
         const candidates = await projection.search(current.messages[0]!.text, 72, current.id);
         const replaySource = [...source.slice(0, position + 1), ...controls];

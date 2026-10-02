@@ -58,6 +58,7 @@ export async function createPiAgent(options: {
     budget: options.memoryBudget, ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios });
   return {
     memoryVector: (text: string) => embedding?.cached(text),
+    purgeEmbeddingCache: () => embedding?.purge(),
     initializeMemory: (log: RuntimeLog, userId: number) => bootstrap.start(log, userId),
     async answer(messages: Message[], request?: Request): Promise<string> {
       const current = messages.at(-1);

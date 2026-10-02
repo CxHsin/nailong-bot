@@ -22,6 +22,19 @@ export function memoryQualification(events: StoredEvent[], node: MemoryNode) {
   if (!settledAt || !Number.isFinite(Date.parse(settledAt))) return undefined;
   return { position, settledAt, deliveredSources: assistant.filter((message) => (message.availableSequence ?? -1) <= position).map((message) => message.id) };
 }
+export function memoryNodesForReply(events: StoredEvent[], userId: number, messageId: number): MemoryNode[] {
+  const originals = memoryNodes(events.filter((event) => event.type !== "memory_excluded"), userId);
+  const requests = new Set<string>();
+  const sources = new Set(events.flatMap((event, index) => {
+    if (event.type === "message" && event.role === "user" && event.messageId === messageId) return [eventIdentity(event, index)];
+    if (event.type !== "telegram_delivery_succeeded" || event.telegramMessageId !== messageId) return [];
+    const source = events.find((item) => item.type === "text_finalized" && item.textSegmentId === event.textSegmentId &&
+      item.requestId === event.requestId && ["result", "final"].includes(String(item.contentKind)));
+    if (source?.requestId) requests.add(source.requestId);
+    return source ? [eventIdentity(source, events.indexOf(source))] : [];
+  }));
+  return originals.filter((node) => node.requestId && requests.has(node.requestId) || node.messages.some((message) => sources.has(message.id)));
+}
 export function memoryNodes(events: StoredEvent[], userId: number): MemoryNode[] {
   const excluded = memoryExclusions(events);
   const nodes: MemoryNode[] = [];

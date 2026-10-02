@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import type { StoredEvent } from "../runtime/runtime-types.js";
 import { sourceDigest } from "../runtime/event-digest.js";
 
@@ -11,6 +11,10 @@ export type Checkpoint = { version: 2; id: string; boundary: string; through: nu
 export function createCheckpointStore(dataDir: string, strategy: Checkpoint["summaryStrategy"] = "full-result-v1") {
   const dir = join(dataDir, "checkpoints");
   return {
+    async invalidate() {
+      if (dirname(resolve(dir)) !== resolve(dataDir)) throw new Error("历史摘要缓存路径无效");
+      await rm(dir, { recursive: true, force: true });
+    },
     async load(boundary: string, events: StoredEvent[]): Promise<Checkpoint | undefined> {
       let names: string[];
       try { names = await readdir(dir); }

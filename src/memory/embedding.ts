@@ -39,6 +39,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
   let worker: Promise<void> | undefined; let stopped = false; let status: string | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined; let backoff = 100;
   let generation = 0; let activeGeneration = 0;
+  let cacheEpoch = 0;
   const key = (text: string, kind = "message") => sourceDigest({ namespace: namespace(), kind, text });
   function cached(text: string, kind = "message"): number[] | undefined {
     const row = db.prepare("SELECT payload FROM vectors WHERE key=? AND namespace=?").get(key(text, kind), namespace()) as { payload: string } | undefined;
@@ -50,6 +51,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
   }
   async function compute(jobs: Job[], background = false): Promise<number[][]> {
       const computation = ++generation;
+      const epoch = cacheEpoch;
       const input: Array<{ text: string; job: number }> = [];
       for (const [index, job] of jobs.entries()) {
         if (job.eligible && !await job.eligible()) continue;
@@ -94,7 +96,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
         }
         const responseNamespace = sourceDigest({ baseNamespace, dimension: responseDimension });
         for (const [index, job] of jobs.entries()) {
-          if (vectors[index]!.length && eligible[index]) storeVector(job.text, vectors[index]!, "message", responseNamespace);
+          if (vectors[index]!.length && eligible[index] && epoch === cacheEpoch) storeVector(job.text, vectors[index]!, "message", responseNamespace);
         }
         status = undefined; return vectors;
       } catch { status = "embedding_unavailable"; throw new Error("embedding 暂不可用"); }
@@ -148,6 +150,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
     runWorker();
   }
   return { cached, get, enqueue, turn, namespace, identity: baseNamespace, status: () => status,
+    purge() { cacheEpoch++; db.exec("DELETE FROM vectors"); },
     async close() { stopped = true; if (retry) clearTimeout(retry); queued.clear(); controllers.forEach((controller) => controller.abort());
       await Promise.allSettled([...pending.values()]); await worker; db.close(); },
   };

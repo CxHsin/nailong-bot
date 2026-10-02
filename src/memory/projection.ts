@@ -8,6 +8,7 @@ import { cosineOfUnitVectors, type createEmbeddingClient } from "./embedding.js"
 import { graphAt, memoryGraph, type MemoryState, type MemoryInitialization } from "./graph.js";
 import { MEMORY_ALGORITHM, memoryDynamics, type MemoryDynamics } from "./dynamics.js";
 import { rankMemories, recallConfig, type RecallConfig } from "./recall.js";
+import { MEMORY_INDEX_FILE } from "./cache.js";
 
 export type MemoryCandidate = { node: MemoryNode; score: number; sources: string[]; similarity?: number; state?: MemoryState; initialization?: MemoryInitialization; paths?: string[][] };
 export function literalTerms(text: string): string[] {
@@ -20,7 +21,7 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
     const events = source ?? await options.log.read();
     const result = memoryNodes(events, options.userId);
     await mkdir(options.dataDir, { recursive: true });
-    const db = new DatabaseSync(join(options.dataDir, "memory.sqlite"));
+    const db = new DatabaseSync(join(options.dataDir, MEMORY_INDEX_FILE));
     try {
       db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS memory_nodes (id TEXT PRIMARY KEY, payload TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
       const fingerprint = sourceDigest({ version: 1, userId: options.userId, nodes: result });
@@ -60,7 +61,7 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
     const terms = literalTerms(query);
     const dynamics = memoryDynamics(options.dynamics);
     const baseGraph = memoryGraph(events, options.userId, (text) => embedding?.cached(text), dynamics);
-    const db = new DatabaseSync(join(options.dataDir, "memory.sqlite"));
+    const db = new DatabaseSync(join(options.dataDir, MEMORY_INDEX_FILE));
     try {
       db.prepare("INSERT OR REPLACE INTO memory_meta VALUES ('graph', ?)").run(JSON.stringify({ algorithm: MEMORY_ALGORITHM, userId: options.userId,
         sourceDigest: sourceDigest(events), through: events.at(-1)?.sequence ?? events.length, embedding: embedding?.namespace(), dynamics,

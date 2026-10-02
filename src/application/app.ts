@@ -12,6 +12,7 @@ import { projectDeliveredChat, projectFinalAnswer,
   projectRequestState } from "./runtime-projections.js";
 import { commitMemoryLearning } from "./memory-learning.js";
 import type { MemoryDynamics } from "../memory/dynamics.js";
+import { handleMemoryCommand } from "./memory-commands.js";
 
 import { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
 export { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
@@ -26,6 +27,7 @@ export function createApp(options: {
   answer: (messages: Message[], request: Request) => Promise<string>;
   memoryDynamics?: Partial<MemoryDynamics>;
   memoryVector?: (text: string) => number[] | undefined;
+  purgeEmbeddingCache?: () => void;
 }) {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
   const readEvents = createEventReader(log);
@@ -61,6 +63,7 @@ export function createApp(options: {
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text?.trim() || "请分析这张图片。";
+    if (await handleMemoryCommand(log, options, update, text, onStarted)) return;
     if (await handleCommand(log, options, update, text, onStarted)) return;
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
@@ -70,6 +73,7 @@ export function createApp(options: {
       // Requests are serialized by this app. An older open request cannot still be running here.
       for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
       const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId, requestId: id,
+        replyToMessageId: update.replyToMessageId,
         originalText: update.text ?? null,
         ...(update.images?.length ? { images: update.images } : {}) },
         { type: "request_started", requestId: id }];

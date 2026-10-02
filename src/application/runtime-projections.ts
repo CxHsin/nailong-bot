@@ -1,5 +1,6 @@
 import type { Message } from "./app-types.js";
 import type { StoredEvent } from "../runtime/runtime-types.js";
+import { filterMemoryEvents } from "../runtime/memory-exclusion.js";
 
 /** Derived state only: every value can be rebuilt from the committed event prefix. */
 export function projectRequestState(events: StoredEvent[]) {
@@ -19,6 +20,7 @@ export function projectRequestState(events: StoredEvent[]) {
 
 /** Compatibility view for simple answer adapters; Pi uses replayEvents instead. */
 export function projectDeliveredChat(events: StoredEvent[]): Message[] {
+  events = filterMemoryEvents(events);
   const reset = events.findLastIndex((event) => event.type === "reset");
   const generated = new Map<string, string>();
   const messages: Message[] = [];

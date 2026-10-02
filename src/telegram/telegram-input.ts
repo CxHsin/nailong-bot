@@ -50,7 +50,7 @@ export function registerTelegramInput(bot: Bot, options: {
       let hasStarted = false;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const completed = options.handle({ userId: ctx.from.id, chatType: ctx.chat.type,
-        text: ctx.message.text ?? ctx.message.caption, images, messageId: ctx.message.message_id },
+        text: ctx.message.text ?? ctx.message.caption, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
         () => { hasStarted = true; markStarted(); });
       active.add(completed);
       void completed.then(() => { active.delete(completed); }, () => {

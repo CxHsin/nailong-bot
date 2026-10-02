@@ -9,10 +9,10 @@ export function toolResultView(toolName: string, result: ToolResult, archive: To
 }
 
 export function replayToolResultView(options: { result: ToolResult; archive?: ToolArchive;
-  recorded?: unknown; archiveRead: boolean; olderThanRecent: boolean; toolName: string }) {
+  recorded?: unknown; archiveRead: boolean; olderThanRecent: boolean; toolName: string; sourceFiltered?: boolean }) {
   const { result, archive, recorded, archiveRead, olderThanRecent, toolName } = options;
-  const pruned = recorded === "archive" || (recorded === undefined &&
-    (shouldPrune(result, archiveRead) || (olderThanRecent && shouldPrune(result, false))));
+  const pruned = !options.sourceFiltered && (recorded === "archive" || (recorded === undefined &&
+    (shouldPrune(result, archiveRead) || (olderThanRecent && shouldPrune(result, false)))));
   return { content: pruned && archive ? archivePlaceholder(toolName, archive) : result.content,
     details: pruned ? {} : result.details };
 }

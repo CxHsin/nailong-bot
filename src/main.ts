@@ -75,6 +75,7 @@ async function main(): Promise<void> {
     },
     answer: agent.answer,
     memoryVector: agent.memoryVector,
+    purgeEmbeddingCache: agent.purgeEmbeddingCache,
     send: async (text, update, onChunk) => {
       const chunks = planTelegramText(text);
       for (const [index, chunk] of chunks.entries()) {

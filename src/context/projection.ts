@@ -6,7 +6,8 @@ import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "../runtime/runtime-types.js";
 import { protocolText } from "../agent/output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
-import { eventIdentity } from "../runtime/memory-facts.js";
+import { eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
+import { filterMemoryEvents, filterMemoryToolResult, filterArchivedMemoryResult } from "../runtime/memory-exclusion.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
@@ -14,7 +15,9 @@ export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUni
   diagnostics: string[] };
 
 export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
-  const all = await log.read();
+  const rawEvents = await log.read();
+  const excluded = memoryExclusions(rawEvents);
+  const all = filterMemoryEvents(rawEvents);
   const replayText = (type: "progress" | "status" | "result" | "final", text: string, timestamp: number) =>
     assistantText(structured ? protocolText(type, text) : text, model, timestamp);
   const reset = all.findLastIndex((event) => event.type === "reset");
@@ -88,7 +91,10 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
             found.event.result as ToolResult; }
           catch { throw new Error("工具归档缺失或校验失败"); }
           if (!result || !Array.isArray(result.content)) throw new Error("缺少完整工具结果");
-          const view = replayToolResultView({ result, archive, recorded: found.event.modelVisible,
+          const unfiltered = result;
+          result = filterArchivedMemoryResult(rawEvents, found.event, filterMemoryToolResult(call.name, result, excluded), excluded);
+          const view = replayToolResultView({ result, archive,
+            sourceFiltered: result !== unfiltered, recorded: found.event.modelVisible,
             archiveRead: log.isArchiveRead(call.name, sent.event.args),
             olderThanRecent: !recent.includes(event.requestId) && event.requestId !== currentId,
             toolName: call.name });
@@ -162,5 +168,6 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   }
   for (const identity of results.keys()) if (!used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);
   if (!current) throw new Error("缺少当前用户消息");
-  return { events, boundary: reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1)), units, current, diagnostics };
+  const boundary = reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1));
+  return { events, boundary: excluded.size ? `${boundary}:${sourceDigest([...excluded].sort())}` : boundary, units, current, diagnostics };
 }

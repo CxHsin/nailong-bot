@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { createServer, type ServerResponse } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { createApp } from "../src/application/app.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
+import type { ToolResult } from "../src/runtime/runtime-types.js";
 
 type Payload = { messages: Array<{ role: string; content?: unknown }>; tools?: unknown[] };
 let toolSequence = 0;
@@ -32,7 +33,7 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, ...extra };
   let agent = await createPiAgent(options);
   const sent: string[] = [];
-  const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, send: async (text) => { sent.push(text); }, ...overrides });
+  const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, purgeEmbeddingCache: agent.purgeEmbeddingCache, send: async (text) => { sent.push(text); }, ...overrides });
   let app = makeApp(); let id = 0;
   t.after(async () => { await agent.close(); server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
   return { dir, log, seen, sent, makeApp,
@@ -646,4 +647,176 @@ test("historical early reinforcement freezes a user-only baseline before a late 
   assert.equal(initial.salience, 0);
   assert.deepEqual((events.find((event) => event.type === "memory_learned" && event.requestId === "frozen-early-b")!.activated as Array<{ nodeId: string }>).map((item) => item.nodeId), ["frozen-late-a"]);
   assert.equal(events.filter((event) => event.type === "memory_initialized" && event.nodeId === "frozen-late-a").length, 1);
+});
+
+test("explicit forgetting filters later context and memory, preserves raw inspection, and permits new same-topic information", async (t) => {
+  const fixture = await memoryFixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "tool") answer(res, "已查询");
+    else if (last.content === "查 limboo") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else answer(res, "答复");
+  });
+  await fixture.send("limboo 原始秘密alpha");
+  const nodeId = (await fixture.log.read()).find((event) => event.type === "message" && event.role === "user")!.requestId!;
+  const calls = fixture.seen.length;
+  await fixture.send(`/forget ${nodeId}`);
+  assert.equal(fixture.seen.length, calls);
+  assert.equal((await fixture.log.read()).filter((event) => event.type === "memory_excluded" && event.nodeId === nodeId).length, 1);
+  await fixture.send("查 limboo");
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /原始秘密alpha/);
+  await fixture.send(`/memory log ${nodeId}`);
+  assert.match(fixture.sent.at(-1)!, /原始秘密alpha/);
+  assert.match(fixture.sent.at(-1)!, /不恢复/);
+  await fixture.send("/reset"); await fixture.restart(["memory.sqlite", "embeddings.sqlite"]);
+  await fixture.send("limboo 重新建立的新约定beta"); await fixture.send("查 limboo");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /新约定beta/);
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /原始秘密alpha/);
+  assert.ok((await fixture.log.read()).some((event) => event.type === "message" && event.text === "limboo 原始秘密alpha"));
+});
+
+test("reply-based forgetting locates both user and delivered assistant turns, and duplicate inputs stay idempotent", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  let botMessageId = 500;
+  const app = fixture.makeApp({ telegram: { send: async () => ++botMessageId, edit: async () => {} } });
+  await app.handle({ userId: 42, chatType: "private", text: "用户回复目标alpha", messageId: 301 });
+  await app.handle({ userId: 42, chatType: "private", text: "/forget", messageId: 302, replyToMessageId: 301 });
+  await app.handle({ userId: 42, chatType: "private", text: "助手回复目标beta", messageId: 303 });
+  const delivery = (await fixture.log.read()).findLast((event) => event.type === "telegram_delivery_succeeded")!;
+  const command = { userId: 42, chatType: "private", text: "忘掉这件事", messageId: 304, replyToMessageId: Number(delivery.telegramMessageId) };
+  await app.handle(command); await app.handle(command);
+  const events = await fixture.log.read();
+  const excluded = events.filter((event) => event.type === "memory_excluded");
+  assert.equal(excluded.length, 2); assert.equal(new Set(excluded.map((event) => event.nodeId)).size, 2);
+  assert.ok(excluded.every((event) => event.replyToMessageId !== undefined));
+  const count = events.length;
+  await app.handle({ ...command, userId: 999, messageId: 305 });
+  assert.equal((await fixture.log.read()).length, count);
+  await app.handle({ userId: 42, chatType: "private", text: "后续正常问题", messageId: 306 });
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /用户回复目标alpha|助手回复目标beta/);
+});
+
+test("ambiguous forgetting only offers confirmation candidates and old memory tool results are filtered with valid pairing", async (t) => {
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (data.messages.at(-1)!.role === "tool") answer(res, "已查询");
+    else if (data.messages.at(-1)!.content === "查旧事") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else answer(res, "答复");
+  });
+  await fixture.send("limboo 私密旧事实alpha"); await fixture.send("查旧事");
+  const target = (await fixture.log.read()).find((event) => event.type === "message" && event.text === "limboo 私密旧事实alpha")!.requestId!;
+  await fixture.send("忘掉 limboo");
+  assert.equal((await fixture.log.read()).some((event) => event.type === "memory_excluded"), false);
+  assert.match(fixture.sent.at(-1)!, /没有执行排除/);
+  await fixture.send(`/forget ${target}`); await fixture.send("不相关的新问题");
+  const context = fixture.seen.at(-1)!.messages;
+  assert.doesNotMatch(JSON.stringify(context), /私密旧事实alpha/);
+  assert.ok(context.some((message) => message.role === "tool"));
+  assert.ok(context.some((message) => message.role === "assistant"));
+});
+
+test("excluded memory cannot return through archived read results including recursive and legacy reads", async (t) => {
+  let archivePath = "";
+  const fixture = await memoryFixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "tool") answer(res, "查询完成");
+    else if (last.content === "查旧事归档") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else if (last.content === "读来源归档") answer(res, "", { name: "read", args: { path: archivePath } });
+    else answer(res, "答复");
+  });
+  await fixture.send("limboo archive_sensitive"); await fixture.send("查旧事归档");
+  let events = await fixture.log.read();
+  const target = events.find((event) => event.type === "message" && event.text === "limboo archive_sensitive")!.requestId!;
+  archivePath = (events.findLast((event) => event.type === "tool_result")!.archive as { path: string }).path;
+  await fixture.send("读来源归档");
+  events = await fixture.log.read();
+  archivePath = "@" + relative(fixture.dir, (events.findLast((event) => event.type === "tool_result" && event.toolName === "memory_search")!.archive as { rawPath: string }).rawPath);
+  if (process.platform === "win32") archivePath = archivePath.toUpperCase();
+  await fixture.send("读来源归档");
+  events = await fixture.log.read();
+  const oldRead = events.findLast((event) => event.type === "tool_result" && event.toolName === "read")!;
+  const oldModel = events.findLast((event) => event.type === "model_message" && event.requestId === oldRead.requestId &&
+    (event.message as { content: Array<{ type: string }> }).content.some((part) => part.type === "toolCall"))!;
+  const legacyResult = { ...(oldRead.result as ToolResult), details: {} };
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "legacy-read", text: "旧版来源查询" });
+  await fixture.log.append({ type: "model_message", requestId: "legacy-read", message: oldModel.message });
+  await fixture.log.append({ type: "tool_dispatch", requestId: "legacy-read", toolCallId: oldRead.toolCallId, toolName: "read", args: { path: archivePath } });
+  await fixture.log.append({ type: "tool_result", requestId: "legacy-read", toolCallId: oldRead.toolCallId, toolName: "read", result: legacyResult, archive: await fixture.log.archive(legacyResult) });
+  await fixture.log.append({ type: "request_completed", requestId: "legacy-read" });
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /archive_sensitive/);
+  events = await fixture.log.read();
+  archivePath = (events.findLast((event) => event.type === "tool_result")!.archive as { path: string }).path;
+  await fixture.send("读来源归档");
+  await fixture.send(`/forget ${target}`); await fixture.send("普通新问题");
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /archive_sensitive/);
+  assert.equal(fixture.seen.at(-1)!.messages.filter((message) => message.role === "tool").length, 5);
+  await fixture.restart(); await fixture.send("重启后新问题");
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /archive_sensitive/);
+});
+
+test("replying to a confirmed page of a partially delivered final can exclude its user turn", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "多页正文".repeat(1800)));
+  let sends = 0;
+  const app = fixture.makeApp({ telegram: { send: async () => { if (++sends === 2) throw new Error("second page unavailable"); return 900 + sends; }, edit: async () => {} } });
+  await app.handle({ userId: 42, chatType: "private", text: "部分送达目标", messageId: 410 });
+  const events = await fixture.log.read();
+  const delivered = events.find((event) => event.type === "telegram_delivery_succeeded")!;
+  assert.ok(delivered);
+  await app.handle({ userId: 42, chatType: "private", text: "/forget", messageId: 411, replyToMessageId: Number(delivered.telegramMessageId) });
+  assert.ok((await fixture.log.read()).some((event) => event.type === "memory_excluded" && event.nodeId === delivered.requestId));
+});
+
+test("archive source exclusion survives removal of a previously verified directory alias", async (t) => {
+  let path = "";
+  const fixture = await memoryFixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "tool") answer(res, "已读取");
+    else if (last.content === "查来源") answer(res, "", { name: "memory_search", args: { query: "limboo" } });
+    else if (last.content === "读别名") answer(res, "", { name: "read", args: { path } });
+    else answer(res, "答复");
+  });
+  await fixture.send("limboo alias_sensitive"); await fixture.send("查来源");
+  const events = await fixture.log.read();
+  const target = events.find((event) => event.type === "message" && event.text === "limboo alias_sensitive")!.requestId!;
+  const archive = events.findLast((event) => event.type === "tool_result")!.archive as { path: string };
+  const alias = join(fixture.dir, "archive-alias");
+  await symlink(join(fixture.dir, "tool-results"), alias, process.platform === "win32" ? "junction" : "dir");
+  path = join(alias, relative(join(fixture.dir, "tool-results"), archive.path));
+  await fixture.send("读别名");
+  await fixture.send(`/forget ${target}`);
+  await rm(alias); await fixture.restart(); await fixture.send("无关新问题");
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /alias_sensitive/);
+});
+
+test("a password question replying to an old message does not authorize forgetting", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  const app = fixture.makeApp();
+  await app.handle({ userId: 42, chatType: "private", text: "账号凭据旧约定", messageId: 401 });
+  await app.handle({ userId: 42, chatType: "private", text: "忘记密码怎么办？", messageId: 402, replyToMessageId: 401 });
+  assert.equal((await fixture.log.read()).some((event) => event.type === "memory_excluded"), false);
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /忘记密码怎么办/);
+  await app.handle({ userId: 42, chatType: "private", text: "忘掉账号", messageId: 403, replyToMessageId: 401 });
+  assert.equal((await fixture.log.read()).some((event) => event.type === "memory_excluded"), false);
+  assert.match(fixture.sent.at(-1)!, /没有执行排除/);
+});
+
+test("forgetting invalidates affected summaries and regenerates them only from remaining original facts", async (t) => {
+  let summaries = 0;
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (JSON.stringify(data.messages).includes("HISTORY_COMPACTION")) {
+      summaries++;
+      const sensitive = JSON.stringify(data.messages).includes("alpha_sensitive");
+      const summary = `## Goal\nContinue.\n## Progress\nEarlier work.\n## Constraints\nKeep evidence.\n## Decisions\nUse sources.\n## Next Steps\nAnswer.\n## Critical Context\n${sensitive ? "alpha_sensitive" : "remaining clean facts"}`;
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: summary }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    } else answer(res, "答复");
+  }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
+  for (let index = 0; index < 5; index++) {
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `forget-summary-${index}`, text: `${index === 0 ? "alpha_sensitive" : "other"} ` + "x".repeat(2500) });
+    await fixture.log.append({ type: "answer_generated", requestId: `forget-summary-${index}`, text: "y".repeat(2500) });
+    await fixture.log.append({ type: "delivery_succeeded", requestId: `forget-summary-${index}` });
+    await fixture.log.append({ type: "request_completed", requestId: `forget-summary-${index}` });
+  }
+  await fixture.send("继续"); const before = summaries; assert.ok(before > 0);
+  await fixture.send("/forget forget-summary-0"); await fixture.send("再继续");
+  assert.ok(summaries > before);
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /alpha_sensitive/);
 });
