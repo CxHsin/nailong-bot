@@ -19,6 +19,7 @@ import { memoryTools } from "../memory/tools.js";
 import type { MemoryBudget } from "../application/memory-context.js";
 import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
 import type { MemoryDynamics } from "../memory/dynamics.js";
+import type { RecallConfig } from "../memory/recall.js";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -34,6 +35,7 @@ export async function createPiAgent(options: {
   embedding?: EmbeddingConfig;
   memoryDynamics?: Partial<MemoryDynamics>;
   memoryNow?: () => number;
+  memoryRecall?: Partial<RecallConfig>;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -63,7 +65,7 @@ export async function createPiAgent(options: {
       await loader.reload();
       const manager = SessionManager.inMemory(options.dataDir);
       const userId = request ? (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user")?.chatId : undefined;
-      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding, dynamics: options.memoryDynamics, now: options.memoryNow }) : undefined;
+      const memory = request && typeof userId === "number" ? createMemoryProjection({ log: request.log, dataDir: options.dataDir, userId, embedding, dynamics: options.memoryDynamics, now: options.memoryNow, recall: options.memoryRecall }) : undefined;
       for (const message of request ? [] : messages.slice(0, -1)) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });

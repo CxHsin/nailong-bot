@@ -10,7 +10,7 @@ export function memoryTools(memory: ReturnType<typeof createMemoryProjection>, c
     execute: async (_id, args) => {
       const items: Array<{ nodeId: string; score: number; messages: unknown[] }> = [];
       for (const c of await memory.search(args.query, args.limit ?? 10, currentId)) {
-        const item = { nodeId: c.node.id, score: c.score, sources: c.sources, similarity: c.similarity, state: c.state, messages: [] as unknown[] };
+        const item = { nodeId: c.node.id, score: c.score, sources: c.sources, similarity: c.similarity, state: c.state, paths: c.paths, messages: [] as unknown[] };
         for (const message of c.node.messages) {
           const points = Array.from(message.text);
           const preview = { id: message.id, role: message.role, at: message.at, offset: 0, end: Math.min(250, points.length),

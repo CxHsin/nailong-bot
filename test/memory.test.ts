@@ -444,3 +444,52 @@ test("existing original context qualifies for learning but summary-only history 
   assert.deepEqual(new Set(activated.map((item) => item.nodeId)), new Set(shown.map((item) => item.nodeId)));
   assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /历史摘要/);
 });
+
+test("learned local associations inject original background without a literal match", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "game", text: "limboo 是我的朋友" });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "care", text: "引流条每天换药" });
+  await fixture.send("limboo 引流条");
+  await fixture.send("/reset"); await fixture.send("limboo 最近怎样");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /引流条每天换药/);
+  const candidates = (await fixture.log.read()).findLast((event) => event.type === "memory_recalled")!.candidates as Array<{ nodeId: string; sources: string[] }>;
+  assert.ok(candidates.find((item) => item.nodeId === "care")!.sources.includes("local"));
+});
+
+test("multiple learned seed paths discover far-field background and excluded nodes cannot bridge", async (t) => {
+  const fixture = await memoryFixture(t, (_data, res) => answer(res, "答复"));
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "far-care", at: new Date(Date.now() - 3 * 86400_000).toISOString(), text: "引流条每天换药" });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "far-game", text: "limboo 是我的朋友" });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "far-family", text: "舍友和我联机" });
+  await fixture.send("limboo 舍友 引流条");
+  await fixture.send("/reset"); await fixture.send("limboo 舍友 最近怎样");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /引流条每天换药/);
+  const snapshot = (await fixture.log.read()).findLast((event) => event.type === "memory_recalled")!;
+  const distant = (snapshot.candidates as Array<{ nodeId: string; sources: string[]; paths: string[][] }>).find((item) => item.nodeId === "far-care")!;
+  assert.ok(distant.sources.includes("far")); assert.ok(!distant.sources.includes("local"));
+  assert.ok(new Set(distant.paths.map((path) => path[0])).size >= 2);
+  await fixture.log.append({ type: "memory_excluded", nodeId: "far-care" });
+  await fixture.send("/reset"); await fixture.send("limboo 舍友 最近怎样");
+  assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /引流条每天换药/);
+});
+
+test("a greeting hub and unrelated noise cannot outrank a direct personal-name fact", async (t) => {
+  const fixture = await memoryFixture(t, (data, res) => {
+    if (data.messages.at(-1)!.role === "tool") answer(res, String(data.messages.at(-1)!.content));
+    else answer(res, "", { name: "memory_search", args: { query: "limboo", limit: 20 } });
+  }, { memoryRecall: { maxLocalNodes: 16, iterations: 3, maxTransitions: 4 } });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "specific", text: "limboo 是我的朋友" });
+  await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: "hub", text: "你好 晚安" });
+  const dynamics = { strengthMs: 7 * 86400_000, edgeMs: 14 * 86400_000, resourceMs: 30 * 60_000, strengthCap: 3, edgeCap: 2,
+    strengthRate: 0.18, resourceRate: 0.35, edgeRate: 0.12, backwardRatio: 0.25 };
+  for (let index = 0; index < 24; index++) {
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `noise-${index}`, text: "不相关背景" });
+    await fixture.log.append({ type: "memory_learned", requestId: `noise-${index}`, userId: 42, algorithm: "akasha-v1", origin: "online", settledAt: new Date().toISOString(), dynamics,
+      activated: [{ nodeId: "hub", signal: 0.7, score: 2 }, ...(index === 0 ? [{ nodeId: "specific", signal: 0.7, score: 2 }] : [])] });
+  }
+  await fixture.send("/reset"); await fixture.send("查询名字");
+  const results = JSON.parse(fixture.sent.at(-1)!) as Array<{ nodeId: string; score: number; paths: string[][] }>;
+  assert.equal(results[0]!.nodeId, "specific");
+  assert.ok(results.every((item) => Number.isFinite(item.score) && item.score >= 0));
+  assert.ok(results.every((item) => item.paths.length <= 4 && item.paths.every((path) => path.length <= 4)));
+});

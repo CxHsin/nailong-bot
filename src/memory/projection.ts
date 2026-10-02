@@ -7,14 +7,15 @@ import type { RuntimeLog, StoredEvent } from "../runtime/runtime-types.js";
 import { cosineOfUnitVectors, type createEmbeddingClient } from "./embedding.js";
 import { graphAt, memoryGraph, type MemoryState, type MemoryInitialization } from "./graph.js";
 import { MEMORY_ALGORITHM, memoryDynamics, type MemoryDynamics } from "./dynamics.js";
+import { rankMemories, recallConfig, type RecallConfig } from "./recall.js";
 
-export type MemoryCandidate = { node: MemoryNode; score: number; sources: string[]; similarity?: number; state?: MemoryState; initialization?: MemoryInitialization };
+export type MemoryCandidate = { node: MemoryNode; score: number; sources: string[]; similarity?: number; state?: MemoryState; initialization?: MemoryInitialization; paths?: string[][] };
 export function literalTerms(text: string): string[] {
   const parts = text.toLowerCase().match(/[a-z0-9_]+|[\p{Script=Han}]+/gu) ?? [];
   return [...new Set(parts.flatMap((part) => /\p{Script=Han}/u.test(part) && part.length > 1
     ? Array.from({ length: part.length - 1 }, (_, i) => part.slice(i, i + 2)) : [part]))];
 }
-export function createMemoryProjection(options: { log: RuntimeLog; dataDir: string; userId: number; embedding?: ReturnType<typeof createEmbeddingClient>; dynamics?: Partial<MemoryDynamics>; now?: () => number }) {
+export function createMemoryProjection(options: { log: RuntimeLog; dataDir: string; userId: number; embedding?: ReturnType<typeof createEmbeddingClient>; dynamics?: Partial<MemoryDynamics>; now?: () => number; recall?: Partial<RecallConfig> }) {
   async function nodes(source?: StoredEvent[]): Promise<MemoryNode[]> {
     const events = source ?? await options.log.read();
     const result = memoryNodes(events, options.userId);
@@ -67,7 +68,7 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
     } finally { db.close(); }
     const graph = graphAt(baseGraph, options.now?.() ?? Date.now(), dynamics);
     const documents = all.map((n) => new Set(literalTerms(n.messages.map((m) => m.text).join("\n"))));
-    return all.map((node, i) => {
+    const content = all.map((node, i) => {
       const matched = terms.filter((term) => documents[i]!.has(term));
       const literal = matched.reduce((sum, term) => sum + Math.log(1 + all.length / (1 + documents.filter((d) => d.has(term)).length)), 0);
       const vectors = node.messages.map((message) => embedding?.cached(message.text)).filter((vector): vector is number[] => !!vector);
@@ -76,10 +77,12 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
       const direct = similarity >= 0.35 ? similarity : 0;
       const normalizedLiteral = literal / (1 + literal);
       const evidence = direct + normalizedLiteral * (1 - direct);
-      const state = graph.states.get(node.id);
-      const score = evidence * (1 + 0.8 * (state?.salience ?? 0)) * (1 + 0.6 * (state?.strength ?? 0) / dynamics.strengthCap) * (0.5 + 0.5 * (state?.resource ?? 1));
-      return { node, score, similarity, state, initialization: baseGraph.initializations.find((item) => item.nodeId === node.id), sources: [...(literal ? ["literal"] : []), ...(direct ? ["dense"] : [])] };
-    }).filter((c) => c.score > 0).sort((a, b) => b.score - a.score || a.node.id.localeCompare(b.node.id)).slice(0, Math.min(72, Math.max(1, limit)));
+      const userEvidence = node.messages.some((message) => message.role === "user" && (literalTerms(message.text).some((term) => terms.includes(term)) ||
+        queryVector && embedding?.cached(message.text) && cosineOfUnitVectors(queryVector, embedding.cached(message.text)!) >= 0.35));
+      return { node, evidence, similarity, userEvidence, sources: [...(literal ? ["literal"] : []), ...(direct ? ["dense"] : [])] };
+    });
+    return rankMemories(content, graph, dynamics, recallConfig(options.recall)).slice(0, Math.min(72, Math.max(1, limit)))
+      .map((item) => ({ ...item, initialization: baseGraph.initializations.find((entry) => entry.nodeId === item.node.id) }));
   }
   return { nodes, search, diagnostics: () => options.embedding ? options.embedding.status() : "embedding_not_configured" };
 }
