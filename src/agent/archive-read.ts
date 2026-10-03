@@ -1,7 +1,9 @@
-import { readableResult } from "../runtime/tool-archive.js";
+import { archiveReadPath, archiveSourceEvent, readableResult } from "../runtime/tool-archive.js";
+import { eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
+import { filterArchivedMemoryResult, filterMemoryToolResult } from "../runtime/memory-exclusion.js";
 import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import type { RuntimeLog, StoredEvent, ToolArchive, ToolResult } from "../runtime/runtime-types.js";
+import type { RuntimeLog, ToolArchive, ToolResult } from "../runtime/runtime-types.js";
 
 const MAX_RESPONSE_BYTES = 7500;
 
@@ -12,16 +14,22 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
       signal: Parameters<typeof ordinary.execute>[2], update: Parameters<typeof ordinary.execute>[3],
       context: Parameters<typeof ordinary.execute>[4]) {
       if (!log.isArchiveRead("read", args)) return ordinary.execute(id, args, signal, update, context);
-      const [path, fragment] = args.path.split("#", 2);
+      const path = archiveReadPath(dataDir, args)!;
+      const fragment = args.path.split("#", 2)[1];
       const events = await log.read();
-      const event = events.findLast((entry: StoredEvent) => entry.type === "tool_result" &&
-        (entry.archive as ToolArchive | undefined)?.path === path);
+      const event = archiveSourceEvent(events, args);
       if (!event) throw new Error("工具归档没有对应的运行事件");
       const archive = event.archive as ToolArchive;
+      const details = { archiveSourceId: eventIdentity(event, events.indexOf(event)) };
       const source = event.result as ToolResult | undefined;
       const result = await log.recoverArchive(archive, source);
       const serialized = JSON.stringify(result);
       if (source && serialized !== JSON.stringify(source)) throw new Error("工具归档与事件结果不一致");
+      const excluded = memoryExclusions(events);
+      const filtered = filterArchivedMemoryResult(events, event, filterMemoryToolResult(String(event.toolName), result, excluded), excluded);
+      if (JSON.stringify(filtered.content) !== JSON.stringify(result.content)) return {
+        content: [{ type: "text", text: "该归档包含已排除的记忆来源，默认读取不再展示；原始日志仍可通过 /memory log 明确诊断查阅。" }], details,
+      };
       const lines = readableResult(result).split("\n");
       const offset = args.offset ?? 1;
       const limit = args.limit ?? 120;
@@ -46,7 +54,7 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
         const text = body.subarray(start, until).toString("utf8") + (nextOffset ? "\n" : "") +
           (next ? `\n[继续读取：read({"path":${JSON.stringify(next)},"offset":${offset},"limit":${limit}})]` :
             nextOffset ? `\n[继续读取：read({"path":${JSON.stringify(path)},"offset":${nextOffset},"limit":${limit}})]` : "");
-        return { content: [{ type: "text" as const, text }], details: {} };
+        return { content: [{ type: "text" as const, text }], details };
       };
       while (stop > start && Buffer.byteLength(JSON.stringify(make(stop))) > MAX_RESPONSE_BYTES) {
         stop--;

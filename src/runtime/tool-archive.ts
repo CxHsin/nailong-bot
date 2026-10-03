@@ -1,7 +1,28 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
-import type { ToolArchive, ToolResult } from "./runtime-types.js";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { realpathSync } from "node:fs";
+import type { StoredEvent, ToolArchive, ToolResult } from "./runtime-types.js";
+
+export function archiveReadPath(dataDir: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object" || !("path" in args) || typeof args.path !== "string") return undefined;
+  let path = args.path.split("#", 1)[0]!.replace(/^@/, "").replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, " ");
+  if (path === "~") path = homedir();
+  else if (path.startsWith("~/")) path = homedir() + path.slice(1);
+  let resolved = resolve(dataDir, path);
+  try { resolved = realpathSync.native(resolved); } catch {}
+  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+export function archiveSourceEvent(events: StoredEvent[], args: unknown): StoredEvent | undefined {
+  return events.findLast((entry) => {
+    const archive = entry.archive as ToolArchive | undefined;
+    if (entry.type !== "tool_result" || !archive) return false;
+    const path = archiveReadPath(resolve(dirname(archive.path), ".."), args);
+    return !!path && [archive.path, archive.rawPath].some((source) => archiveReadPath(resolve(dirname(archive.path), ".."), { path: source }) === path);
+  });
+}
 
 export function archivePlaceholder(toolName: string, archive: ToolArchive): ToolResult["content"] {
   return [{ type: "text", text: `工具结果已归档。工具：${toolName}；可读取的 JSONL 归档路径：${archive.path}；该归档文件字节数：${archive.bytes}；该归档文件 SHA-256：${archive.sha256}。可用 read 按 offset/limit 分段读取；各行按 part 排序并拼接 text，可还原完整原始结果 JSON。` }];
@@ -100,9 +121,9 @@ export function createToolArchive(dataDir: string) {
     isArchiveRead(toolName: string, args: unknown): boolean {
       if (toolName !== "read" || typeof args !== "object" || args === null || !("path" in args) ||
         typeof args.path !== "string") return false;
-      const pathname = args.path.split("#", 1)[0]!;
+      const pathname = archiveReadPath(dataDir, args)!;
       const inside = relative(archiveDir, resolve(dataDir, pathname));
-      return !!inside && !inside.startsWith("..") && !isAbsolute(inside) && pathname.endsWith(".txt");
+      return !!inside && !inside.startsWith("..") && !isAbsolute(inside) && /\.(txt|json)$/i.test(pathname);
     },
   };
 }

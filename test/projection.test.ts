@@ -9,6 +9,7 @@ import { createPiAgent } from "../src/agent/pi-agent.js";
 import { assistantText } from "../src/agent/model-message.js";
 import { getModel } from "@mariozechner/pi-ai";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { closeFixture } from "./fixtures/cleanup.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
@@ -24,7 +25,6 @@ function reply(res: ServerResponse, content: string, call?: { id: string; name: 
 async function fixture(t: TestContext, respond: (data: Payload, res: ServerResponse) => void,
   options: Partial<Parameters<typeof createPiAgent>[0]> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "projection-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
   const promptFile = join(dir, "prompt.md");
   await writeFile(promptFile, "Be helpful.");
   const seen: Payload[] = [];
@@ -36,13 +36,12 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
     respond(data, res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const agentOptions = { dataDir: dir, promptFile, deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}`, ...options };
   let agent = await createPiAgent(agentOptions);
-  t.after(() => agent.close());
+  t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const replies: string[] = [];
   const makeApp = () => createApp({ ownerId: 42, dataDir: dir, answer: agent.answer,
     send: async (text) => { replies.push(text); } });
@@ -85,7 +84,7 @@ test("model window budget folds old history, preserves three requests, and reuse
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
       summaries++; reply(res, summary);
     } else reply(res, "finished");
-  }, { contextWindow: 6600 });
+  }, { contextWindow: 7600 });
   const events = Array.from({ length: 6 }, (_, i) => [
     { type: "message", role: "user", text: `old-${i}:` + "x".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
     { type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
@@ -101,7 +100,7 @@ test("model window budget folds old history, preserves three requests, and reuse
   assert.match(history, /old-3:/);
   assert.match(history, /old-5:/);
   const outputLimit = normal.max_tokens ?? normal.max_completion_tokens;
-  assert.ok(outputLimit! <= 6600 && outputLimit! > 0);
+  assert.ok(outputLimit! <= 7600 && outputLimit! > 0);
   const before = summaries;
   await f.restart();
   await f.send("again");

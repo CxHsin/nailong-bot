@@ -1,4 +1,4 @@
-import { estimateInput } from "./input-budget.js";
+import { estimateInput, modelInputBudget } from "./input-budget.js";
 import { summaryInput, summarySource, validateSummary } from "./history-summary.js";
 import { createHash } from "node:crypto";
 import type { Api, Context, Message, Model } from "@mariozechner/pi-ai";
@@ -20,11 +20,10 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
   ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
   const store = createCheckpointStore(options.dataDir, "structured-text-v1");
   return {
-    async project(model: Model<Api>, context: Context, force = false): Promise<{ context: Context; maxTokens: number }> {
-      const ratio = options.ratios?.[`${model.provider}/${model.id}`] ?? options.ratio ?? 0.86;
-      if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0 ||
-        !Number.isFinite(ratio) || ratio <= 0 || ratio >= 1) throw new Error("模型窗口或 Projection 预算配置无效");
-      const budget = Math.floor(model.contextWindow * ratio);
+    async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
+      const resolved = modelInputBudget(model, options.ratio, options.ratios);
+      const ratio = resolved.ratio;
+      const budget = resolved.budget - reserveTokens;
       const replayStarted = performance.now();
       const replay = await replayEvents(options.log, options.requestId, model, true);
       const replayMs = performance.now() - replayStarted;
@@ -129,7 +128,8 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       await options.log.append({ type: "context_projected", requestId: options.requestId, estimatedTokens, budget,
         checkpointId: checkpoint?.id, diagnostics: replay.diagnostics,
         logBytes: await options.log.bytes(), replayMs, processPeakRssBytes });
-      return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)) };
+      return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)),
+        sourceIds: replay.units.filter((u) => u.through > (checkpoint?.through ?? 0)).flatMap((u) => u.sourceIds ?? []) };
     },
   };
 }

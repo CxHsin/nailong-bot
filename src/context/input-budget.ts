@@ -1,4 +1,11 @@
-import type { Context, Message } from "@mariozechner/pi-ai";
+import type { Api, Context, Message, Model } from "@mariozechner/pi-ai";
+
+export function modelInputBudget(model: Model<Api>, ratio?: number, ratios?: Record<string, number>) {
+  const selected = ratios?.[`${model.provider}/${model.id}`] ?? ratio ?? 0.86;
+  if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0 || !Number.isFinite(selected) || selected <= 0 || selected >= 1)
+    throw new Error("模型窗口或 Projection 预算配置无效");
+  return { budget: Math.floor(model.contextWindow * selected), ratio: selected };
+}
 
 // Count all serialized input components; UTF-8 / 3 is an estimate, not provider usage.
 export function estimateInput(context: Context): number {

@@ -10,6 +10,9 @@ import { createTelegramProjection } from "../telegram/telegram-projection.js";
 import type { TelegramTransport } from "../telegram/telegram-types.js";
 import { projectDeliveredChat, projectFinalAnswer,
   projectRequestState } from "./runtime-projections.js";
+import { commitMemoryLearning } from "./memory-learning.js";
+import type { MemoryDynamics } from "../memory/dynamics.js";
+import { handleMemoryCommand } from "./memory-commands.js";
 
 import { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
 export { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
@@ -22,6 +25,9 @@ export function createApp(options: {
   telegram?: TelegramTransport;
   send: (text: string, update: Update, onChunk?: (index: number, total: number) => Promise<void>) => Promise<void>;
   answer: (messages: Message[], request: Request) => Promise<string>;
+  memoryDynamics?: Partial<MemoryDynamics>;
+  memoryVector?: (text: string) => number[] | undefined;
+  purgeEmbeddingCache?: () => void;
 }) {
   const log: RuntimeLog = options.log ?? createRuntimeLog(options.dataDir);
   const readEvents = createEventReader(log);
@@ -57,6 +63,7 @@ export function createApp(options: {
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text?.trim() || "请分析这张图片。";
+    if (await handleMemoryCommand(log, options, update, text, onStarted)) return;
     if (await handleCommand(log, options, update, text, onStarted)) return;
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
@@ -66,6 +73,8 @@ export function createApp(options: {
       // Requests are serialized by this app. An older open request cannot still be running here.
       for (const requestId of active) await log.append({ type: "request_interrupted", requestId });
       const batch = [{ type: "message", role: "user", text, chatId: update.userId, messageId: update.messageId, requestId: id,
+        replyToMessageId: update.replyToMessageId,
+        originalText: update.text ?? null,
         ...(update.images?.length ? { images: update.images } : {}) },
         { type: "request_started", requestId: id }];
       if (log.appendBatch) await log.appendBatch(batch);
@@ -130,11 +139,19 @@ export function createApp(options: {
       if (telegram && await isNewOutput(id)) {
         await notice(id, "这次回复尚未完成，已发送内容保留。你可以要求继续或重新生成。");
       } else await options.send(`抱歉，这条消息暂时处理失败${safeReason}。`, update);
+    } finally {
+      await commitMemoryLearning(log, options.ownerId, options.memoryDynamics, options.memoryVector).catch(async () => {
+        await log.append({ type: "memory_degraded", requestId: id, reason: "learning_commit_unavailable" }).catch(() => undefined);
+      });
     }
   }
 
   return {
-    recover: delivery.recover,
+    recover(): Promise<void> {
+      const next = queue.then(async () => { await delivery.recover(); await commitMemoryLearning(log, options.ownerId, options.memoryDynamics, options.memoryVector); });
+      queue = next.catch(() => undefined);
+      return next;
+    },
     handle(update: Update, onStarted?: () => void): Promise<void> {
       if (!accepts(update)) return Promise.resolve();
       pendingRequests++;
