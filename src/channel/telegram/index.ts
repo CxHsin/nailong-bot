@@ -17,7 +17,7 @@ export function normalizeTelegramInput(update: TelegramInput): HostInput {
 }
 
 export type TelegramHostTransport = { draft?: (draftId: number, text: string, chatId: number) => Promise<void>; send: (text: string, chatId: number) => Promise<number>; edit?: (messageId: number, text: string, chatId: number) => Promise<void> };
-export function createTelegramHostProjection(options: TelegramHostTransport & { chatId: number }) {
+export function createTelegramHostProjection(options: TelegramHostTransport & { chatId: number; onDelivered?: (event: HostEvent) => Promise<void> }) {
   let draftId = 1;
   let finalRun: string | undefined;
   return {
@@ -27,6 +27,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & { 
         if (event.type === "run_succeeded" && event.result?.text && finalRun !== event.runId) {
           finalRun = event.runId;
           await options.send(String(event.result.text), options.chatId);
+          await options.onDelivered?.(event);
         }
       }
       return handle.done;

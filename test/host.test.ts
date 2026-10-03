@@ -80,3 +80,17 @@ test("legacy runtime events are upcast without changing stored records", async (
   assert.equal(event.type, "message");
   assert.equal(event.sequence, undefined);
 });
+
+test("a finalized result can be redelivered after a Host restart without executing again", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "host-redelivery-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir); let executions = 0;
+  const host = createHost({ log, execute: async () => { executions++; return { text: "reusable" }; } });
+  const handle = host.submit(input("once"));
+  const events = await collect(handle); const resultId = String((events.at(-1)?.result as { resultId?: string }).resultId);
+  const restarted = createHost({ log, execute: async () => { executions++; return { text: "should not run" }; } });
+  const delivered: string[] = [];
+  await restarted.redeliver(resultId, async (result) => { delivered.push(String(result.text)); });
+  assert.equal(executions, 1);
+  assert.deepEqual(delivered, ["reusable"]);
+});

@@ -34,6 +34,9 @@ const contextAllowed = (item: ContextItem) => !(["commentary", "delivery", "delt
 export function contextItemsFromEvents(events: StoredEvent[]): ContextItem[] {
   return events.flatMap((event, index): ContextItem[] => {
     const id = typeof event.eventId === "string" ? event.eventId : `${event.type}:${index + 1}`;
+    if (event.type === "run_submitted" && Array.isArray(event.parts)) {
+      return [{ type: "user", id, parts: event.parts as ContentPart[] }];
+    }
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
       const parts: ContentPart[] = [{ type: "text", text: event.text }];
       if (Array.isArray(event.images)) for (const image of event.images) if (image && typeof image === "object") {
@@ -72,7 +75,8 @@ export function projectProviderContext(request: ProviderProjectionRequest): Prov
     items = [summary, ...items.slice(request.compact.through)];
   }
   items = items.filter((item) => item.type !== "reasoning" || (request.capabilities.reasoningReplay && hasReplayMetadata(item)));
-  for (const item of items) if (item.type === "image" && !request.capabilities.images) throw new Error("Provider 不支持 image ContentPart");
+  const hasImage = items.some((item) => item.type === "image" || (item.type === "user" || item.type === "assistant") && item.parts.some((part) => part.type === "image"));
+  if (hasImage && !request.capabilities.images) throw new Error("Provider 不支持 image ContentPart");
   const config = items.filter((item) => item.type === "configUpdate");
   if (config.length && !request.capabilities.appendConfigurationUpdates) segment = config.length;
   const identity = { conversationId: request.conversationId, provider: request.capabilities.provider, model: request.capabilities.model,

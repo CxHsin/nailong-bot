@@ -26,9 +26,12 @@ export type HostEvent = {
   result?: RunResult;
   error?: string;
   reason?: string;
+  parts?: ContentPart[];
 };
 
 export type RunExecutionContext = {
+  runId: string;
+  conversationId: string;
   signal: AbortSignal;
   emit(event: Omit<HostEvent, "type" | "schemaVersion" | "runId" | "conversationId" | "sequence" | "at"> & { type: "progress" | "run_blocked" | "run_recovered" }): void;
 };
@@ -93,16 +96,21 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; pr
   };
   const run = async (job: Job, submitted: Promise<unknown>) => {
     await submitted;
+    if (job.cancelled || job.controller.signal.aborted) {
+      const terminal = await append(job, "run_cancelled", { reason: "cancelled_before_start" });
+      job.resolve(terminal); job.queue.close(); jobs.delete(job.runId); return;
+    }
     await append(job, "run_started");
     try {
-      const value = await options.execute(job.input, { signal: job.controller.signal, emit: (event) => {
+      const value = await options.execute(job.input, { runId: job.runId, conversationId: job.input.conversationId, signal: job.controller.signal, emit: (event) => {
         void append(job, event.type, event);
       } });
       if (job.controller.signal.aborted || job.cancelled) {
         const terminal = await append(job, "run_cancelled", { reason: "cancelled" }); job.resolve(terminal); return;
       }
       const result = typeof value === "string" ? { text: value } : value;
-      const terminal = await append(job, "run_succeeded", result ? { result } : {}); job.resolve(terminal);
+      const reusable = result ? { ...result, resultId: result.resultId ?? job.runId } : { resultId: job.runId };
+      const terminal = await append(job, "run_succeeded", { result: reusable }); job.resolve(terminal);
     } catch (error) {
       const cancelled = job.controller.signal.aborted || job.cancelled || (error instanceof DOMException && error.name === "AbortError");
       const terminal = await append(job, cancelled ? "run_cancelled" : "run_failed", { error: String(error), reason: cancelled ? "cancelled" : "execution" });
@@ -118,7 +126,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; pr
     const done = new Promise<HostEvent>((res, rej) => { resolve = res; reject = rej; });
     const job: Job = { input, runId, queue: eventQueue, done, resolve, reject, controller: new AbortController(), sequence: 0, cancelled: false, eventTail: Promise.resolve() };
     jobs.set(runId, job);
-    const submitted = append(job, "run_submitted");
+    const submitted = append(job, "run_submitted", { parts: structuredClone(input.parts) });
     queue = queue.then(() => run(job, submitted)).catch((error) => { reject(error); eventQueue.close(); });
     return { runId, conversationId: input.conversationId, events: () => eventQueue.iterate(), done, cancel: () => cancel(runId) };
   };
@@ -132,5 +140,14 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; pr
     });
     return queue;
   };
-  return { submit, cancel, reset, async readEvents() { return (await options.log.read()).map(upcastHostEvent); } };
+  const redeliver = async (resultId: string, deliver: (result: RunResult) => Promise<void>): Promise<RunResult> => {
+    const events = (await options.log.read()).map(upcastHostEvent);
+    const event = events.findLast((entry) => entry.type === "run_succeeded" &&
+      entry.result && typeof entry.result === "object" && (entry.result as RunResult).resultId === resultId);
+    if (!event?.result || typeof event.result !== "object") throw new Error("找不到可复用的运行结果");
+    const result = event.result as RunResult;
+    await deliver(structuredClone(result));
+    return result;
+  };
+  return { submit, cancel, reset, redeliver, async readEvents() { return (await options.log.read()).map(upcastHostEvent); } };
 }

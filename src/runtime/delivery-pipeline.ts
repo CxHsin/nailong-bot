@@ -15,6 +15,11 @@ export function createDeliveryFactStore(log: RuntimeLog) {
     async recordOutcome(resultId: string, channel: string, outcome: Exclude<DeliveryOutcome, "pending">, extra: { error?: string } = {}) {
       return log.append({ type: `delivery_${outcome}`, resultId, channel, outcome, ...extra });
     },
+    async retry(input: Omit<DeliveryFact, "outcome" | "at" | "idempotencyKey"> & { idempotencyKey?: string }) {
+      const prior = (await facts()).filter((event) => event.type === "delivery_attempt" && event.resultId === input.resultId && event.channel === input.channel).length;
+      const idempotencyKey = input.idempotencyKey ?? `${input.resultId}:${input.channel}:retry:${prior + 1}`;
+      return log.append({ type: "delivery_attempt", ...input, idempotencyKey, retry: prior + 1 });
+    },
     async recover() { return (await facts()) as StoredEvent[]; },
   };
 }

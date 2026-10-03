@@ -1,6 +1,6 @@
-# 个人 Telegram Agent
+# Nailong Agent
 
-在本机运行的单人 Telegram Bot，支持文字和图片。使用 pi SDK 调用 DeepSeek，开放 pi 原生文件工具，并把 TinyFish MCP 的 `search`、`fetch_content` 映射为模型可选择的网页工具。
+在本机运行的个人 Agent，当前提供 Telegram 和 CLI 两个 Channel，支持文字和图片。两个 Channel 共用 Host、运行事件、Delivery facts 与 Provider-aware Context Projection；使用 pi SDK 调用 DeepSeek，开放 pi 原生文件工具，并把 TinyFish MCP 的 `search`、`fetch_content` 映射为模型可选择的网页工具。
 
 ## 启动
 
@@ -11,9 +11,19 @@
 3. 按需要编辑 `system-prompt.md`。
 4. `npm start`
 
+也可以直接使用共享 Host 的 CLI Channel：`npm run send -- "问题" --conversation-id <id>` 发送一次请求，或 `npm run chat -- --conversation-id <id>` 逐行交互；加 `--json` 输出 NDJSON。Telegram 继续接受旧的 `TELEGRAM_*` 配置，也可迁移到 `AGENT_TELEGRAM_BOT_TOKEN`、`AGENT_TELEGRAM_USER_ID`。
+
 Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊中发送的文字和照片。照片配文会与图片一同送给模型；没有配文时默认分析图片，后续文字可继续追问。电脑关机或进程停止时 Bot 不在线。`/reset` 开始新上下文，但不会删除旧记录。修改 System prompt 后重启生效。已落盘的私聊输入按聊天和消息 ID 去重，重启或 Telegram 重投不会重复执行；中断后可发送一条新消息要求继续。
 
 ## 运行事件与投影
+
+### Feature Map
+
+- **Host**（`src/host/`）：接收认证 Actor、显式 `conversationId` 与 `ContentPart[]`，为每次运行分配持久身份，保证全局串行、取消与 reset barrier，并输出有序 `RunHandle` 事件。
+- **Content Parts**（`src/host/content-parts.ts`）：统一文字和图片；Telegram file ID 在 Channel 边界解析，Host 只接收 MIME 与持久内容引用。
+- **Channels**：Telegram 适配器位于 `src/channel/telegram/`，CLI 适配器位于 `src/cli/`；两者可用同一 conversation ID 继续会话。
+- **Progress / Delivery facts**（`src/runtime/progress.ts`、`src/runtime/delivery-pipeline.ts`）：语义进展与交付事实独立于 UI 和模型上下文，支持 quiet/normal/verbose、未知送达、重试与结果复用。
+- **Provider-aware Context Projection**（`src/context/provider-aware.ts`）：根据 Provider capabilities 过滤 UI-only 事件，合法重放 reasoning、编码图片与工具关联，维护 cache key/stable prefix，并以显式 summary 执行 compaction。
 
 `data/events.sqlite` 中按序追加的 Runtime Event Log 是运行事实源。用户消息、模型步骤与文字、工具派发与结果、Telegram 投递尝试与结果分别记录；已经生成的回答与已经送达的回答不是同一件事。运行时从同一份已提交日志生成不同视图：
 
