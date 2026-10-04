@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,7 +9,7 @@ import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createAgentHost } from "../src/application/agent-host.js";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 import { createTelegramHostProjection } from "../src/channel/telegram/index.js";
-import { parseStructuredText, readOutputFrames, recoverFinalEnvelope } from "../src/agent/output-protocol.js";
+import { parseStructuredText, previewStructuredText, readOutputFrames, recoverFinalEnvelope } from "../src/agent/output-protocol.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 
 test("a normally stopped final with only a missing closing envelope reaches Telegram without retry exhaustion", async (t) => {
@@ -110,4 +111,67 @@ test("final envelope recovery preserves text and refuses truncation, tool calls 
     '{"type":"final","text":"正文"}\n{"type":"final","text":"追加',
     '{"type":"final","text":"裸引号"正文',
   ]) assert.equal(recoverFinalEnvelope(raw, "stop", false), undefined, raw);
+});
+
+test("duplicate protocol fields cannot change types, overwrite text or finish an append frame", () => {
+  for (const raw of [
+    '{"type":"final","text":"甲","type":"status"}',
+    '{"type":"final","text":"甲","text":"乙"}',
+    '{"type":"final","text":"甲","t\\u0065xt":"乙"}',
+    '{"type":"final","text":"甲","end":false,"end":true}',
+  ]) assert.throws(() => parseStructuredText(raw), /重复/);
+  for (const raw of [
+    '{"type":"final","text":"甲","type":"status"',
+    '{"type":"final","text":"甲","text":"乙',
+    '{"type":"final","text":"甲","t\\u0065xt":"乙',
+  ]) assert.equal(recoverFinalEnvelope(raw, "stop", false), undefined);
+  const text = '字段形状 "type":"status"，嵌套 {"text":"内容"}，冒号 : 和反斜杠 \\';
+  assert.equal(parseStructuredText(JSON.stringify({ type: "final", text })).text, text);
+});
+
+test("stream previews retain literal whitespace across deltas without exposing incomplete escapes", () => {
+  const raw = '{"type":"final","text":"甲\n乙\r\n\t丙\\n丁\\uD83D\\uDE00"}';
+  const opening = '{"type":"final","text":"'.length;
+  const expected = parseStructuredText(raw).text;
+  for (let end = opening + 1; end <= raw.length; end++) {
+    const preview = previewStructuredText(raw.slice(0, end));
+    assert.ok(preview, `missing preview at delta ${end}`);
+    assert.ok(expected.startsWith(preview.text), `incorrect prefix at delta ${end}`);
+    assert.equal(/[\uD800-\uDBFF]$/.test(preview.text), false);
+  }
+  assert.equal(previewStructuredText(raw)?.text, expected);
+  assert.equal(previewStructuredText('{"type":"final","text":"甲\u0000乙'), undefined);
+  assert.equal(previewStructuredText('{"type":"final","text":"甲\\\n乙'), undefined);
+});
+
+test("real Pi publishes a literal multiline preview before the final envelope closes", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "multiline-preview-"));
+  const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
+  const expected = "第一行\n第二行";
+  let previewBeforeCompletion = false;
+  let completed = false;
+  let resolvePreview!: () => void;
+  const preview = new Promise<void>((resolve) => { resolvePreview = resolve; });
+  const server = createServer(async (req, res) => {
+    for await (const _ of req) { /* drain */ }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '{"type":"final","text":"' + expected }, finish_reason: null }] })}\n\n`);
+    await Promise.race([preview, delay(1000)]);
+    completed = true;
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: '"}' }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
+  const host = createAgentHost({ dataDir: dir, promptFile, log: createRuntimeLog(dir), agent });
+  const run = host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "多行正文" });
+  for await (const event of run.events()) {
+    if (event.progress?.type === "text" && !event.progress.finalized && event.progress.text === expected && !completed) {
+      previewBeforeCompletion = true;
+      resolvePreview();
+    }
+  }
+  assert.equal(previewBeforeCompletion, true);
+  assert.equal((await run.done).result?.text, expected);
 });

@@ -10,6 +10,9 @@ import { assistantText } from "../src/agent/model-message.js";
 import { getModel } from "@mariozechner/pi-ai";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 import { closeFixture } from "./fixtures/cleanup.js";
+import { replayEvents } from "../src/context/projection.js";
+import { createCheckpointStore } from "../src/context/checkpoint.js";
+import { sourceDigest } from "../src/runtime/event-digest.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] };
@@ -74,6 +77,46 @@ test("restart replays tool exchanges, including errors, without duplicating call
   assert.equal(f.seen.at(-1)!.messages.filter((m) => m.role === "user").length, 1);
   assert.equal(f.seen.at(-1)!.messages.some((m) => m.role === "tool"), false);
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /same-id/);
+});
+
+test("protocol feedback corrects only its current Run and is excluded from compaction input", async (t) => {
+  const f = await fixture(t, (_data, res) => reply(res, "finished"));
+  const log = createRuntimeLog(f.dir);
+  await log.append({ type: "message", role: "user", requestId: "old", text: "old user" });
+  await log.append({ type: "protocol_feedback", requestId: "old", text: "STALE_PROTOCOL_FEEDBACK" });
+  await log.append({ type: "request_failed", requestId: "old" });
+  await log.append({ type: "message", role: "user", requestId: "current", text: "current user" });
+  await log.append({ type: "protocol_feedback", requestId: "current", text: "CURRENT_PROTOCOL_FEEDBACK" });
+  const replay = await replayEvents(log, "current", getModel("deepseek", "deepseek-v4-flash"), true);
+  assert.doesNotMatch(JSON.stringify(replay.units.flatMap((unit) => unit.messages)), /STALE_PROTOCOL_FEEDBACK/);
+  assert.match(JSON.stringify(replay.units.flatMap((unit) => unit.messages)), /CURRENT_PROTOCOL_FEEDBACK/);
+  assert.doesNotMatch(JSON.stringify(replay.units.flatMap((unit) => unit.summaryMessages ?? unit.messages)), /PROTOCOL_FEEDBACK/);
+  assert.notEqual(replay.boundary, "initial", "old-policy derived summaries must not be reused");
+  const events = await log.read();
+  await createCheckpointStore(f.dir, "structured-text-v1").save({ boundary: "initial", through: events.length,
+    sourceDigest: sourceDigest(events), lastEventDigest: sourceDigest(events.at(-1)), summaryStrategy: "structured-text-v1",
+    summary: "STALE_DERIVED_PROTOCOL_FEEDBACK", model: "deepseek/deepseek-flash", ratio: 0.82 });
+  await f.send("next user");
+  assert.doesNotMatch(JSON.stringify(f.seen.at(-1)!.messages), /PROTOCOL_FEEDBACK/);
+  assert.equal((await log.read()).filter((event) => event.type === "protocol_feedback").length, 2);
+});
+
+test("real Provider correction survives its retry but not the next Run after restart", async (t) => {
+  let calls = 0;
+  const f = await fixture(t, (_data, res) => {
+    if (++calls === 1) {
+      const raw = '{"type":"final","text":"被拒绝正文","extra":true}';
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: raw }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    } else reply(res, "finished");
+  });
+  await f.send("first user");
+  assert.equal(f.seen.length, 2);
+  assert.match(JSON.stringify(f.seen[1]!.messages.filter((message) => message.role === "user")), /运行层协议反馈/);
+  await f.restart();
+  await f.send("next user");
+  assert.doesNotMatch(JSON.stringify(f.seen[2]!.messages.filter((message) => message.role === "user")), /运行层协议反馈|被拒绝正文/);
+  assert.equal(f.replies.at(-1), "finished");
 });
 
 const summary = "## Goal\nContinue the task.\n## Progress\nEarlier work completed.\n## Constraints\nKeep the user's requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue recent work.\n## Critical Context\nUse the original log for exact details.";

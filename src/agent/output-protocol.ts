@@ -32,11 +32,37 @@ export function normalizeOutputWhitespace(raw: string): string {
   }
   return result;
 }
-function parseSingleText(raw: string): StructuredText {
+function parseProtocolObject(raw: string): Record<string, unknown> {
+  const normalized = normalizeOutputWhitespace(raw);
   let value: unknown;
-  try { value = JSON.parse(normalizeOutputWhitespace(raw)); } catch { throw new Error("文字不是完整 JSON 对象"); }
+  try { value = JSON.parse(normalized); } catch { throw new Error("文字不是完整 JSON 对象"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("文字协议需要对象");
-  const object = value as Record<string, unknown>;
+  // JSON.parse silently overwrites duplicate keys. Inspect complete string tokens,
+  // including escaped key names, without treating field-shaped body text as keys.
+  const keys = new Set<string>();
+  let depth = 0;
+  for (let index = 0; index < normalized.length; index++) {
+    const char = normalized[index];
+    if (char === "{") depth++;
+    else if (char === "}") depth--;
+    else if (char === '"') {
+      const start = index++;
+      while (normalized[index] !== '"') {
+        if (normalized[index] === "\\") index++;
+        index++;
+      }
+      let next = index + 1;
+      while (/\s/.test(normalized[next] ?? "")) next++;
+      if (depth === 1 && normalized[next] === ":") {
+        const key = JSON.parse(normalized.slice(start, index + 1)) as string;
+        if (keys.has(key)) throw new Error("文字协议不允许重复字段");
+        keys.add(key);
+      }
+    }
+  }
+  return value as Record<string, unknown>;
+}
+function validateSingleText(object: Record<string, unknown>): StructuredText {
   if (Object.keys(object).length !== 2 || !["status", "result", "final", "progress"].includes(String(object.type)) ||
     typeof object.text !== "string" || !object.text.trim()) throw new Error("文字协议需要 type 和非空 text，且不允许其他字段");
   return { type: object.type as StructuredText["type"], text: object.text };
@@ -47,7 +73,10 @@ export function recoverFinalEnvelope(raw: string, stopReason: string, hasToolCal
   if (stopReason !== "stop" || hasToolCalls ||
     !/^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"text"\s*:\s*"/.test(raw)) return;
   for (const suffix of ['"}', '}']) {
-    try { return parseSingleText(raw + suffix); }
+    try {
+      const parsed = validateSingleText(parseProtocolObject(raw + suffix));
+      if (parsed.type === "final") return parsed;
+    }
     catch { /* Never alter text, remove fields or synthesize append-frame completion. */ }
   }
 }
@@ -79,10 +108,10 @@ export function readOutputFrames(raw: string): { output?: StructuredText; prefix
       else if (char === "}" && --depth === 0) { end = index + 1; break; }
     }
     if (end < 0) break;
-    const frame = JSON.parse(normalizeOutputWhitespace(raw.slice(offset, end))) as Record<string, unknown>;
+    const frame = parseProtocolObject(raw.slice(offset, end));
     if (!("end" in frame)) {
       if (type) throw new Error("文字协议不能混合单对象和追加帧");
-      const output = parseSingleText(raw.slice(offset, end));
+      const output = validateSingleText(frame);
       if (raw.slice(end).trim()) throw new Error("单对象文字协议后不允许追加内容");
       return { output, rest: "", framed: false };
     }
@@ -108,6 +137,7 @@ export function parseStructuredText(raw: string): StructuredText {
 
 /** Decode only a canonical envelope's string prefix. It is never validation for delivery. */
 export function previewStructuredText(raw: string): StructuredText | undefined {
+  raw = normalizeOutputWhitespace(raw);
   const match = raw.match(/^\s*\{\s*"type"\s*:\s*"(status|result|final)"\s*,\s*"text"\s*:\s*"/);
   if (!match) return;
   let body = "";

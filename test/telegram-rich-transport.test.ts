@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createServer } from "node:http";
+import { Api } from "grammy";
 import { createTelegramRichTransport, isRichApiUnavailable } from "../src/channel/telegram/rich-transport.js";
 
 const source = "# 标题\n\n**加粗**\n\n| 名称 | 值 |\n| --- | --- |\n| 一 | 二 |";
@@ -94,4 +96,56 @@ test("HTML fallback splits long Markdown into safe Telegram-sized messages", asy
   assert.ok(chunks.length > 1);
   assert.ok(chunks.every((chunk) => chunk.length <= 4000));
   assert.ok(chunks.every((chunk) => !chunk.includes("##")));
+});
+
+test("draft cancellation reaches Rich and HTML APIs and cannot start a fallback after abort", async () => {
+  const unavailable = Object.assign(new Error("Not Found"), { error_code: 404 });
+  const controller = new AbortController();
+  const signals: Array<AbortSignal | undefined> = [];
+  const transport = createTelegramRichTransport({
+    sendRich: async () => 1, sendHtml: async () => 1,
+    draftRich: async (_id, _chat, _text, signal) => { signals.push(signal); throw unavailable; },
+    draftHtml: async (_id, _chat, _text, signal) => { signals.push(signal); },
+  });
+  await transport.draft(1, "正文", 42, controller.signal);
+  assert.deepEqual(signals, [controller.signal, controller.signal]);
+  controller.abort();
+  await assert.rejects(transport.draft(1, "正文", 42, controller.signal), { name: "AbortError" });
+  assert.equal(signals.length, 2);
+  const pending = new AbortController();
+  let htmlCalls = 0;
+  const aborted = createTelegramRichTransport({
+    sendRich: async () => 1, sendHtml: async () => 1,
+    draftRich: async () => { pending.abort(); throw unavailable; },
+    draftHtml: async () => { htmlCalls++; },
+  });
+  await assert.rejects(aborted.draft(1, "正文", 42, pending.signal), { name: "AbortError" });
+  assert.equal(htmlCalls, 0);
+});
+
+test("native draft cancellation aborts grammY's actual HTTP request", async (t) => {
+  let started!: () => void;
+  const requestStarted = new Promise<void>((resolve) => { started = resolve; });
+  const server = createServer(async (req, _res) => {
+    for await (const _ of req) { /* drain */ }
+    started(); // Deliberately leave the local HTTP response pending.
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const api = new Api("test-token", { apiRoot: `http://127.0.0.1:${address.port}` });
+  const transport = createTelegramRichTransport({
+    sendRich: async () => 1, sendHtml: async () => 1, draftHtml: async () => { throw new Error("no fallback after abort"); },
+    draftRich: async (id, chat, markdown, signal) => {
+      await api.sendRichMessageDraft(chat, id, { markdown }, undefined, signal as Parameters<typeof api.sendRichMessageDraft>[4]);
+    },
+  });
+  const controller = new AbortController();
+  const draft = transport.draft(1, "正文", 42, controller.signal);
+  await requestStarted;
+  controller.abort();
+  await assert.rejects(draft, { name: "AbortError" });
 });

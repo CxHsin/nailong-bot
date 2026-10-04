@@ -3,9 +3,9 @@ import { planTelegramText } from "../../telegram/telegram-layout.js";
 
 export type TelegramRichTransportApi = {
   sendRich: (chatId: number, markdown: string) => Promise<number>;
-  draftRich: (draftId: number, chatId: number, markdown: string) => Promise<void>;
+  draftRich: (draftId: number, chatId: number, markdown: string, signal?: AbortSignal) => Promise<void>;
   sendHtml: (chatId: number, html: string) => Promise<number>;
-  draftHtml: (draftId: number, chatId: number, html: string) => Promise<void>;
+  draftHtml: (draftId: number, chatId: number, html: string, signal?: AbortSignal) => Promise<void>;
 };
 
 type RichAvailability = "unknown" | "supported" | "unsupported";
@@ -42,24 +42,28 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
     return firstMessageId;
   }
 
-  async function draftHtml(draftId: number, text: string, chatId: number): Promise<void> {
+  async function draftHtml(draftId: number, text: string, chatId: number, signal?: AbortSignal): Promise<void> {
     const rendered = planTelegramText(text)[0] ?? formatMarkdownForTelegram(text);
-    await api.draftHtml(draftId, chatId, rendered);
+    await api.draftHtml(draftId, chatId, rendered, signal);
   }
 
   return {
-    async draft(draftId: number, text: string, chatId: number): Promise<void> {
+    async draft(draftId: number, text: string, chatId: number, signal?: AbortSignal): Promise<void> {
+      signal?.throwIfAborted();
       if (availability !== "unsupported") {
         try {
-          await api.draftRich(draftId, chatId, text);
+          await api.draftRich(draftId, chatId, text, signal);
+          signal?.throwIfAborted();
           availability = "supported";
           return;
         } catch (error) {
+          signal?.throwIfAborted();
           if (!isRichApiUnavailable(error)) throw error;
           availability = "unsupported";
         }
       }
-      await draftHtml(draftId, text, chatId);
+      signal?.throwIfAborted();
+      await draftHtml(draftId, text, chatId, signal);
     },
     async send(text: string, chatId: number): Promise<number> {
       if (availability !== "unsupported") {

@@ -109,6 +109,8 @@ system 提示词与工具定义保持稳定，当前日期及自动记忆引文�
 
 Provider 正常结束、没有工具调用且单对象 final 仅缺末尾双引号／右花括号时，运行层可补齐外壳并记录修复；正文与原始模型记录保持不变。长度截断、未完成转义、多余字段和未结束追加帧仍拒绝。见 [#79](https://github.com/CxHsin/nailong-bot/issues/79)。
 
+文字对象与追加帧拒绝重复字段（包括转义后同名字段）。协议纠错反馈只进入当前 Run 的模型输入，不进入可复用历史摘要；旧投影策略的摘要缓存会重新生成，原始记录保留。多行预览和最终正文采用同一空白规范化规则。Telegram 草稿请求最多等待 3 秒，超时取消并停用本轮草稿更新，正式回复仍继续发送。见 [#80](https://github.com/CxHsin/nailong-bot/issues/80)。
+
 UI Projection 只使用文本快照、撤回和工具活动三种实时更新，不再维护独立的 Progress pipeline 或 quiet／normal／verbose 模式。Telegram 仅保留当前说明和工具活动，每 15 秒刷新仍在执行的同一草稿；运行终态到达后停止刷新，再发送正式消息。CLI 人类模式显示完成的说明和工具事实，JSON 模式保留实时快照。此简化见 [#78](https://github.com/CxHsin/nailong-bot/issues/78)；它保留模型上下文与 UI 的隔离，也不公开原始 reasoning。
 
 `.env`、`data/` 和 `tinyFish.txt` 被 Git 忽略；运行数据可能包含图片、私人文件和工具参数。

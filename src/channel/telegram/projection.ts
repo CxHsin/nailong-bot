@@ -1,7 +1,7 @@
 import type { HostEvent, RunHandle } from "../../host/host.js";
 
 export type TelegramHostTransport = {
-  draft?: (draftId: number, text: string, chatId: number) => Promise<void>;
+  draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
 };
 
@@ -9,6 +9,7 @@ export type TelegramHostTransport = {
 export function createTelegramHostProjection(options: TelegramHostTransport & {
   chatId: number;
   draftIntervalMs?: number;
+  draftTimeoutMs?: number;
   onDelivered?: (event: HostEvent, messageId: number) => Promise<void>;
 }) {
   let nextDraftId = 1;
@@ -30,12 +31,25 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
           latest === published && Date.now() - publishedAt < 15_000) return;
         const text = latest;
         sending = true;
-        pending = options.draft(draftId, text, options.chatId).then(() => {
-          published = text;
-          publishedAt = Date.now();
-        }).catch(() => {
-          // Draft API/content/rate-limit failures must never prevent the final reply.
-          unavailable = true;
+        pending = new Promise<void>((resolve) => {
+          const controller = new AbortController();
+          const deadline = setTimeout(() => {
+            unavailable = true;
+            controller.abort();
+            resolve(); // Also bound transports that ignore cancellation.
+          }, options.draftTimeoutMs ?? 3_000);
+          void Promise.resolve().then(() => options.draft!(draftId, text, options.chatId, controller.signal)).then(() => {
+            if (!controller.signal.aborted) {
+              published = text;
+              publishedAt = Date.now();
+            }
+          }).catch(() => {
+            // Draft API/content/rate-limit failures must never prevent the final reply.
+            unavailable = true;
+          }).finally(() => {
+            clearTimeout(deadline);
+            resolve();
+          });
         }).finally(() => { sending = false; });
       }, options.draftIntervalMs ?? 750);
       timer.unref();

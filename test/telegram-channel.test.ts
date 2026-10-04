@@ -155,3 +155,48 @@ test("long silent runs refresh the same truthful draft without adding chat messa
   assert.deepEqual(sent, []);
   run.push("run_cancelled"); await consume;
 });
+
+for (const terminal of ["run_succeeded", "run_failed", "run_cancelled"] as const) {
+  test(`a hanging draft cannot block ${terminal} delivery`, async (t) => {
+    t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+    const drafts: number[] = [];
+    const sent: string[] = [];
+    const projection = createTelegramHostProjection({ chatId: 42,
+      draft: async (id) => { drafts.push(id); await new Promise<void>(() => {}); },
+      send: async (text) => { sent.push(text); return 1; } });
+    const run = controlledRun(`hanging-${terminal}`);
+    const consume = projection.consume(run.handle);
+    run.push("run_started"); await drain(); t.mock.timers.tick(750); await drain();
+    assert.equal(drafts.length, 1);
+    run.push(terminal, { result: { text: "完整答案" } }); await drain();
+    t.mock.timers.tick(5_000); await drain();
+    assert.equal(sent.length, 1, "terminal delivery must survive a draft that never settles");
+    await consume;
+    t.mock.timers.tick(30_000); await drain();
+    assert.equal(drafts.length, 1);
+  });
+}
+
+test("draft deadline cancels the request and disables late draft updates", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"] });
+  let signal: AbortSignal | undefined;
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const sent: string[] = [];
+  let attempts = 0;
+  const projection = createTelegramHostProjection({ chatId: 42, draftTimeoutMs: 1000,
+    draft: async (_id, _text, _chat, abort) => { attempts++; signal = abort; await blocked; },
+    send: async (text) => { sent.push(text); return 1; } });
+  const run = controlledRun("draft-deadline");
+  const consume = projection.consume(run.handle);
+  run.push("run_started"); await drain(); t.mock.timers.tick(750); await drain();
+  assert.equal(signal?.aborted, false);
+  t.mock.timers.tick(1000); await drain();
+  assert.equal(signal?.aborted, true);
+  release(); await drain();
+  run.push("progress", { progress: { type: "tool", name: "ls", state: "started" } });
+  await drain(); t.mock.timers.tick(30_000); await drain();
+  assert.equal(attempts, 1);
+  run.push("run_succeeded", { result: { text: "完成" } }); await consume;
+  assert.deepEqual(sent, ["完成"]);
+});
