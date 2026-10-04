@@ -60,10 +60,12 @@ async function main(): Promise<void> {
     started();
     await projection.consume(run);
   };
-  const reportFailure = () => console.error("Telegram 更新处理失败，请检查连接和本地记录。");
+  const reportFailure = (error?: unknown) => {
+    console.error("Telegram 更新处理失败，请检查连接和本地记录。", error instanceof Error ? error.stack ?? error.message : error);
+  };
   const input = registerTelegramInput(bot, { ownerId: telegram.ownerId,
     download: (fileId) => downloadTelegramPhoto(bot, telegram.token, fileId), handle, reportFailure });
-  bot.catch(reportFailure);
+  bot.catch((error) => reportFailure(error));
   const stop = () => { void input.accepted().then(() => bot.stop()).catch(reportFailure); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   console.log("Agent 正在通过 Telegram Channel 接收私聊文字和图片消息。");
