@@ -1,6 +1,8 @@
 # Nailong Agent
 
-在本机运行的个人 Agent，当前提供 Telegram 和 CLI 两个 Channel，支持文字和图片。两个 Channel 共用 Host、运行事件、Delivery facts 与 Provider-aware Context Projection；使用 pi SDK 调用 DeepSeek，开放 pi 原生文件工具，并把 TinyFish MCP 的 `search`、`fetch_content` 映射为模型可选择的网页工具。
+在本机运行的个人 Agent，通过 Telegram 私聊或 CLI 接收文字和图片。两个入口使用同一 Host 实现和运行事件日志；使用 pi SDK 调用 DeepSeek，开放 pi 原生文件工具，并提供可选的 TinyFish 网页工具。
+
+Provider-aware Context Projection、语义 Progress／Delivery facts 和 Akasha 长期记忆已有模块与测试，但尚未完整接入当前 Host 入口。下文区分当前入口和原应用兼容流程；模块实现不等于入口验收完成。
 
 ## 启动
 
@@ -13,17 +15,19 @@
 
 也可以直接使用共享 Host 的 CLI Channel：`npm run send -- "问题" --conversation-id <id>` 发送一次请求，或 `npm run chat -- --conversation-id <id>` 逐行交互；加 `--json` 输出 NDJSON。Telegram 继续接受旧的 `TELEGRAM_*` 配置，也可迁移到 `AGENT_TELEGRAM_BOT_TOKEN`、`AGENT_TELEGRAM_USER_ID`。
 
-Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊中发送的文字和照片。照片配文会与图片一同送给模型；没有配文时默认分析图片，后续文字可继续追问。电脑关机或进程停止时 Bot 不在线。`/reset` 开始新上下文，但不会删除旧记录。修改 System prompt 后重启生效。已落盘的私聊输入按聊天和消息 ID 去重，重启或 Telegram 重投不会重复执行；中断后可发送一条新消息要求继续。
+Bot 使用 long polling，无需公网地址，只响应配置账号的私聊文字和照片。进程停止时 Bot 不在线。当前 Host 入口发送原生草稿和最终正文，优先 Rich Markdown，API 不可用时回退 HTML。CLI 支持 `--image` 和 `--ndjson`。`/reset`、`/prompt`、输入去重及完整重启交付恢复保留在原应用兼容流程，尚未接入当前入口。
 
 ## 运行事件与投影
 
-### Feature Map
+### Feature Map（模块能力与接入边界）
 
 - **Host**（`src/host/`）：接收认证 Actor、显式 `conversationId` 与 `ContentPart[]`，为每次运行分配持久身份，保证全局串行、取消与 reset barrier，并输出有序 `RunHandle` 事件。
 - **Content Parts**（`src/host/content-parts.ts`）：统一文字和图片；Telegram file ID 在 Channel 边界解析，Host 只接收 MIME 与持久内容引用。
-- **Channels**：Telegram 适配器位于 `src/channel/telegram/`，CLI 适配器位于 `src/cli/`；两者可用同一 conversation ID 继续会话。
+- **Channels**：Telegram 适配器位于 `src/channel/telegram/`，CLI 适配器位于 `src/cli/`；两者携带 conversation ID，但模型历史尚未按该身份隔离，完整跨 Channel 续聊仍待集成。
 - **Progress / Delivery facts**（`src/runtime/progress.ts`、`src/runtime/delivery-pipeline.ts`）：语义进展与交付事实独立于 UI 和模型上下文，支持 quiet/normal/verbose、未知送达、重试与结果复用。
 - **Provider-aware Context Projection**（`src/context/provider-aware.ts`）：根据 Provider capabilities 过滤 UI-only 事件，合法重放 reasoning、编码图片与工具关联，维护 cache key/stable prefix，并以显式 summary 执行 compaction。
+
+当前入口已使用 Host 输入、运行事件及 Channel 输出；reset／cancel 的用户命令、语义进展流水线、Delivery fact store、redeliver／recoverRuns 和 Provider-aware 投影尚待接入。队列仅保证同一 Host 实例内串行，不协调多个启动进程。
 
 `data/events.sqlite` 中按序追加的 Runtime Event Log 是运行事实源。用户消息、模型步骤与文字、工具派发与结果、Telegram 投递尝试与结果分别记录；已经生成的回答与已经送达的回答不是同一件事。运行时从同一份已提交日志生成不同视图：
 
@@ -35,7 +39,7 @@ Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊
 
 `.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。启动时如发现旧版 `data/events.jsonl`，会校验并幂等导入 SQLite，旧文件保留。完整工具结果存于 `data/tool-results/`，历史摘要 checkpoint 存于 `data/checkpoints/`。这些数据可能包含图片、私人文件内容和工具参数，请按私人数据管理。
 
-每次模型调用前会估算上下文大小，默认输入预算为模型上下文窗口的 86%。可用 `PROJECTION_BUDGET_RATIOS` 按模型覆盖，例如 `{"deepseek/deepseek-flash":0.8}`。超预算时，较早的完整历史会折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 只改变续聊边界，不删除旧事件。
+每次模型调用前会估算上下文大小，默认输入预算为模型上下文窗口的 86%。Telegram 入口读取 `PROJECTION_BUDGET_RATIOS` 按模型覆盖，例如 `{"deepseek/deepseek-flash":0.8}`；CLI 入口目前使用默认值。超预算时，较早的完整历史会折叠为经过来源校验的摘要，尽量保留最近三个完整请求。
 
 较大的工具结果会先完整归档，再把包含路径、大小和校验值的引用交给模型。模型可用 `read` 分段取回归档文本。归档失败时仍使用原始结果；日志写入失败则停止后续工具或模型步骤。重复阶段性成果会触发停滞保护；连续十二步未执行工具或提交最终答复时也会结束本轮，避免持续占用请求队列。工具已执行但结果未成功入库时，下一轮只标记结果未知，避免盲目重试。
 
@@ -61,6 +65,8 @@ Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一�
 文件工具不依赖 TinyFish。没有配置 TinyFish 或连接失败时仍可使用；`find` 和 `grep` 使用 pi 管理的 fd／ripgrep，缺失时 pi 会尝试下载。
 
 ## 长期记忆
+
+本节描述 Akasha 模块和原应用兼容流程。当前 Host 入口未写入记忆所需的 `chatId` 身份，尚未启用 `memory_search`／`memory_read`、自动召回和初始化；送达后的记忆学习、`/forget` 与 `/memory log` 也未接入。Telegram 保留 embedding、记忆动力学、召回及预算配置，CLI 尚未读取这些配置。不能据此承诺当前启动命令具备完整长期记忆。
 
 回复目标 User 或已送达 Assistant 消息发送 `/forget`，或发送 `/forget 节点引用`，可排除指定旧轮次的召回、学习与后续上下文。回复时也支持明确的“忘掉这件事”；模糊话题只列候选等待确认，问句不会执行遗忘。旧摘要失效重建，来源工具结果及其归档续读不能绕过排除。排除事实持久保存，重启、重建及 `/reset` 不会撤销；同话题的新消息仍可成为新记忆，不建立永久话题黑名单。
 
