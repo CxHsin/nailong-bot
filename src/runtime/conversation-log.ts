@@ -18,11 +18,18 @@ export function conversationEvents(events: StoredEvent[], conversationId: string
   const owners = conversationOwnership(events);
   const ownerId = conversationUserId(conversationId);
   return events.flatMap((event, index) => {
+    const previous = events[index - 1];
+    // The old command adapter wrote these adjacent records as one batch.
+    const legacyResetOwner = event.type === "reset" && previous?.type === "message" &&
+      previous.role === "user" && previous.text === "/reset" && !previous.requestId && !previous.images
+      ? typeof previous.conversationId === "string" ? previous.conversationId :
+        typeof previous.chatId === "number" ? `telegram:private:${previous.chatId}` : undefined
+      : undefined;
     const id = event.requestId ?? (typeof event.runId === "string" ? event.runId : undefined);
     const owner = typeof event.conversationId === "string" ? event.conversationId : id ? owners.get(id) :
       typeof event.nodeId === "string" ? owners.get(event.nodeId) :
       typeof event.chatId === "number" ? `telegram:private:${event.chatId}` :
-      event.userId === ownerId && conversationId.startsWith("telegram:private:") ? conversationId : undefined;
+      event.userId === ownerId && conversationId.startsWith("telegram:private:") ? conversationId : legacyResetOwner;
     return owner === conversationId ? [{ ...event, eventId: eventIdentity(event, index) }] : [];
   });
 }

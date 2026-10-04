@@ -1,4 +1,4 @@
-import { createHost, type HostInput, type RunResult } from "../host/host.js";
+import { createHost, type HostEvent, type HostInput, type RunResult } from "../host/host.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { conversationLog, conversationUserId } from "../runtime/conversation-log.js";
 import { handleCommand } from "./commands.js";
@@ -6,6 +6,7 @@ import { handleMemoryCommand } from "./memory-commands.js";
 import { projectDeliveredChat } from "./runtime-projections.js";
 import type { Message, Request, Update } from "./app-types.js";
 import { cacheStatistics, cacheReportText } from "../runtime/cache-statistics.js";
+import { commitMemoryLearning } from "./memory-learning.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
@@ -18,14 +19,15 @@ export const AGENT_COMMANDS = [
 
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
+  memoryVector?: (text: string) => number[] | undefined;
 } };
 
 async function control(options: AgentHostOptions, input: HostInput, log: RuntimeLog): Promise<RunResult | undefined> {
   if (input.parts.some((part) => part.type !== "text")) return undefined;
   const text = input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim();
+  if (!text.startsWith("/")) return undefined;
   const match = /^\/([a-zA-Z0-9_]+)(?:\s|$)/.exec(text);
-  if (!match) return undefined;
-  const name = match[1]!;
+  const name = match?.[1] ?? text.slice(1).split(/\s/, 1)[0]!;
   const definition = AGENT_COMMANDS.find((item) => item.command === name);
   await log.append({ type: "command_received", command: name, messageId: input.metadata?.messageId, contextPolicy: "exclude" });
   if (!definition) return { text: "未知命令，请发送 /help 查看帮助。", kind: "control" };
@@ -46,13 +48,13 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
     messageId: Number(input.metadata?.messageId ?? 0),
     ...(typeof input.metadata?.replyToMessageId === "number" ? { replyToMessageId: input.metadata.replyToMessageId } : {}) };
   const handled = name === "prompt" ? await handleCommand(log, { promptFile: options.promptFile, send }, update, text) :
-    await handleMemoryCommand(log, { dataDir: options.dataDir, send, purgeEmbeddingCache: options.agent.purgeEmbeddingCache }, update, text);
+    await handleMemoryCommand(log, { dataDir: options.dataDir, conversationId: input.conversationId, send, purgeEmbeddingCache: options.agent.purgeEmbeddingCache }, update, text);
   return { text: handled ? response : `用法：${definition.usage}`, kind: "control" };
 }
 
 /** Shared production Host for Telegram and CLI, including queued controls. */
 export function createAgentHost(options: AgentHostOptions) {
-  return createHost({ log: options.log, execute: async (input, context) => {
+  const host = createHost({ log: options.log, execute: async (input, context) => {
     const log = conversationLog(options.log, input.conversationId);
     if (input.metadata?.channel === "telegram" && typeof input.metadata.messageId === "number" &&
       (await log.read()).some((event) => event.messageId === input.metadata!.messageId &&
@@ -80,4 +82,15 @@ export function createAgentHost(options: AgentHostOptions) {
       throw error;
     }
   } });
+  return { ...host, async recordDelivery(event: HostEvent, delivery: { channel: "telegram" | "cli"; telegramMessageId?: number }) {
+    if (event.type !== "run_succeeded") return;
+    const log = conversationLog(options.log, event.conversationId);
+    await log.append({ type: "delivery_succeeded", runId: event.runId, requestId: event.runId,
+      resultId: String(event.result?.resultId ?? event.runId), ...delivery });
+    if (event.result?.kind !== "model") return;
+    await log.append({ type: "request_completed", requestId: event.runId });
+    await commitMemoryLearning(log, conversationUserId(event.conversationId), undefined, options.agent.memoryVector).catch(async () => {
+      await log.append({ type: "memory_degraded", requestId: event.runId, reason: "learning_unavailable" }).catch(() => undefined);
+    });
+  } };
 }

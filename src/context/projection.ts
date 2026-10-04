@@ -16,7 +16,7 @@ export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUni
 
 export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
   const rawEvents = await log.read();
-  const stable = rawEvents.some((event) => event.requestId === currentId && typeof event.conversationId === "string");
+  const hostConversationReplay = rawEvents.some((event) => event.requestId === currentId && typeof event.conversationId === "string");
   const excluded = memoryExclusions(rawEvents);
   const all = filterMemoryEvents(rawEvents);
   const replayText = (type: "progress" | "status" | "result" | "final", text: string, timestamp: number) =>
@@ -101,7 +101,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           const view = replayToolResultView({ result, archive,
             sourceFiltered: result !== unfiltered, recorded: found.event.modelVisible,
             archiveRead: log.isArchiveRead(call.name, sent.event.args),
-            olderThanRecent: !stable && !recent.includes(event.requestId) && event.requestId !== currentId,
+            olderThanRecent: !hostConversationReplay && !recent.includes(event.requestId) && event.requestId !== currentId,
             toolName: call.name });
           kept.push(call);
           responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: view.content,
@@ -126,18 +126,18 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         const progress = events.find((e) => e.type === "text_finalized" && e.modelStepId === event.modelStepId &&
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
-          c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !stable : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
+          c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !hostConversationReplay : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
         if (progress?.contentKind === "result") {
           // Keep execution facts regardless of UI delivery, but never imply unseen text was delivered.
           assistant.content = assistant.content.filter((part) => part.type !== "text");
           const text = String(progress.text);
-          if (stable || resultDelivered(progress.textSegmentId)) {
+          if (hostConversationReplay || resultDelivered(progress.textSegmentId)) {
             assistant.content.push({ type: "text", text: structured ? protocolText("result", text) : text });
           } else if (event.requestId === currentId && !ended.has(currentId)) {
             const work = `内部工作成果（尚未确认送达用户）：\n${text}`;
             assistant.content.push({ type: "text", text: structured ? protocolText("status", work) : work });
           }
-        } else if (structured && (progress || !event.protocolVersion) && !stable) {
+        } else if (structured && (progress || !event.protocolVersion) && !hostConversationReplay) {
           const text = typeof progress?.text === "string" ? progress.text : original.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
           if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "status" ? "status" : "progress", text) });
         }
@@ -147,8 +147,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
     } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
-      if (stable && event.contentKind !== "result") continue;
-      if (!stable && event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
+      if (hostConversationReplay && event.contentKind !== "result") continue;
+      if (!hostConversationReplay && event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
         if (event.requestId !== currentId || ended.has(currentId)) continue;
         const work = `内部工作成果（尚未确认送达用户）：\n${event.text}`;
         if (!events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
@@ -163,8 +163,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", event.text, timestamp)], through: index + 1,
         requestId: event.requestId, safe: true, sourceIds: event.contentKind === "result" ? [eventIdentity(event, all.indexOf(event))] : [] });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId) &&
-      (!stable || !events.some((e) => e.type === "run_succeeded" && e.runId === event.requestId)) ||
-      stable && event.type === "run_succeeded" && (event.result as { kind?: string } | undefined)?.kind === "model") {
+      (!hostConversationReplay || !events.some((e) => e.type === "run_succeeded" && e.runId === event.requestId)) ||
+      hostConversationReplay && event.type === "run_succeeded" && (event.result as { kind?: string } | undefined)?.kind === "model") {
       const requestId = event.requestId ?? event.runId;
       const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === requestId);
       if (typeof answer?.text === "string") {

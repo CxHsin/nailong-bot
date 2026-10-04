@@ -4,7 +4,7 @@ import type { Api, Model, Message, Usage, SimpleStreamOptions } from "@mariozech
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
 import { createContextProjection } from "../context/context-budget.js";
-import { assistantText } from "./model-message.js";
+import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
 import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames } from "./output-protocol.js";
 import { composeMemory, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
@@ -83,6 +83,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const user = request && (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user");
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
+    conversationId: request.conversationId,
     ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
     summarize: async (context, maxTokens) => {
       const callId = randomUUID();
@@ -99,7 +100,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   let snapshot = request?.conversationId ? (await request.log.read()).find((event) => event.type === "context_input_snapshot" && event.requestId === request.id) : undefined;
   session.agent.streamFn = async (selected, context, streamOptions) => {
     try {
-      if (request?.conversationId) context = { ...context, systemPrompt: `${systemPrompt}\nCurrent working directory: ${options.dataDir.replace(/\\/g, "/")}` };
+      if (request?.conversationId) context = { ...context, systemPrompt: stableSystemPrompt(systemPrompt, options.dataDir) };
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;
       for (let attempt = 0; attempt < 2; attempt++) {

@@ -4,7 +4,7 @@ import { createCheckpointStore } from "../context/checkpoint.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import type { Update } from "./app-types.js";
 
-export async function handleMemoryCommand(log: RuntimeLog, options: { dataDir: string; purgeEmbeddingCache?: () => void;
+export async function handleMemoryCommand(log: RuntimeLog, options: { dataDir: string; conversationId?: string; purgeEmbeddingCache?: () => void;
   send: (text: string, update: Update) => Promise<void> }, update: Update, text: string, onStarted?: () => void): Promise<boolean> {
   if (update.images?.length) return false;
   const raw = /^\/memory\s+log\s+(\S+)(?:\s+(\d+))?$/.exec(text);
@@ -45,7 +45,7 @@ export async function handleMemoryCommand(log: RuntimeLog, options: { dataDir: s
   onStarted?.();
   try {
     options.purgeEmbeddingCache?.();
-    await Promise.all([invalidateMemoryIndex(options.dataDir), createCheckpointStore(options.dataDir).invalidate()]);
+    await Promise.all([invalidateMemoryIndex(options.dataDir), createCheckpointStore(options.dataDir, "structured-text-v1", options.conversationId).invalidate()]);
   } catch { await log.append({ type: "memory_degraded", userId: update.userId, reason: "exclusion_cache_cleanup_unavailable" }).catch(() => undefined); }
   await options.send("已排除该旧轮次的召回、学习和后续上下文。原始运行日志仍保留，可明确查阅；这不是数据删除。", update);
   return true;

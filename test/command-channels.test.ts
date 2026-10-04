@@ -29,8 +29,7 @@ test("Telegram startup registers owner commands before polling and routes authen
   const channel = await initializeTelegramHostChannel({ bot, ownerId: 42, host,
     transport: { send: async (text) => { responses.push(text); return 1; } },
     download: async () => ({ type: "image", mimeType: "image/png", data: "aW1n" }), reportFailure: (error) => { throw error; },
-    onDelivered: async (event, telegramMessageId) => { await log.append({ type: "delivery_succeeded", requestId: event.runId,
-      conversationId: event.conversationId, channel: "telegram", telegramMessageId }); } });
+    onDelivered: (event, telegramMessageId) => host.recordDelivery(event, { channel: "telegram", telegramMessageId }) });
   await channel.start();
   const menu = methods.find((call) => call.method === "setMyCommands")!.payload;
   assert.deepEqual(menu.scope, { type: "chat", chat_id: 42 });

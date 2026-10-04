@@ -54,11 +54,7 @@ async function main(): Promise<void> {
   };
   const channel = await initializeTelegramHostChannel({ bot, ownerId: telegram.ownerId, host, transport,
     download: (fileId) => downloadTelegramPhoto(bot, telegram.token, fileId), reportFailure,
-    onDelivered: async (event, telegramMessageId) => {
-      await log.append({ type: "delivery_succeeded", runId: event.runId, requestId: event.runId, conversationId: event.conversationId,
-        resultId: String(event.result?.resultId ?? event.runId), channel: "telegram", telegramMessageId });
-      if (event.result?.kind === "model") await log.append({ type: "request_completed", requestId: event.runId, conversationId: event.conversationId });
-    } });
+    onDelivered: (event, telegramMessageId) => host.recordDelivery(event, { channel: "telegram", telegramMessageId }) });
   const stop = () => { void channel.stop().catch(reportFailure); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   console.log("Agent 正在通过 Telegram Channel 接收私聊文字和图片消息。");

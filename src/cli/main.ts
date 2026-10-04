@@ -17,10 +17,7 @@ async function main() {
   const agent = await createPiAgent({ dataDir, promptFile, deepseekKey: key, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
   const host = createAgentHost({ log, dataDir, promptFile, agent });
   const cli = createCliChannel({ host, actor: { id: process.env.AGENT_ACTOR_ID?.trim() || "cli", kind: "user" }, stdout: (line) => stdout.write(`${line}\n`), stderr: (line) => stderr.write(`${line}\n`),
-    onDelivered: async (event) => {
-      await log.append({ type: "delivery_succeeded", requestId: event.runId, conversationId: event.conversationId, resultId: event.runId, channel: "cli" });
-      if (event.result?.kind === "model") await log.append({ type: "request_completed", requestId: event.runId, conversationId: event.conversationId });
-    } });
+    onDelivered: (event) => host.recordDelivery(event, { channel: "cli" }) });
   try {
     if (args.command === "send") await cli.send(args.text, { json: args.json, conversationId: args.conversationId, imagePath: args.imagePath });
     else {

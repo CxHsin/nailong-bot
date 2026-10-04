@@ -62,11 +62,12 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   const dir = await mkdtemp(join(tmpdir(), "cache-summary-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   let summaries = 0; let zero = false;
+  const summaryInputs: Array<{ previousSummary?: string }> = [];
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const payload: Payload = JSON.parse(body);
     const isSummary = payload.messages.some((message) => message.content.includes("HISTORY_COMPACTION"));
-    if (isSummary) summaries++;
+    if (isSummary) { summaries++; summaryInputs.push(JSON.parse(payload.messages.at(-1)!.content)); }
     const text = isSummary ? "## Goal\nContinue.\n## Progress\nEarlier work completed.\n## Constraints\nKeep requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue work.\n## Critical Context\nConsult original logs for exact details." : JSON.stringify({ type: "final", text: "answer" });
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }],
@@ -91,6 +92,12 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   const report = (await send("/kvcache")).result?.cache as { auxiliary: { calls: number; measured: number; hit: number; miss: number } };
   assert.equal(report.auxiliary.calls, summaries); assert.equal(report.auxiliary.measured, summaries);
   assert.equal(report.auxiliary.hit, 80 * summaries); assert.equal(report.auxiliary.miss, 20 * summaries);
+  await log.append({ type: "message", role: "user", text: "other secret", requestId: "other-secret", conversationId: "c2" });
+  await send("/forget other-secret", "c2");
+  const previousSummaries = summaries;
+  await send("continue again");
+  assert.ok(summaryInputs.slice(previousSummaries).every((input) => input.previousSummary?.includes("Earlier work completed")),
+    "further c1 compaction must continue its checkpoint after forgetting in c2");
   zero = true; await send("zero", "c2");
   const empty = (await send("/kvcache", "c2")).result?.cache as { execution: { input: number; measured: number; hitRate: number | null } };
   assert.equal(empty.execution.input, 0); assert.equal(empty.execution.measured, 1); assert.equal(empty.execution.hitRate, null);
@@ -139,4 +146,42 @@ test("actual memory prefixes survive new recall and tools, while forgetting remo
   assert.equal(seen.length, before);
   await send("再继续");
   assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /SECRET-ALPHA/);
+});
+
+test("current input keeps its date and memory snapshot after a long tool chain is compacted", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "cache-current-compaction-"));
+  const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
+  await writeFile(join(dir, "source.txt"), "evidence ".repeat(500));
+  const executionInputs: Payload[] = [];
+  let tools = 0; let summaries = 0;
+  const server = createServer(async (req, res) => {
+    let body = ""; for await (const chunk of req) body += chunk;
+    const payload: Payload = JSON.parse(body);
+    const isSummary = payload.messages.some((message) => message.content?.includes("HISTORY_COMPACTION"));
+    if (!isSummary) executionInputs.push(payload);
+    if (isSummary) summaries++;
+    const text = "## Goal\nContinue.\n## Progress\nEarlier work completed.\n## Constraints\nKeep requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue work.\n## Critical Context\nConsult original logs for exact details.";
+    const delta = isSummary ? { content: text } : tools < 8 ? { tool_calls: [{ index: 0, id: `read-${tools++}`, type: "function",
+      function: { name: "read", arguments: JSON.stringify({ path: "source.txt" }) } }] } :
+      { content: JSON.stringify({ type: "final", text: "answer" }) };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: "tool_calls" in delta ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
+    memoryBootstrap: false, contextWindow: 6000, now: () => new Date("2026-10-04T00:00:00Z") });
+  t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
+  const log = createRuntimeLog(dir);
+  await log.append({ type: "message", role: "user", conversationId: "c1", requestId: "secret", text: "暗号是 SECRET-ALPHA" });
+  await log.append({ type: "request_completed", conversationId: "c1", requestId: "secret" });
+  const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
+  await host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "/reset" }).done;
+  const terminal = await host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "暗号 inspect all evidence" }).done;
+  assert.equal(terminal.type, "run_succeeded", terminal.error);
+  assert.ok(summaries > 0);
+  assert.match(JSON.stringify(executionInputs[0]!.messages), /SECRET-ALPHA/);
+  assert.match(JSON.stringify(executionInputs.at(-1)!.messages), /SECRET-ALPHA/);
+  assert.match(JSON.stringify(executionInputs.at(-1)!.messages), /2026-10-04/);
+  assert.equal(executionInputs.at(-1)!.messages.filter((message) => message.content === "暗号 inspect all evidence").length, 1);
 });

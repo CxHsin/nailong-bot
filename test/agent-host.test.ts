@@ -24,6 +24,8 @@ test("Host controls are queued without invoking the model or entering model hist
   assert.match(String((await send("/kvcache"))?.text), /暂无/);
   assert.match(String((await send("/kvcache unexpected"))?.text), /用法/);
   assert.match(String((await send("/missing"))?.text), /未知命令/);
+  assert.match(String((await send("/kvcache!"))?.text), /用法|未知命令/);
+  assert.match(String((await send("/?"))?.text), /用法|未知命令/);
   await send("/prompt set custom prompt");
   await send("first");
   await send("other", "c2");
@@ -34,6 +36,50 @@ test("Host controls are queued without invoking the model or entering model hist
   const events = await log.read();
   assert.deepEqual(events.filter((e) => e.type === "message").map((e) => e.text), ["first", "other", "new"]);
   assert.ok(events.some((e) => e.type === "conversation_reset" && e.conversationId === "c1"));
+});
+
+test("legacy reset receipts retain their scoped boundary without reviving control inputs", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "host-legacy-reset-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  for (const event of [
+    { type: "message", role: "user", chatId: 42, text: "old secret" },
+    { type: "message", role: "assistant", text: "old answer" },
+    { type: "message", role: "user", chatId: 42, text: "/reset" },
+    { type: "reset" },
+    { type: "message", role: "user", chatId: 99, text: "other conversation" },
+  ]) await log.append(event);
+  const histories: string[][] = [];
+  const host = createAgentHost({ dataDir: dir, promptFile: join(dir, "prompt.md"), log, agent: {
+    answer: async (messages) => { histories.push(messages.map((message) => message.text)); return "answer"; },
+  } });
+  await host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:42", text: "fresh" }).done;
+  await host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:99", text: "continued" }).done;
+  assert.deepEqual(histories, [["fresh"], ["other conversation", "continued"]]);
+  assert.ok((await log.read()).some((event) => event.type === "reset" && event.conversationId === undefined));
+});
+
+test("Host settles delivered memory once and controls do not reinforce it", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "host-memory-delivery-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  const host = createAgentHost({ dataDir: dir, promptFile: join(dir, "prompt.md"), log, agent: {
+    answer: async (_messages, request) => {
+      await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId: "memory-snapshot", candidates: [] });
+      return "answer";
+    },
+  } });
+  const model = await host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "remember" }).done;
+  assert.equal((await log.read()).some((event) => event.type === "memory_learned"), false);
+  await host.recordDelivery(model, { channel: "cli" });
+  await host.recordDelivery(model, { channel: "telegram", telegramMessageId: 123 });
+  const learned = (await log.read()).filter((event) => event.type === "memory_learned");
+  assert.equal(learned.length, 1);
+  assert.equal(learned[0]!.requestId, model.runId);
+  assert.equal(learned[0]!.conversationId, "c1");
+  const control = await host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "/help" }).done;
+  await host.recordDelivery(control, { channel: "cli" });
+  assert.equal((await log.read()).filter((event) => event.type === "memory_learned").length, 1);
 });
 
 test("reset is queued behind active work and cancelled consumption and legacy ownership stay visible", async (t) => {
