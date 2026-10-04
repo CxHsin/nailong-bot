@@ -1,17 +1,33 @@
 import { randomUUID, createHash } from "node:crypto";
 import { createAssistantMessageEventStream, isContextOverflow } from "@mariozechner/pi-ai";
-import type { Api, Model } from "@mariozechner/pi-ai";
+import type { Api, Model, Message, Usage, SimpleStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
 import { createContextProjection } from "../context/context-budget.js";
-import { assistantText } from "./model-message.js";
+import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
 import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames } from "./output-protocol.js";
 import { composeMemory, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
 import type { createMemoryProjection } from "../memory/projection.js";
 import { estimateInput, modelInputBudget } from "../context/input-budget.js";
+import { recordModelUsage } from "./model-usage.js";
+import { projectProviderContext } from "../context/provider-aware.js";
+import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+function deepseekCacheOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
+  return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
+    const customized = await options?.onPayload?.(payload, model);
+    const result = customized ?? payload;
+    if (model.provider !== "deepseek" || !result || typeof result !== "object") return result;
+    const clean = { ...result } as Record<string, unknown>;
+    delete clean.prompt_cache_key;
+    delete clean.prompt_cache_retention;
+    delete clean.cache_control;
+    return clean;
+  } };
+}
+
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
   let dispatchedThisStep = false;
   const previousBeforeTool = session.agent.beforeToolCall;
@@ -57,39 +73,74 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     protocolVersion: OUTPUT_PROTOCOL_VERSION, botPrompt, systemPrompt, botPromptVersion: request.botPromptVersion ?? createHash("sha256").update(botPrompt).digest("hex"),
     systemPromptHash: createHash("sha256").update(systemPrompt).digest("hex") });
   const providerStream = session.agent.streamFn;
+  const identityEvents = request?.conversationId ? await request.log.read() : [];
+  const resetIndex = identityEvents.findLastIndex((event) => event.type === "conversation_reset" || event.type === "reset");
+  const projectionIdentity = request?.conversationId ? projectProviderContext({ conversationId: request.conversationId,
+    capabilities: { provider: model.provider, model: model.id, promptProfile: createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools,
+      reset: resetIndex < 0 ? "initial" : eventIdentity(identityEvents[resetIndex]!, resetIndex), excluded: [...memoryExclusions(identityEvents)].sort() })).digest("hex"),
+      reasoningReplay: false, promptCaching: true, images: true, compaction: true, appendConfigurationUpdates: false }, items: [] }) : undefined;
+  if (projectionIdentity) session.agent.sessionId = projectionIdentity.cacheKey;
   const user = request && (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user");
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
+    conversationId: request.conversationId,
     ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
     summarize: async (context, maxTokens) => {
-      const stream = await providerStream(model, context, { maxTokens, signal: session.agent.signal });
-      for await (const _event of stream) { /* Drain snapshots rather than retaining them. */ }
+      const callId = randomUUID();
+      await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
+      const stream = await providerStream(model, context, deepseekCacheOptions({ maxTokens, signal: session.agent.signal }));
+      let initialUsage: Usage | undefined;
+      for await (const event of stream) if (event.type === "start") initialUsage = event.partial.usage;
       const response = await stream.result();
+      await recordModelUsage(request, callId, "summary", response, initialUsage);
       if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
       return response.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
     },
   });
+  let snapshot = request?.conversationId ? (await request.log.read()).find((event) => event.type === "context_input_snapshot" && event.requestId === request.id) : undefined;
   session.agent.streamFn = async (selected, context, streamOptions) => {
     try {
+      if (request?.conversationId) context = { ...context, systemPrompt: stableSystemPrompt(systemPrompt, options.dataDir) };
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;
       for (let attempt = 0; attempt < 2; attempt++) {
         const inputBudget = modelInputBudget(selected, options.contextBudgetRatio, options.modelBudgetRatios).budget;
-        const reserve = recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0;
+        const date: Message = { role: "user", timestamp: 0, content: `运行层当前日期（背景资料）：${(options.now?.() ?? new Date()).toISOString().slice(0, 10)}` };
+        const reserve = snapshot ? 0 : (recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0) +
+          (request?.conversationId ? estimateInput({ messages: [date] }) - estimateInput({ messages: [] }) : 0);
         const result = projection ? await projection.project(selected, context, attempt === 1, reserve) :
           { context, maxTokens: selected.maxTokens, sourceIds: [] as string[] };
-        const combined = composeMemory(result.context, result.sourceIds, recalled?.candidates ?? [], reserve, String(user?.text ?? ""));
+        let combined = snapshot ? { context: result.context, shown: snapshot.shown as ReturnType<typeof composeMemory>["shown"], tokens: Number(snapshot.tokens), quotes: [] } :
+          composeMemory(result.context, result.sourceIds, recalled?.candidates ?? [], recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0, String(user?.text ?? ""));
+        if (request?.conversationId && !snapshot) {
+          const currentIndex = combined.context.messages.findLastIndex((message) => message.role === "user");
+          const memoryMessage = combined.quotes.length ? combined.context.messages[currentIndex - 1] : undefined;
+          const supplemental = [date, ...(memoryMessage ? [memoryMessage] : [])];
+          const messages = [...combined.context.messages];
+          messages.splice(memoryMessage ? currentIndex - 1 : currentIndex, 0, date);
+          combined = { ...combined, context: { ...combined.context, messages } };
+          snapshot = { type: "context_input_snapshot", at: new Date().toISOString(), messages: supplemental,
+            shown: combined.shown, tokens: combined.tokens,
+            memoryNodeIds: combined.quotes.flatMap((quote) => { const reference = quote as { nodeId: string; associationPaths?: string[][] };
+              return [reference.nodeId, ...(reference.associationPaths?.flat() ?? [])]; }) };
+          const { at: _at, ...storedSnapshot } = snapshot;
+          await request.log.append({ ...storedSnapshot, requestId: request.id });
+        }
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
-        await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, systemPrompt: result.context.systemPrompt });
-        const source = await providerStream(selected, combined.context, { ...streamOptions,
-          maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) });
+        await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
+          systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
+          stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
+        const source = await providerStream(selected, combined.context, deepseekCacheOptions({ ...streamOptions,
+          maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }));
         let producedOutput = false;
+        let initialUsage: Usage | undefined;
         let lastPreview = "";
         let lastPreviewAt = -Infinity;
         let lastValidatedPrefix = "";
         for await (const event of source) {
+          if (event.type === "start") initialUsage = event.partial.usage;
           if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
           if (event.type === "text_delta" && request) {
             const rawPreview = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
@@ -122,6 +173,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           }
         }
         const message = await source.result();
+        await recordModelUsage(request, modelStepId, "execution", message, initialUsage);
         if (request && recalled?.snapshotId && message.stopReason !== "error" && message.stopReason !== "aborted")
           await request.log.append({ type: "memory_presented", requestId: request.id,
             modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, tokens: combined.tokens, budget: reserve });

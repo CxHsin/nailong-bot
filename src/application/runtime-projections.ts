@@ -21,7 +21,7 @@ export function projectRequestState(events: StoredEvent[]) {
 /** Compatibility view for simple answer adapters; Pi uses replayEvents instead. */
 export function projectDeliveredChat(events: StoredEvent[]): Message[] {
   events = filterMemoryEvents(events);
-  const reset = events.findLastIndex((event) => event.type === "reset");
+  const reset = events.findLastIndex((event) => event.type === "reset" || event.type === "conversation_reset");
   const generated = new Map<string, string>();
   const messages: Message[] = [];
   for (const event of events.slice(reset + 1)) {

@@ -4,7 +4,7 @@ import { normalizeHostInput } from "../../host/host.js";
 export { createTelegramRichTransport, isRichApiUnavailable } from "./rich-transport.js";
 export type { TelegramRichTransportApi } from "./rich-transport.js";
 
-export type TelegramInput = { fromId: number; chatId: number; chatType: string; messageId: number; text?: string; image?: { mimeType: string; data: string; contentRef?: string } };
+export type TelegramInput = { fromId: number; chatId: number; chatType: string; messageId: number; replyToMessageId?: number; text?: string; image?: { mimeType: string; data: string; contentRef?: string } };
 export function telegramConversationId(chatId: number): string {
   if (!Number.isSafeInteger(chatId) || chatId <= 0) throw new Error("Telegram chatId 无效");
   return `telegram:private:${chatId}`;
@@ -15,11 +15,12 @@ export function normalizeTelegramInput(update: TelegramInput): HostInput {
   const parts: ContentPart[] = [];
   if (update.text !== undefined && update.text.trim()) parts.push({ type: "text", text: update.text });
   if (update.image) parts.push({ type: "image", mimeType: update.image.mimeType, data: update.image.data, ...(update.image.contentRef ? { contentRef: update.image.contentRef } : {}) });
-  return normalizeHostInput({ actor: { id: `telegram:${update.fromId}`, kind: "user" }, conversationId: telegramConversationId(update.chatId), parts, metadata: { channel: "telegram", messageId: update.messageId } });
+  return normalizeHostInput({ actor: { id: `telegram:${update.fromId}`, kind: "user" }, conversationId: telegramConversationId(update.chatId), parts, metadata: { channel: "telegram", messageId: update.messageId,
+    ...(update.replyToMessageId !== undefined ? { replyToMessageId: update.replyToMessageId } : {}) } });
 }
 
 export type TelegramHostTransport = { draft?: (draftId: number, text: string, chatId: number) => Promise<void>; send: (text: string, chatId: number) => Promise<number>; edit?: (messageId: number, text: string, chatId: number) => Promise<void> };
-export function createTelegramHostProjection(options: TelegramHostTransport & { chatId: number; onDelivered?: (event: HostEvent) => Promise<void> }) {
+export function createTelegramHostProjection(options: TelegramHostTransport & { chatId: number; onDelivered?: (event: HostEvent, messageId: number) => Promise<void> }) {
   let draftId = 1;
   let finalRun: string | undefined;
   return {
@@ -28,8 +29,14 @@ export function createTelegramHostProjection(options: TelegramHostTransport & { 
         if (event.type === "progress" && event.text && options.draft) await options.draft(draftId, event.text, options.chatId);
         if (event.type === "run_succeeded" && event.result?.text && finalRun !== event.runId) {
           finalRun = event.runId;
-          await options.send(String(event.result.text), options.chatId);
-          await options.onDelivered?.(event);
+          const messageId = await options.send(String(event.result.text), options.chatId);
+          await options.onDelivered?.(event, messageId);
+        }
+        if (event.type === "run_failed") {
+          await options.send("抱歉，这条消息处理失败，请稍后重试。", options.chatId);
+        }
+        if (event.type === "run_cancelled") {
+          await options.send("这条消息已取消。", options.chatId);
         }
       }
       return handle.done;

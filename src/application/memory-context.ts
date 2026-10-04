@@ -26,9 +26,11 @@ export function composeMemory(context: Context, sourceIds: string[], candidates:
   const present = new Set(sourceIds);
   const shown: Array<{ nodeId: string; messageId: string; offset: number; end: number; existing: boolean }> = [];
   for (const message of context.messages) {
-    if (message.role !== "toolResult" || !["memory_search", "memory_read"].includes(message.toolName) || message.isError) continue;
+    const snapshotText = message.role === "user" && typeof message.content === "string" && message.content.startsWith("长期记忆原文引用") ? message.content : undefined;
+    if (!snapshotText && (message.role !== "toolResult" || !["memory_search", "memory_read"].includes(message.toolName) || message.isError)) continue;
     try {
-      const text = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      const text = snapshotText ? snapshotText.slice(snapshotText.indexOf("\n") + 1) :
+        Array.isArray(message.content) ? message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") : "";
       const parsed = JSON.parse(text);
       const items = Array.isArray(parsed) ? parsed : [parsed];
       for (const item of items) for (const part of item.messages ?? [item]) {
@@ -78,6 +80,8 @@ export function composeMemory(context: Context, sourceIds: string[], candidates:
       if (accepted) shown.push({ nodeId: candidate.node.id, messageId: original.id, offset: accepted.offset, end: accepted.end, existing: false });
     }
   }
-  const messages = quotes.length ? [makeMessage(), ...context.messages] : context.messages;
-  return { context: { ...context, messages }, shown, tokens: quotes.length ? memoryCost() : 0 };
+  const messages = [...context.messages];
+  const current = messages.findLastIndex((message) => message.role === "user");
+  if (quotes.length) messages.splice(Math.max(0, current), 0, makeMessage());
+  return { context: { ...context, messages }, shown, tokens: quotes.length ? memoryCost() : 0, quotes };
 }

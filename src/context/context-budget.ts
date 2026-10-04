@@ -12,13 +12,16 @@ function checkpointMessage(c: Checkpoint): Message {
 }
 function contextMessages(replay: Replay, checkpoint?: Checkpoint): Message[] {
   const suffix = replay.units.filter((u) => u.through > (checkpoint?.through ?? 0)).flatMap((u) => u.messages);
-  if (checkpoint && !suffix.includes(replay.current)) suffix.unshift(replay.current);
+  if (checkpoint && !suffix.includes(replay.current)) {
+    const currentInput = replay.units.find((unit) => unit.messages.includes(replay.current));
+    suffix.unshift(...(currentInput?.messages ?? [replay.current]));
+  }
   return checkpoint ? [checkpointMessage(checkpoint), ...suffix] : suffix;
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
-  ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
-  const store = createCheckpointStore(options.dataDir, "structured-text-v1");
+  conversationId?: string; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
+  const store = createCheckpointStore(options.dataDir, "structured-text-v1", options.conversationId);
   return {
     async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
       const resolved = modelInputBudget(model, options.ratio, options.ratios);

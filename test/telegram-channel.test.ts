@@ -25,6 +25,20 @@ test("Telegram Host projection converges one editable draft into one final messa
   assert.deepEqual(calls, ["draft:处理中", "send:完成"]);
 });
 
+test("Telegram Host projection closes failed runs with a visible error", async () => {
+  const calls: string[] = [];
+  const projection = createTelegramHostProjection({ chatId: 42, draft: async (_id, text) => { calls.push(`draft:${text}`); },
+    send: async (text) => { calls.push(`send:${text}`); return 10; } });
+  const events: HostEvent[] = [
+    { type: "run_submitted", schemaVersion: 1, runId: "r2", conversationId: "c1", sequence: 1, at: "now" },
+    { type: "progress", schemaVersion: 1, runId: "r2", conversationId: "c1", sequence: 2, at: "now", phase: "working", source: "provider", visibility: "normal", contextPolicy: "exclude", text: "处理中" },
+    { type: "run_failed", schemaVersion: 1, runId: "r2", conversationId: "c1", sequence: 3, at: "now", error: "模型协议纠正次数耗尽" },
+  ];
+  const handle = { runId: "r2", conversationId: "c1", events: async function* () { yield* events; }, done: Promise.resolve(events.at(-1)!), cancel: async () => false } as RunHandle;
+  await projection.consume(handle);
+  assert.deepEqual(calls, ["draft:处理中", "send:抱歉，这条消息处理失败，请稍后重试。"]);
+});
+
 test("legacy Telegram environment variables remain accepted with migration guidance", () => {
   const warnings: string[] = [];
   const result = telegramEnvironment({ TELEGRAM_BOT_TOKEN: "old-token", TELEGRAM_USER_ID: "42" }, (message) => warnings.push(message));

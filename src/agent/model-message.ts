@@ -1,5 +1,9 @@
 import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
 
+export function stableSystemPrompt(systemPrompt: string, dataDir: string): string {
+  return `${systemPrompt}\nCurrent working directory: ${dataDir.replace(/\\/g, "/")}`;
+}
+
 export function assistantText(text: string, model: Model<Api>, timestamp = Date.now()): AssistantMessage {
   return { role: "assistant", content: [{ type: "text", text }], api: model.api,
     provider: model.provider, model: model.id, stopReason: "stop", timestamp,

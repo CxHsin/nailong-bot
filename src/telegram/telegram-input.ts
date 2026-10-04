@@ -26,6 +26,7 @@ export async function downloadTelegramPhoto(bot: Bot, token: string, fileId: str
 /** Both text and captioned photos use the same durable acceptance boundary. */
 export function registerTelegramInput(bot: Bot, options: {
   ownerId: number;
+  botUsername?: string;
   download: (fileId: string) => Promise<ImageContent>;
   handle: (input: Update, onStarted: () => void) => Promise<void>;
   reportFailure: (error?: unknown) => void;
@@ -34,6 +35,12 @@ export function registerTelegramInput(bot: Bot, options: {
   let acceptance = Promise.resolve();
   bot.on(["message:text", "message:photo"], async (ctx) => {
     if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private") return;
+    let text = ctx.message.text ?? ctx.message.caption;
+    const addressed = !ctx.message.photo && text && /^\/([a-zA-Z0-9_]+)@([a-zA-Z0-9_]+)(?=\s|$)/.exec(text);
+    if (addressed && options.botUsername) {
+      if (addressed[2]!.toLowerCase() !== options.botUsername.toLowerCase()) return;
+      text = text!.replace(addressed[0], `/${addressed[1]}`);
+    }
     let releaseAcceptance!: () => void;
     // Include downloads in the shutdown boundary so polling cannot confirm an unaccepted photo.
     acceptance = new Promise<void>((resolve) => { releaseAcceptance = resolve; });
@@ -50,7 +57,7 @@ export function registerTelegramInput(bot: Bot, options: {
       let hasStarted = false;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const completed = options.handle({ userId: ctx.from.id, chatType: ctx.chat.type,
-        text: ctx.message.text ?? ctx.message.caption, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
+        text, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
         () => { hasStarted = true; markStarted(); });
       active.add(completed);
       void completed.then(() => { active.delete(completed); }, (error) => {

@@ -8,11 +8,12 @@ export type Checkpoint = { version: 2; id: string; boundary: string; through: nu
   lastEventDigest: string; summaryStrategy: "full-result-v1" | "structured-text-v1";
   summary: string; previousId?: string; model: string; ratio: number; createdAt: string };
 
-export function createCheckpointStore(dataDir: string, strategy: Checkpoint["summaryStrategy"] = "full-result-v1") {
-  const dir = join(dataDir, "checkpoints");
+export function createCheckpointStore(dataDir: string, strategy: Checkpoint["summaryStrategy"] = "full-result-v1", conversationId?: string) {
+  const root = conversationId ? join(dataDir, "checkpoints", "conversations") : dataDir;
+  const dir = conversationId ? join(root, createHash("sha256").update(conversationId).digest("hex")) : join(root, "checkpoints");
   return {
     async invalidate() {
-      if (dirname(resolve(dir)) !== resolve(dataDir)) throw new Error("历史摘要缓存路径无效");
+      if (dirname(resolve(dir)) !== resolve(root)) throw new Error("历史摘要缓存路径无效");
       await rm(dir, { recursive: true, force: true });
     },
     async load(boundary: string, events: StoredEvent[]): Promise<Checkpoint | undefined> {

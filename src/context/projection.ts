@@ -16,11 +16,12 @@ export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUni
 
 export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
   const rawEvents = await log.read();
+  const hostConversationReplay = rawEvents.some((event) => event.requestId === currentId && typeof event.conversationId === "string");
   const excluded = memoryExclusions(rawEvents);
   const all = filterMemoryEvents(rawEvents);
   const replayText = (type: "progress" | "status" | "result" | "final", text: string, timestamp: number) =>
     assistantText(structured ? protocolText(type, text) : text, model, timestamp);
-  const reset = all.findLastIndex((event) => event.type === "reset");
+  const reset = all.findLastIndex((event) => event.type === "reset" || event.type === "conversation_reset");
   const events = all.slice(reset + 1);
   const resultDelivered = (segmentId: unknown) => segmentDelivery(events, segmentId).complete;
   const units: ReplayUnit[] = [];
@@ -29,9 +30,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   const results = new Map<string, { event: StoredEvent; index: number }>();
   const dispatch = new Map<string, { event: StoredEvent; index: number }>();
   const delivered = new Set(events.filter((e) => e.type === "delivery_succeeded").map((e) => e.requestId));
-  const ended = new Set(events.filter((e) => e.type === "request_failed" || e.type === "request_completed" ||
-    e.type === "request_interrupted")
-    .map((e) => e.requestId));
+  const ended = new Set(events.filter((e) => ["request_failed", "request_completed", "request_interrupted", "run_succeeded", "run_failed", "run_cancelled"].includes(e.type))
+    .map((e) => e.requestId ?? e.runId));
   const used = new Set<string>();
   const calls = new Set<string>();
   const progressSteps = new Set(events.filter((event) => event.type === "text_finalized" &&
@@ -56,7 +56,12 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         ? [{ type: "text", text: event.text }, ...images] : event.text, timestamp };
       if (event.requestId === currentId) current = message;
       legacyRequest = event.requestId ?? `legacy:${index}`;
-      units.push({ messages: [message], through: index + 1, requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
+      const snapshot = events.find((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);
+      const snapshotMessages = Array.isArray(snapshot?.messages) ? snapshot.messages as Message[] : [];
+      const quotesExcluded = Array.isArray(snapshot?.memoryNodeIds) && snapshot.memoryNodeIds.some((id) => excluded.has(String(id)));
+      const supplemental = quotesExcluded ? snapshotMessages.slice(0, 1) : snapshotMessages;
+      units.push({ messages: [...supplemental, message], through: Math.max(index + 1, snapshot ? events.indexOf(snapshot) + 1 : 0), requestId: legacyRequest, safe: true,
+        sourceIds: [eventIdentity(event, all.indexOf(event))] });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
       units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
         requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
@@ -96,7 +101,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           const view = replayToolResultView({ result, archive,
             sourceFiltered: result !== unfiltered, recorded: found.event.modelVisible,
             archiveRead: log.isArchiveRead(call.name, sent.event.args),
-            olderThanRecent: !recent.includes(event.requestId) && event.requestId !== currentId,
+            olderThanRecent: !hostConversationReplay && !recent.includes(event.requestId) && event.requestId !== currentId,
             toolName: call.name });
           kept.push(call);
           responses.push({ role: "toolResult", toolCallId: call.id, toolName: call.name, content: view.content,
@@ -121,18 +126,18 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         const progress = events.find((e) => e.type === "text_finalized" && e.modelStepId === event.modelStepId &&
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
-          c.type === "toolCall" ? kept.includes(c) : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
+          c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !hostConversationReplay : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
         if (progress?.contentKind === "result") {
           // Keep execution facts regardless of UI delivery, but never imply unseen text was delivered.
           assistant.content = assistant.content.filter((part) => part.type !== "text");
           const text = String(progress.text);
-          if (resultDelivered(progress.textSegmentId)) {
+          if (hostConversationReplay || resultDelivered(progress.textSegmentId)) {
             assistant.content.push({ type: "text", text: structured ? protocolText("result", text) : text });
           } else if (event.requestId === currentId && !ended.has(currentId)) {
             const work = `内部工作成果（尚未确认送达用户）：\n${text}`;
             assistant.content.push({ type: "text", text: structured ? protocolText("status", work) : work });
           }
-        } else if (structured && (progress || !event.protocolVersion)) {
+        } else if (structured && (progress || !event.protocolVersion) && !hostConversationReplay) {
           const text = typeof progress?.text === "string" ? progress.text : original.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
           if (text) assistant.content.push({ type: "text", text: protocolText(progress?.contentKind === "status" ? "status" : "progress", text) });
         }
@@ -142,7 +147,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
     } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
-      if (event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
+      if (hostConversationReplay && event.contentKind !== "result") continue;
+      if (!hostConversationReplay && event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
         if (event.requestId !== currentId || ended.has(currentId)) continue;
         const work = `内部工作成果（尚未确认送达用户）：\n${event.text}`;
         if (!events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
@@ -156,12 +162,15 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
       units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", event.text, timestamp)], through: index + 1,
         requestId: event.requestId, safe: true, sourceIds: event.contentKind === "result" ? [eventIdentity(event, all.indexOf(event))] : [] });
-    } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId)) {
-      const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === event.requestId);
+    } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId) &&
+      (!hostConversationReplay || !events.some((e) => e.type === "run_succeeded" && e.runId === event.requestId)) ||
+      hostConversationReplay && event.type === "run_succeeded" && (event.result as { kind?: string } | undefined)?.kind === "model") {
+      const requestId = event.requestId ?? event.runId;
+      const answer = events.slice(0, index).findLast((e) => e.type === "answer_generated" && e.requestId === requestId);
       if (typeof answer?.text === "string") {
-        const finalized = events.findLast((e) => e.type === "text_finalized" && e.requestId === event.requestId && e.contentKind === "final" && e.text === answer.text);
+        const finalized = events.findLast((e) => e.type === "text_finalized" && e.requestId === requestId && e.contentKind === "final" && e.text === answer.text);
         const source = finalized ?? answer;
-        units.push({ messages: [replayText("final", answer.text, timestamp)], through: index + 1, requestId: event.requestId,
+        units.push({ messages: [replayText("final", answer.text, timestamp)], through: index + 1, requestId: typeof requestId === "string" ? requestId : undefined,
           safe: true, sourceIds: [eventIdentity(source, all.indexOf(source))] });
       }
     }
