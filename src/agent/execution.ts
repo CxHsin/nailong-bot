@@ -154,7 +154,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
                 preview = { ...frames.prefix, text: frames.prefix.text + (partial?.text ?? "") };
                 validatedPrefix = frames.framed;
                 if (frames.prefix.text && frames.prefix.text !== lastValidatedPrefix) {
-                  await request.log.append({ type: "text_validated_prefix", requestId: request.id,
+                  if (request.onText) await request.log.append({ type: "text_validated_prefix", requestId: request.id,
                     modelStepId, textSegmentId, text: frames.prefix.text, contentKind: frames.prefix.type });
                   lastValidatedPrefix = frames.prefix.text;
                   prefixChanged = true;
@@ -163,11 +163,12 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             } catch { /* Invalid protocol cannot publish new text or dispatch tools. */ }
             // Preview at most every 100 ms, but publish complete validated frames immediately.
             if (preview && preview.text !== lastPreview && (prefixChanged || performance.now() - lastPreviewAt >= 100)) {
-              await request.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
+              if (request.onText) await request.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
                 textSegmentId, contentKind: preview.type, text: preview.text,
                 protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
               lastPreview = preview.text;
               lastPreviewAt = performance.now();
+              request.onProgress?.({ type: "text", segmentId: textSegmentId, kind: preview.type, text: preview.text, finalized: false });
               await request.onText?.(textSegmentId);
             }
           }
@@ -206,6 +207,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const response = createAssistantMessageEventStream();
         if (invalid) {
           await request?.log.append({ type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
+          request?.onProgress?.({ type: "discard", segmentId: textSegmentId });
           if (request && (await request.log.read()).some((entry) => entry.textSegmentId === textSegmentId && entry.type === "telegram_delivery_attempt"))
             throw new Error("模型协议在部分正文提交后失效，本轮未完成");
           if (++protocolErrors > 2) throw new Error("模型协议纠正次数耗尽，本轮未完成");
@@ -230,6 +232,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
           await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
             textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
+          request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind: parsed.type, text: parsed.text, finalized: true });
           await request?.onText?.(textSegmentId);
           if (parsed.type !== "final" && !toolCalls.length)
             await queueFeedback(`上一条输出是 ${parsed.type}，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。`);

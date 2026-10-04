@@ -48,7 +48,8 @@ test("Host serializes runs globally and exposes ordered terminal events", async 
   assert.equal(secondEvents.at(-1)?.type, "run_succeeded");
   assert.deepEqual(firstEvents.map((event) => event.sequence), firstEvents.map((_, index) => index + 1));
   assert.equal(firstEvents[0]?.runId, first.runId);
-  assert.equal((await log.read()).filter((event) => event.runId === first.runId).length, firstEvents.length);
+  const stored = (await log.read()).filter((event) => event.runId === first.runId);
+  assert.deepEqual(stored.map((event) => event.type), firstEvents.filter((event) => event.type !== "progress").map((event) => event.type));
 });
 
 test("Host persists envelopes through SQLite without claiming log identities", async (t) => {

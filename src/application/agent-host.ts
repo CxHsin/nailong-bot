@@ -74,15 +74,24 @@ export function createAgentHost(options: AgentHostOptions) {
       ...(typeof replyToMessageId === "number" ? { replyToMessageId } : {}), ...(replyContext ? { replyContext } : {}),
       ...(images.length ? { images } : {}) });
     await log.append({ type: "request_started", requestId: context.runId });
-    context.emit({ type: "progress", phase: "agent", source: "runtime", visibility: "normal", contextPolicy: "exclude", text: "处理中" });
+    const results = new Map<string, string>();
     const history = await log.read();
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
     try {
-      const answer = await options.agent.answer(projectDeliveredChat(history), { id: context.runId, log, conversationId: input.conversationId,
+      const final = await options.agent.answer(projectDeliveredChat(history), { id: context.runId, log, conversationId: input.conversationId,
+        onProgress: (progress) => {
+          if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);
+          if (progress.type === "discard") results.delete(progress.segmentId);
+          context.emit({ type: "progress", progress });
+        },
         botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
         botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined });
-      await log.append({ type: "answer_generated", requestId: context.runId, text: answer, resultId: context.runId });
-      return { text: answer, resultId: context.runId, kind: "model" };
+      // A protocol final may omit previously completed results; they must survive the draft.
+      const answer = [...results.values(), final].join("\n\n");
+      // Preserve the generated final separately from the Channel's assembled presentation.
+      await log.append({ type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
+      return { text: answer, resultId: context.runId, kind: "model",
+        ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
       await log.append({ type: "request_failed", requestId: context.runId, error: String(error) });
       throw error;
@@ -92,7 +101,8 @@ export function createAgentHost(options: AgentHostOptions) {
     if (event.type !== "run_succeeded") return;
     const log = conversationLog(options.log, event.conversationId);
     await log.append({ type: "delivery_succeeded", runId: event.runId, requestId: event.runId,
-      resultId: String(event.result?.resultId ?? event.runId), ...delivery });
+      resultId: String(event.result?.resultId ?? event.runId),
+      ...(event.result?.stageSegmentIds ? { stageSegmentIds: event.result.stageSegmentIds } : {}), ...delivery });
     if (event.result?.kind !== "model") return;
     await log.append({ type: "request_completed", requestId: event.runId });
     await commitMemoryLearning(log, conversationUserId(event.conversationId), undefined, options.agent.memoryVector).catch(async () => {
