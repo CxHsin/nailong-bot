@@ -6,7 +6,7 @@ import type { Request } from "../application/app-types.js";
 import { createContextProjection } from "../context/context-budget.js";
 import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
-import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames } from "./output-protocol.js";
+import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames, normalizeOutputWhitespace } from "./output-protocol.js";
 import { composeMemory, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
 import type { createMemoryProjection } from "../memory/projection.js";
 import { estimateInput, modelInputBudget } from "../context/input-budget.js";
@@ -201,7 +201,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           if (parsed?.type === "final" && toolCalls.length) throw new Error("final 不允许同时调用工具");
         } catch (error) { invalid = error instanceof Error ? error.message : String(error); }
         await request?.log.append({ type: "protocol_validated", requestId: request.id, modelStepId,
-          protocolVersion: OUTPUT_PROTOCOL_VERSION, valid: !invalid, error: invalid });
+          protocolVersion: OUTPUT_PROTOCOL_VERSION, valid: !invalid, error: invalid,
+          normalizedWhitespace: !invalid && normalizeOutputWhitespace(raw) !== raw });
         const response = createAssistantMessageEventStream();
         if (invalid) {
           await request?.log.append({ type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
