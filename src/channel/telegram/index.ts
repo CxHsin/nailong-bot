@@ -32,6 +32,12 @@ export function createTelegramHostProjection(options: TelegramHostTransport & { 
           const messageId = await options.send(String(event.result.text), options.chatId);
           await options.onDelivered?.(event, messageId);
         }
+        if (event.type === "run_failed") {
+          await options.send("抱歉，这条消息处理失败，请稍后重试。", options.chatId);
+        }
+        if (event.type === "run_cancelled") {
+          await options.send("这条消息已取消。", options.chatId);
+        }
       }
       return handle.done;
     },
