@@ -1,76 +1,113 @@
 # Nailong Agent
 
-在本机运行的个人 Agent，当前提供 Telegram 和 CLI 两个 Channel，支持文字和图片。两个 Channel 共用 Host、运行事件、Delivery facts 与 Provider-aware Context Projection；使用 pi SDK 调用 DeepSeek，开放 pi 原生文件工具，并把 TinyFish MCP 的 `search`、`fetch_content` 映射为模型可选择的网页工具。
+在本机运行的个人 Agent，通过 Telegram 私聊或 CLI 接收文字和图片，使用 pi SDK 调用 DeepSeek，并提供本机文件工具和可选的 TinyFish 网页工具。
 
-## 启动
+[功能地图](#功能地图-feature-map) · [启动与使用](#启动与使用) · [运行数据与上下文](#运行数据与上下文) · [代码结构](#代码结构) · [验证](#验证)
+
+## 功能地图 Feature Map
+
+这份地图按当前入口的接入状态组织。**入口已接入**表示启动命令会使用该能力；**模块已实现，待接入**表示有独立 API 和测试，但当前 Telegram／CLI 入口尚未完成集成；**兼容实现**表示保留在原应用流程中，不代表当前入口具备相同行为。
+
+### 入口已接入
+
+| 功能 | 当前行为与使用方式 | 代码入口 | 相关验证 |
+| --- | --- | --- | --- |
+| Telegram 私聊 | `npm start`；只接受配置账号的私聊文字和照片，照片先下载再归一化 | [`src/main.ts`](src/main.ts)、[`telegram-input.ts`](src/telegram/telegram-input.ts) | [`telegram-images.test.ts`](test/telegram-images.test.ts) |
+| CLI 对话 | `npm run chat` 逐行交互；`npm run send -- "问题"` 单次发送；send 支持 `--image` | [`src/cli/main.ts`](src/cli/main.ts)、[`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
+| 统一输入与运行 | 两个入口都用 Host API；输入携带 Actor、conversationId 和文字／图片 Content Parts，返回有序 RunHandle 事件；同一 Host 实例内串行执行 | [`host.ts`](src/host/host.ts)、[`content-parts.ts`](src/host/content-parts.ts) | [`host.test.ts`](test/host.test.ts) |
+| Telegram 排版与交付 | 运行进展更新原生草稿，成功后发送最终正文；优先 Rich Markdown，API 不可用时回退安全 HTML 和长文分段 | [`src/channel/telegram/`](src/channel/telegram/index.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-channel.test.ts`](test/telegram-channel.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts) |
+| CLI 输出 | 默认显示运行时间线；`--json`／`--ndjson` 输出逐行 JSON 事件，带 type、seq、runId 和 conversationId；入口错误写 stderr | [`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
+| 文件与网页工具 | pi 的 read、write、edit、ls、find、grep；配置 TinyFish 后增加 web_search、web_fetch | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`tinyfish.ts`](src/agent/tinyfish.ts) | [`local-files.test.ts`](test/local-files.test.ts)、[`tinyfish.test.ts`](test/tinyfish.test.ts) |
+| 运行日志与归档 | SQLite 追加记录输入、模型步骤、工具事实和运行结果；旧 JSONL 幂等导入；大工具结果完整归档，可分段读取 | [`sqlite-runtime-log.ts`](src/runtime/sqlite-runtime-log.ts)、[`tool-archive.ts`](src/runtime/tool-archive.ts)、[`archive-read.ts`](src/agent/archive-read.ts) | [`sqlite-runtime-log.test.ts`](test/sqlite-runtime-log.test.ts)、[`runtime-log.test.ts`](test/runtime-log.test.ts) |
+| 模型执行与上下文预算 | 校验 status／result／final 输出协议，重放历史与工具结果，按窗口预算生成摘要 checkpoint，遇到协议错误或持续停滞时结束本轮 | [`execution.ts`](src/agent/execution.ts)、[`projection.ts`](src/context/projection.ts)、[`context-budget.ts`](src/context/context-budget.ts) | [`integration.test.ts`](test/integration.test.ts)、[`projection.test.ts`](test/projection.test.ts) |
+
+“相关验证”指对应模块或兼容流程的测试；完整入口行为还需要按[验证](#验证)章节检查。
+
+### 模块已实现，待接入
+
+| 功能 | 已有模块能力 | 当前接入边界 | 相关验证 |
+| --- | --- | --- | --- |
+| conversationId 续聊 | Telegram 映射为 `telegram:private:<用户 ID>`；CLI 接受 `--conversation-id`，默认使用 `cli:<Actor ID>` | 身份已写入事件；现行模型历史重放尚未按 conversationId 隔离，不能据此承诺独立会话或完整跨 Channel 续聊 | [`cross-channel.test.ts`](test/cross-channel.test.ts) |
+| reset 与取消 | Host 提供排队的 reset barrier 和独立 cancel API | 当前入口没有将 `/reset` 或终端取消接到这些 API；运行中取消还需要执行器响应 AbortSignal | [`host.test.ts`](test/host.test.ts) |
+| 语义进展 | 区分 Provider 摘要、commentary、工具事实、阻塞、恢复与终态；提供 quiet／normal／verbose 和默认 15 秒静默提示 | 当前入口尚未调用 Progress pipeline；模型文字／工具事件没有完整转成 Channel 进展 | [`progress.ts`](src/runtime/progress.ts)、[`progress-pipeline.test.ts`](test/progress-pipeline.test.ts) |
+| Delivery facts | 分开推导 Run 与 Delivery 状态，记录尝试、成功、拒绝、未知结果和显式重试 | 当前入口尚未使用该 fact store；交付去重、未知结果处理和有界重试尚未形成统一流程 | [`delivery-pipeline.ts`](src/runtime/delivery-pipeline.ts)、[`progress-pipeline.test.ts`](test/progress-pipeline.test.ts) |
+| 结果复用与恢复 | Host 的 redeliver 按 resultId 读取已成功结果，不调用执行器；recoverRuns 从日志推导运行状态 | 尚无 Telegram／CLI 用户命令，也未在启动时自动核对未完成运行和交付 | [`recovery.ts`](src/host/recovery.ts)、[`host.test.ts`](test/host.test.ts) |
+| Provider-aware Context Projection | ContextItem union 与 capabilities；过滤 UI-only 内容、按元数据选择 reasoning、检查图片支持，生成 cache identity、配置更新和 compaction summary | pi 当前仍调用现行 projection／context-budget；新投影尚未接入实际 Provider 请求与 compaction 生命周期 | [`provider-aware.ts`](src/context/provider-aware.ts)、[`context-provider.test.ts`](test/context-provider.test.ts) |
+
+这部分对应 [规格 #60](https://github.com/CxHsin/nailong-bot/issues/60) 的后续集成目标。模块测试通过与入口验收完成是两个不同状态。
+
+### 兼容实现
+
+| 功能 | 保留的行为 | 所在位置 |
+| --- | --- | --- |
+| 原 Telegram 应用流程 | 按聊天／消息 ID 去重，命令进入串行队列，支持 `/reset` 和 `/prompt` 查看／设置／恢复 | [`src/application/app.ts`](src/application/app.ts)、[`commands.ts`](src/application/commands.ts) |
+| 原 Telegram 文字投影与恢复 | 模型快照流式草稿、阶段成果和最终正文分段；持久化投递计划；明确拒绝重试，未知送达不自动重发，重启核对已确认内容 | [`src/telegram/telegram-projection.ts`](src/telegram/telegram-projection.ts)、[`telegram-delivery.ts`](src/telegram/telegram-delivery.ts) |
+| 配置与旧事件兼容 | 接受 TELEGRAM_* 环境变量并提示迁移；旧日志保留原记录，读取时做 additive upcast | [`src/channel/telegram/index.ts`](src/channel/telegram/index.ts)、[`event-envelope.ts`](src/host/event-envelope.ts) |
+
+原应用和文字投影仍有回归测试，当前 `src/main.ts` 使用新的 Host Channel 路径；原流程中的命令、去重和恢复能力需要逐项迁入新入口。
+
+## 启动与使用
 
 需要 Node.js 24 或更新版本。
 
-1. `npm install`
-2. 复制 `.env.example` 为 `.env`，填写 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_USER_ID`、`DEEPSEEK_API_KEY`。需要网页搜索时再填写可选的 `TINYFISH_API_KEY`。用户 ID 是 Telegram 数字 ID，不是用户名。
-3. 按需要编辑 `system-prompt.md`。
-4. `npm start`
+1. `npm install`。
+2. 复制 `.env.example` 为 `.env`，填写 `DEEPSEEK_API_KEY`。Telegram 还需要 `AGENT_TELEGRAM_BOT_TOKEN` 和 `AGENT_TELEGRAM_USER_ID`，旧 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_USER_ID` 仍可使用。用户 ID 是 Telegram 数字 ID。
+3. 按需要编辑 `system-prompt.md`；网页查询需要可选的 `TINYFISH_API_KEY`。
+4. 选择下方入口。
 
-也可以直接使用共享 Host 的 CLI Channel：`npm run send -- "问题" --conversation-id <id>` 发送一次请求，或 `npm run chat -- --conversation-id <id>` 逐行交互；加 `--json` 输出 NDJSON。Telegram 继续接受旧的 `TELEGRAM_*` 配置，也可迁移到 `AGENT_TELEGRAM_BOT_TOKEN`、`AGENT_TELEGRAM_USER_ID`。
+| 使用方式 | 命令 |
+| --- | --- |
+| Telegram long polling | `npm start`，或兼容别名 `npm run agent` |
+| CLI 逐行聊天 | `npm run chat` |
+| CLI 单次提问 | `npm run send -- "帮我整理这段内容"` |
+| 文字与图片 | `npm run send -- "分析这张图" --image photo.png` |
+| 指定 conversationId | `npm run send -- "继续" --conversation-id telegram:private:42` |
+| 机器可读事件 | `npm run send -- "问题" --ndjson` |
 
-Bot 使用 long polling，无需公网地址。只响应配置的账号在私聊中发送的文字和照片。照片配文会与图片一同送给模型；没有配文时默认分析图片，后续文字可继续追问。电脑关机或进程停止时 Bot 不在线。`/reset` 开始新上下文，但不会删除旧记录。修改 System prompt 后重启生效。已落盘的私聊输入按聊天和消息 ID 去重，重启或 Telegram 重投不会重复执行；中断后可发送一条新消息要求继续。
+Telegram 使用 long polling，无需公网地址；只有进程运行时在线。CLI 使用同一 Host 实现，各启动进程持有自己的 Host 实例；队列只保证实例内串行。
 
-## 运行事件与投影
+可用 `AGENT_DATA_DIR` 指定运行数据目录（默认 `data/`），`AGENT_PROMPT_FILE` 指定提示词文件（默认 `system-prompt.md`），`AGENT_ACTOR_ID` 指定 CLI Actor（默认 `cli`）。当前 `cli:<Actor ID>` 是固定默认身份，可用 `--conversation-id` 指定不同身份；历史隔离状态见功能地图。
 
-### Feature Map
+## 运行数据与上下文
 
-- **Host**（`src/host/`）：接收认证 Actor、显式 `conversationId` 与 `ContentPart[]`，为每次运行分配持久身份，保证全局串行、取消与 reset barrier，并输出有序 `RunHandle` 事件。
-- **Content Parts**（`src/host/content-parts.ts`）：统一文字和图片；Telegram file ID 在 Channel 边界解析，Host 只接收 MIME 与持久内容引用。
-- **Channels**：Telegram 适配器位于 `src/channel/telegram/`，CLI 适配器位于 `src/cli/`；两者可用同一 conversation ID 继续会话。
-- **Progress / Delivery facts**（`src/runtime/progress.ts`、`src/runtime/delivery-pipeline.ts`）：语义进展与交付事实独立于 UI 和模型上下文，支持 quiet/normal/verbose、未知送达、重试与结果复用。
-- **Provider-aware Context Projection**（`src/context/provider-aware.ts`）：根据 Provider capabilities 过滤 UI-only 事件，合法重放 reasoning、编码图片与工具关联，维护 cache key/stable prefix，并以显式 summary 执行 compaction。
+Runtime Event Log 是持久运行事实源。生成结果、Channel 展示与交付确认分别记录；模型 Projection 与 UI Projection 从日志构造各自视图。投影和摘要不改写原始历史。
 
-`data/events.sqlite` 中按序追加的 Runtime Event Log 是运行事实源。用户消息、模型步骤与文字、工具派发与结果、Telegram 投递尝试与结果分别记录；已经生成的回答与已经送达的回答不是同一件事。运行时从同一份已提交日志生成不同视图：
+| 数据 | 默认路径 | 用途 |
+| --- | --- | --- |
+| 运行事实 | `data/events.sqlite` | 用户输入、模型步骤、工具派发／结果、运行终态及交付记录 |
+| 旧事件日志 | `data/events.jsonl` | 启动时校验并幂等导入 SQLite，原文件保留 |
+| 工具结果归档 | `data/tool-results/` | 完整工具输出及校验信息，供 read 分段取回 |
+| 历史摘要 | `data/checkpoints/` | 经来源校验的有损上下文投影，原始事件仍可核查 |
 
-- **Model Context Projection**（`src/context/projection.ts`、`src/context/context-budget.ts`）：重放用户、模型和工具历史，构造下一次模型调用。已定稿的进展文字会进入上下文；最终回答只有完整送达后才作为用户已收到的答复回放。
-- **Telegram UI Projection**（`src/telegram/telegram-events.ts`、`src/telegram/telegram-projection.ts`）：读取已提交的文字快照和投递状态。生成期间随模型输出更新 Telegram 原生草稿；临时状态只用于预览，每项阶段性成果和最终正文独立发送。长正文先解析 Markdown，再按结构及解析后的长度拆分；已校验的稳定前缀可以提前发送，其余继续预览。正式消息发送后固定，分段计划和实际投递结果均持久记录。
-- **运行与恢复视图**（`src/application/runtime-projections.ts`、`src/telegram/telegram-events.ts`）：推导请求终态和重启后的待核对内容。重启时未结束的请求标为中断，不自动重做已经派发但结果未知的工具操作。
+现行 pi 路径使用 `src/context/projection.ts` 与 `context-budget.ts`。每次调用估算输入大小，默认预算为模型窗口的 86%；超过预算时折叠较早的完整历史，尽量保留最近三个完整请求。最终答复按交付事实回放；部分 progress／status 文字仍会进入现行上下文。新 Provider-aware 投影的 UI-only 排除策略尚待接入。
 
-`src/application/runtime-projections.ts` 中的简化聊天视图仅服务于 `answer(messages)` 适配器；正式 pi 会话使用完整事件重放。`src/context/tool-result-projection.ts` 集中定义工具结果给模型的原文或归档引用视图，并在新事件中记录投影版本与当时的选择。投影和摘要都不改写原始运行事件。
+`createPiAgent` 支持 contextBudgetRatio／modelBudgetRatios 参数；当前两个启动入口尚未读取 `.env.example` 中的 `PROJECTION_BUDGET_RATIOS`。
 
-`.env`、`data/` 和原有的 `tinyFish.txt` 都被 Git 忽略。启动时如发现旧版 `data/events.jsonl`，会校验并幂等导入 SQLite，旧文件保留。完整工具结果存于 `data/tool-results/`，历史摘要 checkpoint 存于 `data/checkpoints/`。这些数据可能包含图片、私人文件内容和工具参数，请按私人数据管理。
+执行协议要求模型输出 status、result 或 final JSON；长文字可用追加帧。运行层校验格式、持久化模型和工具事件，纠正协议错误，并用停滞保护限制持续无进展的调用。当前 Channel 入口没有接入模型文字的 onText 回调，因此完整流式成果展示仍属于兼容投影流程。
 
-每次模型调用前会估算上下文大小，默认输入预算为模型上下文窗口的 86%。可用 `PROJECTION_BUDGET_RATIOS` 按模型覆盖，例如 `{"deepseek/deepseek-flash":0.8}`。超预算时，较早的完整历史会折叠为经过来源校验的摘要，尽量保留最近三个完整请求；`/reset` 只改变续聊边界，不删除旧事件。
-
-较大的工具结果会先完整归档，再把包含路径、大小和校验值的引用交给模型。模型可用 `read` 分段取回归档文本。归档失败时仍使用原始结果；日志写入失败则停止后续工具或模型步骤。重复阶段性成果会触发停滞保护；连续十二步未执行工具或提交最终答复时也会结束本轮，避免持续占用请求队列。工具已执行但结果未成功入库时，下一轮只标记结果未知，避免盲目重试。
-
-## 代码结构与依赖边界
-
-- `src/application/`：输入去重、命令、排队和请求流程，以及请求状态视图。
-- `src/agent/`：pi 会话装配、执行协议与控制、工具事实记录和工具访问策略。
-- `src/context/`：Model Context Projection 的回放、预算、摘要、checkpoint 和工具结果视图。
-- `src/telegram/`：输入、排版、独立事件视图、交付与恢复；旧版交付语义集中保留。
-- `src/runtime/`：事件契约、SQLite／JSONL 存储、归档、增量读取及纯事件解释规则。
-- `src/main.ts`：配置和依赖装配、启动及关闭。
-
-Runtime Event Log 是唯一运行事实源。各 Projection 独立读取同一份已提交日志，不调用其他 Projection，也不读取其他视图的缓存或派生状态。共享的送达与事件身份规则只解释事件，不维护额外事实。模型上下文内的回放、预算和摘要属于同一视图的实现步骤；checkpoint 依据日志校验后才能复用。Telegram 交付与应用恢复是写入事实的编排，和只读事件视图区分。
-
-测试保留在 `test/`，通过应用入口、可控模型／MCP 服务、临时存储和模拟 Telegram 验证行为。目录调整不改变启动命令、数据路径、事件格式或依赖版本。
+`.env`、`data/` 和 `tinyFish.txt` 被 Git 忽略；运行数据可能包含图片、私人文件和工具参数。
 
 ## 本机文件工具
 
-模型可自行调用 `read`、`write`、`edit`、`ls`、`find`、`grep`，完成文件读取、写入、修改、目录浏览和搜索。文件内容、命名、格式和组织方式由模型结合对话决定；`write` 可覆盖已有文件。没有开放 `bash` 命令执行工具。
+模型可以调用 read、write、edit、ls、find、grep；write 可覆盖文件。文件访问使用 Agent 进程的系统权限，相对路径按 pi 会话工作目录（默认 `data/`）解析。程序资源、默认提示词和受保护运行存储由工具访问策略保护；未开放 bash 工具。
 
-默认笔记目录为 `D:\Course\Study\nailong notes`，在 `system-prompt.md` 中约定，可自行修改后重启。消息中也可指定其他路径。该约定不构成权限隔离，文件访问使用 Bot 进程的系统权限；相对路径按 pi 会话工作目录 `data/` 解析。
+默认笔记目录在 `system-prompt.md` 中约定，也可在请求里指定路径。文件工具不依赖 TinyFish；TinyFish 未配置或连接失败时，文件功能仍可用。find／grep 使用 pi 管理的 fd／ripgrep，缺失时 pi 会尝试下载。
 
-文件工具不依赖 TinyFish。没有配置 TinyFish 或连接失败时仍可使用；`find` 和 `grep` 使用 pi 管理的 fd／ripgrep，缺失时 pi 会尝试下载。
+## 代码结构
+
+| 目录／入口 | 职责 |
+| --- | --- |
+| `src/main.ts`、`src/cli/main.ts` | Telegram／CLI 配置、依赖装配、启动与关闭 |
+| `src/host/` | Actor／ContentPart 输入契约、RunHandle、串行队列、cancel／reset API、结果复用与恢复视图 |
+| `src/channel/telegram/`、`src/cli/` | Channel 输入归一化和输出投影；Telegram Rich Markdown／HTML transport |
+| `src/agent/` | pi 会话、结构化执行协议、工具事实记录、访问策略与 TinyFish |
+| `src/context/` | 现行历史重放、预算、checkpoint 和工具结果视图，以及待接入的 Provider-aware 投影 |
+| `src/runtime/` | SQLite／JSONL 日志、归档、增量读取，以及 Progress／Delivery facts 模块 |
+| `src/application/`、`src/telegram/` | 原应用兼容流程、命令、去重、Telegram 输入／排版及旧文字投影与恢复 |
+| `test/` | Host、Context、Channel 模块测试及兼容流程回归测试 |
 
 ## 验证
 
-`npm run typecheck`、`npm test`、`npm run build`。
+代码检查：`npm run typecheck`、`npm test`、`npm run build`。文档修改核对功能地图中的路径、启动命令与接入状态即可。
 
-配置真实凭据后，分别验证普通聊天、图片配文与后续追问、需要搜索的问题、包含网址的问题、流式草稿与最终消息、重启续聊，以及 `/reset` 后的新对话。再在普通对话中要求保存一个结论，检查回复涉及的文件是否实际存在、内容是否可读。TinyFish 不可用时 Bot 仍能进行普通聊天和文件操作，启动日志会说明网页查询工具未启用。Telegram 原生草稿的具体渐入效果由客户端呈现，自动化测试不能替代真实聊天中的视觉检查。
-
-
-### Bot 提示词与输出协议
-
-私聊中已授权用户可以使用 `/prompt` 查看 bot 提示词，`/prompt set 提示词` 设置当前聊天的提示词，`/prompt reset` 恢复默认。配置持久保存在运行事件日志中，从下一次请求生效；修改不会清空历史，`/reset` 仍用于新对话。
-
-默认 bot 提示词来自 `system-prompt.md`。执行协议由程序维护，普通文件工具不能修改程序资源、默认提示词及受保护运行存储。每个请求固定提示词快照。正文风格由 bot 提示词决定，执行协议只规定用途和生命周期。模型使用版本化的 `status/result/final` JSON 协议：临时状态、阶段性成果、最终正文。短回复用一个 `type/text` 对象；长回复可用换行分隔的 `type/text/end` 追加帧，同一正文的 `type` 一致、`text` 依次拼接、最后一帧 `end:true`。帧不是 Telegram 消息，消息边界由运行层决定。草稿可以预览未完成字符串，正式发送只使用已校验内容。协议错误最多纠正两次，连续三次纯状态且无工具调用会报告未完成；已有正式内容后协议失效会停止当前回复。
-
-长回复优先在段落、列表项和代码行边界拆分，超长单句或单行才继续按 Unicode 边界细分。代码块在各条消息中独立闭合；表格转换为保留行列信息的逐项内容。生成失败保留已发送正文，未完成草稿留在日志，并单独提示。明确拒绝可有界重试，送达状态不明时不会自动重发。重启保留旧版记录语义；新版已发送正文和送达不明内容不重发，明确拒绝按持久化的重试时间恢复；未完成请求会获得独立提示。
+配置真实凭据后，分别检查 Telegram 文字／图片、Markdown 正文与草稿、CLI chat／send、图片输入、JSON 输出和文件／网页工具。断言跨 Channel 续聊、命令、取消、流式成果及重启交付恢复前，还需要补齐功能地图所列的入口集成与验收；独立模块和兼容流程的测试不能替代这一步。
