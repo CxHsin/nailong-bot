@@ -67,9 +67,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
       units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
         requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
-    } else if (structured && event.type === "protocol_feedback" && typeof event.text === "string") {
+    } else if (structured && event.type === "protocol_feedback" && event.requestId === currentId && typeof event.text === "string") {
       units.push({ messages: [{ role: "user", content: event.text, timestamp }], through: index + 1,
-        requestId: event.requestId, safe: true });
+        requestId: event.requestId, safe: true, summaryMessages: [] });
     } else if (event.type === "model_message") {
       const original = event.message as AssistantMessage;
       if (event.protocolVersion && !events.some((e) => e.type === "protocol_validated" &&
@@ -179,6 +179,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   }
   for (const identity of results.keys()) if (!used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);
   if (!current) throw new Error("缺少当前用户消息");
-  const boundary = reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1));
+  // Older checkpoints may contain cross-Run feedback. Keep raw events, but never
+  // reuse summaries created under the previous projection policy.
+  const boundary = `${reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1))}:current-run-feedback-v1`;
   return { events, boundary: excluded.size ? `${boundary}:${sourceDigest([...excluded].sort())}` : boundary, units, current, diagnostics };
 }

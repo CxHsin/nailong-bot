@@ -42,11 +42,13 @@ async function main(): Promise<void> {
     memoryDynamics: dynamics, memoryRecall: recall,
   });
   const bot = new Bot(telegram.token);
+  // grammY's Node types use a legacy AbortSignal declaration; its runtime accepts
+  // the native signal's aborted/addEventListener/removeEventListener contract.
   const transport = createTelegramRichTransport({
     sendRich: async (chatId, markdown) => (await bot.api.sendRichMessage(chatId, { markdown })).message_id,
-    draftRich: async (draftId, chatId, markdown) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }); },
+    draftRich: async (draftId, chatId, markdown, signal) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessageDraft>[4]); },
     sendHtml: async (chatId, html) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" })).message_id,
-    draftHtml: async (draftId, chatId, html) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }); },
+    draftHtml: async (draftId, chatId, html, signal) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }, signal as Parameters<typeof bot.api.sendMessageDraft>[4]); },
   });
   const host = createAgentHost({ log, dataDir, promptFile, agent });
   const reportFailure = (error?: unknown) => {

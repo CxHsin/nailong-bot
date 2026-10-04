@@ -19,6 +19,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
         toolCallId, toolName, isError: result.isError,
         modelVisible: view.modelVisible, modelProjectionVersion: TOOL_RESULT_PROJECTION_VERSION,
         result, ...(archive ? { archive } : { archiveError }) });
+      request.onProgress?.({ type: "tool", name: toolName, state: result.isError ? "failed" : "completed" });
       return view;
     };
     agent.subscribe(async (event) => {
@@ -40,7 +41,10 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
     agent.beforeToolCall = async (context, signal) => {
       if (logFailure) return { block: true, reason: "运行日志写入失败" };
       const previous = await originalBefore?.(context, signal);
-      if (previous?.block) return previous;
+      if (previous?.block) {
+        request.onProgress?.({ type: "tool", name: context.toolCall.name, state: "blocked" });
+        return previous;
+      }
       if (request.log.isArchiveRead(context.toolCall.name, context.args)) {
         const args = context.args as { limit?: number };
         args.limit = Math.min(Math.max(1, args.limit ?? 120), 120);
@@ -48,6 +52,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
       try {
         await request.log.append({ type: "tool_dispatch", requestId: request.id,
           toolCallId: context.toolCall.id, toolName: context.toolCall.name, args: context.args });
+        request.onProgress?.({ type: "tool", name: context.toolCall.name, state: "started" });
       } catch (error) {
         logFailure = error instanceof Error ? error : new Error(String(error));
         agent.abort();

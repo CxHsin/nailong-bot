@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeLog, StoredEvent } from "../runtime/runtime-types.js";
 import { upcastHostEvent, HOST_EVENT_SCHEMA_VERSION } from "./event-envelope.js";
 import { normalizeContentParts, type ContentPart } from "./content-parts.js";
+import type { RunProgress } from "../runtime/progress.js";
 
 export type Actor = { id: string; kind?: "user" | "system" | "service"; displayName?: string };
 export type HostInput = { actor: Actor; conversationId: string; parts: ContentPart[]; metadata?: Record<string, unknown> };
@@ -23,6 +24,7 @@ export type HostEvent = {
   visibility?: ProgressMode | "always";
   contextPolicy?: "include" | "exclude";
   text?: string;
+  progress?: RunProgress;
   result?: RunResult;
   error?: string;
   reason?: string;
@@ -78,7 +80,7 @@ export function normalizeHostInput(input: HostInputLike): HostInput {
     conversationId: input.conversationId, parts: normalizeContentParts(raw), ...(input.metadata ? { metadata: structuredClone(input.metadata) } : {}) };
 }
 
-export function createHost(options: { log: RuntimeLog; execute: HostExecutor; progressMode?: ProgressMode }) {
+export function createHost(options: { log: RuntimeLog; execute: HostExecutor }) {
   let queue = Promise.resolve();
   const jobs = new Map<string, Job>();
   const appendNow = async (job: Job, type: HostEventType, extra: Partial<HostEvent> = {}): Promise<HostEvent> => {
@@ -87,7 +89,8 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; pr
     // Host envelopes own their in-run sequence and schema version. The runtime log
     // assigns storage identity fields itself, so never persist those reserved keys.
     const { schemaVersion: _schemaVersion, sequence: _sequence, ...stored } = event;
-    await options.log.append(stored as unknown as Omit<StoredEvent, "at">);
+    // Draft snapshots are ephemeral. Their underlying model/tool facts have their own log records.
+    if (type !== "progress") await options.log.append(stored as unknown as Omit<StoredEvent, "at">);
     job.queue.push(event);
     return event;
   };

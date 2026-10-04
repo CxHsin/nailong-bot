@@ -17,7 +17,8 @@
 | 统一输入与运行 | 两个入口都用 Host API；输入携带 Actor、conversationId 和文字／图片 Content Parts，返回有序 RunHandle 事件；同一 Host 实例内串行执行 | [`host.ts`](src/host/host.ts)、[`content-parts.ts`](src/host/content-parts.ts) | [`host.test.ts`](test/host.test.ts) |
 | 会话隔离与跨 Channel 续聊 | 历史、提示词设置、摘要 checkpoint 和记忆按 conversationId 隔离；共用数据目录时，CLI 指定 Telegram 的 conversationId 可继续同一会话 | [`agent-host.ts`](src/application/agent-host.ts)、[`conversation-log.ts`](src/runtime/conversation-log.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | 共享控制命令 | Telegram／CLI 支持 `/help`、`/kvcache`、`/reset`、`/prompt`、`/forget`、`/memory log`；纯文字命令进入串行队列，不调用模型；Telegram 启动时同步账号专属命令菜单 | [`agent-host.ts`](src/application/agent-host.ts)、[`host-channel.ts`](src/channel/telegram/host-channel.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
-| Telegram 排版与交付 | 运行进展更新原生草稿，成功后发送最终正文，失败时发送可见错误回复；优先 Rich Markdown，API 不可用时回退安全 HTML 和长文分段 | [`src/channel/telegram/`](src/channel/telegram/index.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-channel.test.ts`](test/telegram-channel.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`output-reliability.test.ts`](test/output-reliability.test.ts) |
+| Telegram 排版与交付 | 模型进展、正文预览和工具活动合并更新一个原生草稿；成功后发送阶段成果与最终正文，失败时发送可见错误回复；优先 Rich Markdown，API 不可用时回退安全 HTML 和长文分段 | [`projection.ts`](src/channel/telegram/projection.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-channel.test.ts`](test/telegram-channel.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`ui-projection.test.ts`](test/ui-projection.test.ts) |
+| 实时进展 | 模型提供简短说明，运行时提供工具开始／完成／失败事实；Host 有序转发，Telegram 默认每 750ms 合并更新，短任务直接给答案；草稿失败不阻断最终交付 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`projection.ts`](src/channel/telegram/projection.ts) | [`ui-projection.test.ts`](test/ui-projection.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
 | CLI 输出 | 默认显示运行时间线；`--json`／`--ndjson` 输出逐行 JSON 事件，带 type、seq、runId 和 conversationId；入口错误写 stderr | [`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
 | 文件与网页工具 | pi 的 read、write、edit、ls、find、grep；配置 TinyFish 后增加 web_search、web_fetch | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`tinyfish.ts`](src/agent/tinyfish.ts) | [`local-files.test.ts`](test/local-files.test.ts)、[`tinyfish.test.ts`](test/tinyfish.test.ts) |
 | 运行日志与归档 | SQLite 追加记录输入、模型步骤、工具事实和运行结果；旧 JSONL 幂等导入；大工具结果完整归档，可分段读取 | [`sqlite-runtime-log.ts`](src/runtime/sqlite-runtime-log.ts)、[`tool-archive.ts`](src/runtime/tool-archive.ts)、[`archive-read.ts`](src/agent/archive-read.ts) | [`sqlite-runtime-log.test.ts`](test/sqlite-runtime-log.test.ts)、[`runtime-log.test.ts`](test/runtime-log.test.ts) |
@@ -34,8 +35,7 @@
 | 功能 | 已有模块能力 | 当前接入边界 | 相关验证 |
 | --- | --- | --- | --- |
 | 取消 | Host 提供独立 cancel API，`/reset` 已作为排队控制命令接入 | 当前入口没有用户取消命令或终端取消映射；运行中取消还需要执行器响应 AbortSignal | [`host.test.ts`](test/host.test.ts)、[`agent-host.test.ts`](test/agent-host.test.ts) |
-| 语义进展 | 区分 Provider 摘要、commentary、工具事实、阻塞、恢复与终态；提供 quiet／normal／verbose 和默认 15 秒静默提示 | 当前入口尚未调用 Progress pipeline；模型文字／工具事件没有完整转成 Channel 进展 | [`progress.ts`](src/runtime/progress.ts)、[`progress-pipeline.test.ts`](test/progress-pipeline.test.ts) |
-| 完整 Delivery pipeline | 分开推导 Run 与 Delivery 状态，记录尝试、成功、拒绝、未知结果和显式重试 | 当前入口已记录成功送达，但尚未接入统一的尝试／拒绝／未知结果流程、交付去重和有界重试 | [`delivery-pipeline.ts`](src/runtime/delivery-pipeline.ts)、[`progress-pipeline.test.ts`](test/progress-pipeline.test.ts) |
+| 完整 Delivery pipeline | 分开推导 Run 与 Delivery 状态，记录尝试、成功、拒绝、未知结果和显式重试 | 当前入口已记录成功送达，但尚未接入统一的尝试／拒绝／未知结果流程、交付去重和有界重试 | [`delivery-pipeline.ts`](src/runtime/delivery-pipeline.ts)、[`delivery-pipeline.test.ts`](test/delivery-pipeline.test.ts) |
 | 结果复用与恢复 | Host 的 redeliver 按 resultId 读取已成功结果，不调用执行器；recoverRuns 从日志推导运行状态 | 尚无 Telegram／CLI 用户命令，也未在启动时自动核对未完成运行和交付 | [`recovery.ts`](src/host/recovery.ts)、[`host.test.ts`](test/host.test.ts) |
 | 完整 Provider-aware Context Projection | ContextItem union 与 capabilities；过滤 UI-only 内容、按元数据选择 reasoning、检查图片支持，生成 cache identity、配置更新和 compaction summary | cache identity 已接入实际 pi 执行；模型消息与压缩仍走现行 projection／context-budget，尚未整体切换到新投影 | [`provider-aware.ts`](src/context/provider-aware.ts)、[`context-provider.test.ts`](test/context-provider.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts) |
 
@@ -89,7 +89,7 @@ Telegram 启动时为配置账号注册命令菜单；菜单同步失败会报�
 
 ## 运行数据与上下文
 
-Runtime Event Log 是持久运行事实源。生成结果、Channel 展示与交付确认分别记录；模型 Projection 与 UI Projection 从日志构造各自视图。投影和摘要不改写原始历史。
+Runtime Event Log 是持久运行事实源。模型步骤、工具结果、运行终态与交付确认分别记录；模型 Projection 从日志构造上下文，实时 UI Projection 消费 Host 的活动流。草稿快照不另写日志，重启不重放旧草稿；投影和摘要不改写原始历史。
 
 | 数据 | 默认路径 | 用途 |
 | --- | --- | --- |
@@ -105,7 +105,13 @@ system 提示词与工具定义保持稳定，当前日期及自动记忆引文�
 
 `createPiAgent` 支持 contextBudgetRatio／modelBudgetRatios 参数；Telegram 入口读取 `.env.example` 中的 `PROJECTION_BUDGET_RATIOS`，CLI 入口目前使用默认预算。
 
-执行协议要求模型输出 status、result 或 final JSON；长文字可用追加帧。运行层校验格式、持久化模型和工具事件，纠正协议错误，并用停滞保护限制持续无进展的调用。当前 Channel 入口没有接入模型文字的 onText 回调，因此完整流式成果展示仍属于兼容投影流程。
+执行协议要求模型输出 status、result 或 final JSON；长文字可用追加帧。运行层校验格式、持久化模型和工具事件，纠正协议错误，并用停滞保护限制持续无进展的调用。模型的临时文本快照经 onProgress 进入 Host 活动流；已校验的阶段成果随最终正文正式发送。被拒绝的预览会撤回，不作为成果交付。
+
+Provider 正常结束、没有工具调用且单对象 final 仅缺末尾双引号／右花括号时，运行层可补齐外壳并记录修复；正文与原始模型记录保持不变。长度截断、未完成转义、多余字段和未结束追加帧仍拒绝。见 [#79](https://github.com/CxHsin/nailong-bot/issues/79)。
+
+文字对象与追加帧拒绝重复字段（包括转义后同名字段）。协议纠错反馈只进入当前 Run 的模型输入，不进入可复用历史摘要；旧投影策略的摘要缓存会重新生成，原始记录保留。多行预览和最终正文采用同一空白规范化规则。Telegram 草稿请求最多等待 3 秒，超时取消并停用本轮草稿更新，正式回复仍继续发送。见 [#80](https://github.com/CxHsin/nailong-bot/issues/80)。
+
+UI Projection 只使用文本快照、撤回和工具活动三种实时更新，不再维护独立的 Progress pipeline 或 quiet／normal／verbose 模式。Telegram 仅保留当前说明和工具活动，每 15 秒刷新仍在执行的同一草稿；运行终态到达后停止刷新，再发送正式消息。CLI 人类模式显示完成的说明和工具事实，JSON 模式保留实时快照。此简化见 [#78](https://github.com/CxHsin/nailong-bot/issues/78)；它保留模型上下文与 UI 的隔离，也不公开原始 reasoning。
 
 `.env`、`data/` 和 `tinyFish.txt` 被 Git 忽略；运行数据可能包含图片、私人文件和工具参数。
 

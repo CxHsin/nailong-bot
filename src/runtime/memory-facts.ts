@@ -65,14 +65,16 @@ export function memoryNodes(events: StoredEvent[], userId: number): MemoryNode[]
     for (const event of finals) {
       const delivery = segmentDelivery(events, event.textSegmentId);
       const hasTransportFacts = request.some((e) => e.type.startsWith("telegram_"));
-      const legacyDelivered = (event.protocolVersion !== "json-text-v2" || !hasTransportFacts) && event.contentKind === "final" && request.some((e) =>
-        e.type === "delivery_succeeded" && (e.textSegmentId === undefined || e.textSegmentId === event.textSegmentId));
+      const channelDelivery = request.find((e) => e.type === "delivery_succeeded" &&
+        (event.contentKind === "final" && (e.textSegmentId === undefined || e.textSegmentId === event.textSegmentId) ||
+          Array.isArray(e.stageSegmentIds) && e.stageSegmentIds.includes(event.textSegmentId)));
+      const legacyDelivered = (event.protocolVersion !== "json-text-v2" || !hasTransportFacts) && !!channelDelivery;
       if (delivery.discarded || !delivery.complete && !legacyDelivered) continue;
       const index = events.indexOf(event);
       const pages = events.filter((item) => item.textSegmentId === event.textSegmentId && item.type === "telegram_page");
       const confirmations = delivery.complete ? [events.findLast((item) => item.textSegmentId === event.textSegmentId && item.type === "telegram_plan_finalized")!,
         ...pages, ...pages.map((page) => events.find((item) => item.textSegmentId === event.textSegmentId && item.type === "telegram_delivery_succeeded" && item.partIndex === page.partIndex)!)] :
-        [request.find((item) => item.type === "delivery_succeeded" && (item.textSegmentId === undefined || item.textSegmentId === event.textSegmentId))!];
+        [channelDelivery!];
       const availableSequence = Math.max(index, ...confirmations.map((item) => events.indexOf(item)));
       node.messages.push({ id: eventIdentity(event, index), role: "assistant", text: String(event.text), at: event.at, availableSequence });
     }

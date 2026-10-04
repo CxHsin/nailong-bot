@@ -22,10 +22,17 @@ export function parseCliArgs(argv: string[]): CliCommand {
 function jsonEvent(event: HostEvent) {
   return { type: event.type, seq: event.sequence, sequence: event.sequence, runId: event.runId, conversationId: event.conversationId,
     ...(event.phase ? { phase: event.phase } : {}), ...(event.source ? { source: event.source } : {}),
-    ...(event.text ? { text: event.text } : {}), ...(event.result ? { result: event.result } : {}), ...(event.error ? { error: event.error } : {}) };
+    ...(event.text ? { text: event.text } : {}), ...(event.progress ? { progress: event.progress } : {}),
+    ...(event.result ? { result: event.result } : {}), ...(event.error ? { error: event.error } : {}) };
 }
-function humanEvent(event: HostEvent): string {
-  if (event.type === "progress") return event.text ? `[${event.phase}] ${event.text}` : `[${event.phase}] ${event.source ?? "runtime"}`;
+function humanEvent(event: HostEvent): string | undefined {
+  if (event.type === "progress") {
+    const progress = event.progress;
+    if (!progress) return event.text;
+    if (progress.type === "text") return progress.finalized && progress.kind !== "final" ? progress.text : undefined;
+    if (progress.type === "discard") return undefined;
+    return `[tool:${progress.state}] ${progress.name}`;
+  }
   if (event.type === "run_succeeded") return `run_succeeded ${event.result?.text ?? ""}`.trim();
   if (event.type === "run_failed") return `run_failed ${event.error ?? ""}`.trim();
   return event.type;
@@ -46,7 +53,8 @@ export function createCliChannel(options: { host: { submit(input: HostInputLike)
   }
   async function consume(handle: RunHandle, json: boolean): Promise<HostEvent> {
     for await (const event of handle.events()) {
-      options.stdout(json ? JSON.stringify(jsonEvent(event)) : humanEvent(event));
+      const line = json ? JSON.stringify(jsonEvent(event)) : humanEvent(event);
+      if (line !== undefined) options.stdout(line);
       if (event.type === "run_succeeded") await options.onDelivered?.(event);
     }
     return handle.done;

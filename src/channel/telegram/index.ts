@@ -1,8 +1,10 @@
-import type { Actor, HostInput, HostInputLike, HostEvent, RunHandle } from "../../host/host.js";
+import type { Actor, HostInput } from "../../host/host.js";
 import type { ContentPart } from "../../host/content-parts.js";
 import { normalizeHostInput } from "../../host/host.js";
 export { createTelegramRichTransport, isRichApiUnavailable } from "./rich-transport.js";
 export type { TelegramRichTransportApi } from "./rich-transport.js";
+export { createTelegramHostProjection } from "./projection.js";
+export type { TelegramHostTransport } from "./projection.js";
 
 export type TelegramInput = { fromId: number; chatId: number; chatType: string; messageId: number; replyToMessageId?: number; text?: string; image?: { mimeType: string; data: string; contentRef?: string } };
 export function telegramConversationId(chatId: number): string {
@@ -17,31 +19,6 @@ export function normalizeTelegramInput(update: TelegramInput): HostInput {
   if (update.image) parts.push({ type: "image", mimeType: update.image.mimeType, data: update.image.data, ...(update.image.contentRef ? { contentRef: update.image.contentRef } : {}) });
   return normalizeHostInput({ actor: { id: `telegram:${update.fromId}`, kind: "user" }, conversationId: telegramConversationId(update.chatId), parts, metadata: { channel: "telegram", messageId: update.messageId,
     ...(update.replyToMessageId !== undefined ? { replyToMessageId: update.replyToMessageId } : {}) } });
-}
-
-export type TelegramHostTransport = { draft?: (draftId: number, text: string, chatId: number) => Promise<void>; send: (text: string, chatId: number) => Promise<number>; edit?: (messageId: number, text: string, chatId: number) => Promise<void> };
-export function createTelegramHostProjection(options: TelegramHostTransport & { chatId: number; onDelivered?: (event: HostEvent, messageId: number) => Promise<void> }) {
-  let draftId = 1;
-  let finalRun: string | undefined;
-  return {
-    async consume(handle: RunHandle) {
-      for await (const event of handle.events()) {
-        if (event.type === "progress" && event.text && options.draft) await options.draft(draftId, event.text, options.chatId);
-        if (event.type === "run_succeeded" && event.result?.text && finalRun !== event.runId) {
-          finalRun = event.runId;
-          const messageId = await options.send(String(event.result.text), options.chatId);
-          await options.onDelivered?.(event, messageId);
-        }
-        if (event.type === "run_failed") {
-          await options.send("抱歉，这条消息处理失败，请稍后重试。", options.chatId);
-        }
-        if (event.type === "run_cancelled") {
-          await options.send("这条消息已取消。", options.chatId);
-        }
-      }
-      return handle.done;
-    },
-  };
 }
 
 export function telegramEnvironment(env: Record<string, string | undefined>, warn: (message: string) => void = console.warn): { token: string; ownerId: number } {

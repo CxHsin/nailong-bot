@@ -28,12 +28,20 @@ test("CLI send uses the shared Host and keeps machine events on stdout", async (
 test("human chat renders a timeline and explicit conversation IDs continue the same session", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cli-chat-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const host = createHost({ log: createRuntimeLog(dir), execute: async (input) => ({ text: `seen:${input.conversationId}` }) });
+  const host = createHost({ log: createRuntimeLog(dir), execute: async (input, context) => {
+    context.emit({ type: "progress", progress: { type: "text", segmentId: "s1", kind: "status", text: "未完成的片段", finalized: false } });
+    context.emit({ type: "progress", progress: { type: "text", segmentId: "s1", kind: "status", text: "先核对资料。", finalized: true } });
+    context.emit({ type: "progress", progress: { type: "tool", name: "read", state: "started" } });
+    return { text: `seen:${input.conversationId}` };
+  } });
   const output: string[] = [];
   const cli = createCliChannel({ host, actor: { id: "cli-user", kind: "user" }, stdout: (line) => output.push(line), stderr: () => {} });
   await cli.chat(["one", "two"], { conversationId: "shared" });
   assert.ok(output.some((line) => line.includes("run_succeeded")));
   assert.equal(output.filter((line) => line.includes("shared")).length >= 2, true);
+  assert.ok(output.includes("先核对资料。"));
+  assert.ok(output.includes("[tool:started] read"));
+  assert.equal(output.some((line) => line.includes("未完成的片段") || line.includes("undefined")), false);
 });
 
 test("CLI argument parser supports chat/send, continuation and images", () => {

@@ -5,8 +5,10 @@ export const EXECUTION_PROMPT = `执行协议 json-text-v2（优先于用户配�
 先写 type，再写 text；不要输出 JSON 帧外文字或包裹 JSON 的代码围栏。追加帧是正文生成协议，不代表 Telegram 消息；运行层决定消息边界。长内容及时结束帧，让已完成正文可校验和展示。
 text 字符串内的换行、回车和制表符必须分别写为 \\n、\\r 和 \\t；双引号写为 \\"，反斜杠写为 \\\\。输出前确认每个字符串和对象都已闭合。
 type 为 status、result 或 final。status 是临时处理状态；result 是独立的阶段性成果；final 是独立的最终正文并结束请求。正文风格由用户配置的 bot 提示词决定。
+status 简短说明当前行动的目的、必要理由或有依据的新发现；有实质变化时才更新，不逐个复述工具名或重复“处理中”。短任务可以直接给 final，不必先写 status。
 status 和 result 表示继续处理，可以同时调用工具。开始后续工具工作前结束当前成果文字；工具参数仍遵守各自 schema。允许只调用工具而没有文字。
 final 必须没有工具调用；已有完整答案、明确阻碍或需要用户澄清时用 final。最终正文无需重复阶段性成果，也不要求接续前文。
+单对象输出写完 text 后，必须实际输出闭合双引号和右花括号；正文结束不等于 JSON 对象已闭合。
 模型不指定 Telegram 排版、HTML、消息数量或拆分位置；只输出 Markdown 正文。运行层处理长内容。
 示例：{"type":"status","text":"我会核对资料。"}；{"type":"result","text":"已确认的阶段性结论。"}；{"type":"final","text":"结论如下。"}。
 依据实际工具结果作答，不把行动承诺当作已完成事实。运行层协议反馈用于纠正格式或继续执行，不是真实用户的新请求。`;
@@ -30,14 +32,53 @@ export function normalizeOutputWhitespace(raw: string): string {
   }
   return result;
 }
-function parseSingleText(raw: string): StructuredText {
+function parseProtocolObject(raw: string): Record<string, unknown> {
+  const normalized = normalizeOutputWhitespace(raw);
   let value: unknown;
-  try { value = JSON.parse(normalizeOutputWhitespace(raw)); } catch { throw new Error("文字不是完整 JSON 对象"); }
+  try { value = JSON.parse(normalized); } catch { throw new Error("文字不是完整 JSON 对象"); }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("文字协议需要对象");
-  const object = value as Record<string, unknown>;
+  // JSON.parse silently overwrites duplicate keys. Inspect complete string tokens,
+  // including escaped key names, without treating field-shaped body text as keys.
+  const keys = new Set<string>();
+  let depth = 0;
+  for (let index = 0; index < normalized.length; index++) {
+    const char = normalized[index];
+    if (char === "{") depth++;
+    else if (char === "}") depth--;
+    else if (char === '"') {
+      const start = index++;
+      while (normalized[index] !== '"') {
+        if (normalized[index] === "\\") index++;
+        index++;
+      }
+      let next = index + 1;
+      while (/\s/.test(normalized[next] ?? "")) next++;
+      if (depth === 1 && normalized[next] === ":") {
+        const key = JSON.parse(normalized.slice(start, index + 1)) as string;
+        if (keys.has(key)) throw new Error("文字协议不允许重复字段");
+        keys.add(key);
+      }
+    }
+  }
+  return value as Record<string, unknown>;
+}
+function validateSingleText(object: Record<string, unknown>): StructuredText {
   if (Object.keys(object).length !== 2 || !["status", "result", "final", "progress"].includes(String(object.type)) ||
     typeof object.text !== "string" || !object.text.trim()) throw new Error("文字协议需要 type 和非空 text，且不允许其他字段");
   return { type: object.type as StructuredText["type"], text: object.text };
+}
+
+/** A normal Provider stop may omit only the single final envelope's closing delimiters. */
+export function recoverFinalEnvelope(raw: string, stopReason: string, hasToolCalls: boolean): StructuredText | undefined {
+  if (stopReason !== "stop" || hasToolCalls ||
+    !/^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"text"\s*:\s*"/.test(raw)) return;
+  for (const suffix of ['"}', '}']) {
+    try {
+      const parsed = validateSingleText(parseProtocolObject(raw + suffix));
+      if (parsed.type === "final") return parsed;
+    }
+    catch { /* Never alter text, remove fields or synthesize append-frame completion. */ }
+  }
 }
 
 /** Validated frames let the runtime commit complete structure before generation finishes. */
@@ -67,10 +108,10 @@ export function readOutputFrames(raw: string): { output?: StructuredText; prefix
       else if (char === "}" && --depth === 0) { end = index + 1; break; }
     }
     if (end < 0) break;
-    const frame = JSON.parse(normalizeOutputWhitespace(raw.slice(offset, end))) as Record<string, unknown>;
+    const frame = parseProtocolObject(raw.slice(offset, end));
     if (!("end" in frame)) {
       if (type) throw new Error("文字协议不能混合单对象和追加帧");
-      const output = parseSingleText(raw.slice(offset, end));
+      const output = validateSingleText(frame);
       if (raw.slice(end).trim()) throw new Error("单对象文字协议后不允许追加内容");
       return { output, rest: "", framed: false };
     }
@@ -96,6 +137,7 @@ export function parseStructuredText(raw: string): StructuredText {
 
 /** Decode only a canonical envelope's string prefix. It is never validation for delivery. */
 export function previewStructuredText(raw: string): StructuredText | undefined {
+  raw = normalizeOutputWhitespace(raw);
   const match = raw.match(/^\s*\{\s*"type"\s*:\s*"(status|result|final)"\s*,\s*"text"\s*:\s*"/);
   if (!match) return;
   let body = "";
