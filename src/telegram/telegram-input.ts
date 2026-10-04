@@ -28,7 +28,7 @@ export function registerTelegramInput(bot: Bot, options: {
   ownerId: number;
   download: (fileId: string) => Promise<ImageContent>;
   handle: (input: Update, onStarted: () => void) => Promise<void>;
-  reportFailure: () => void;
+  reportFailure: (error?: unknown) => void;
 }) {
   const active = new Set<Promise<void>>();
   let acceptance = Promise.resolve();
@@ -53,9 +53,9 @@ export function registerTelegramInput(bot: Bot, options: {
         text: ctx.message.text ?? ctx.message.caption, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
         () => { hasStarted = true; markStarted(); });
       active.add(completed);
-      void completed.then(() => { active.delete(completed); }, () => {
+      void completed.then(() => { active.delete(completed); }, (error) => {
         active.delete(completed);
-        if (hasStarted) options.reportFailure();
+        if (hasStarted) options.reportFailure(error);
       });
       const accepted = Promise.race([started, completed]);
       await accepted;
