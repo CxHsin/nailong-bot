@@ -1,6 +1,8 @@
 import type { Actor, HostInput, HostInputLike, HostEvent, RunHandle } from "../../host/host.js";
 import type { ContentPart } from "../../host/content-parts.js";
 import { normalizeHostInput } from "../../host/host.js";
+export { createTelegramRichTransport, isRichApiUnavailable } from "./rich-transport.js";
+export type { TelegramRichTransportApi } from "./rich-transport.js";
 
 export type TelegramInput = { fromId: number; chatId: number; chatType: string; messageId: number; text?: string; image?: { mimeType: string; data: string; contentRef?: string } };
 export function telegramConversationId(chatId: number): string {

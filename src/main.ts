@@ -1,9 +1,9 @@
 import { resolve } from "node:path";
-import { Bot, GrammyError } from "grammy";
+import { Bot } from "grammy";
 import { createPiAgent } from "./agent/pi-agent.js";
 import { createSqliteRuntimeLog } from "./runtime/sqlite-runtime-log.js";
 import { createHost } from "./host/host.js";
-import { createTelegramHostProjection, normalizeTelegramInput, telegramEnvironment } from "./channel/telegram/index.js";
+import { createTelegramHostProjection, createTelegramRichTransport, normalizeTelegramInput, telegramEnvironment } from "./channel/telegram/index.js";
 import { registerTelegramInput, downloadTelegramPhoto } from "./telegram/telegram-input.js";
 import type { Update } from "./application/app-types.js";
 
@@ -22,17 +22,12 @@ async function main(): Promise<void> {
   await log.importLegacy();
   const agent = await createPiAgent({ dataDir, promptFile, deepseekKey, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
   const bot = new Bot(telegram.token);
-  const transport = {
-    draft: async (draftId: number, text: string, chatId: number) => {
-      try { await bot.api.sendMessageDraft(chatId, draftId, text); }
-      catch (error) { throw error instanceof GrammyError ? new Error(`Telegram 拒绝草稿：${error.error_code}`) : error; }
-    },
-    send: async (text: string, chatId: number) => {
-      try { return (await bot.api.sendMessage(chatId, text)).message_id; }
-      catch (error) { throw error instanceof GrammyError ? new Error(`Telegram 拒绝发送：${error.error_code}`) : error; }
-    },
-    edit: async (messageId: number, text: string, chatId: number) => { await bot.api.editMessageText(chatId, messageId, text); },
-  };
+  const transport = createTelegramRichTransport({
+    sendRich: async (chatId, markdown) => (await bot.api.sendRichMessage(chatId, { markdown })).message_id,
+    draftRich: async (draftId, chatId, markdown) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }); },
+    sendHtml: async (chatId, html) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" })).message_id,
+    draftHtml: async (draftId, chatId, html) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }); },
+  });
   const host = createHost({ log, execute: async (input, context) => {
     const text = input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
     const images = input.parts.filter((part): part is { type: "image"; mimeType: string; data?: string } => part.type === "image" && !!part.data)
