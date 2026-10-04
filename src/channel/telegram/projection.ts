@@ -1,8 +1,10 @@
 import type { HostEvent, RunHandle } from "../../host/host.js";
+import type { DeliveryContent, ContentTransport } from "../../runtime/content-delivery.js";
 
-export type TelegramHostTransport = {
+export type TelegramHostTransport = ContentTransport & {
   draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
+  sendProgress?: (text: string, chatId: number, source: "execution" | "progress-model") => Promise<number>;
 };
 
 /** One best-effort live draft per Run; only the terminal message confirms delivery. */
@@ -11,6 +13,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
   draftIntervalMs?: number;
   draftTimeoutMs?: number;
   onDelivered?: (event: HostEvent, messageId: number) => Promise<void>;
+  deliver?: (event: HostEvent, content: DeliveryContent) => Promise<{ complete: boolean; messageId?: number }>;
 }) {
   let nextDraftId = 1;
   return {
@@ -51,7 +54,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             resolve();
           });
         }).finally(() => { sending = false; });
-      }, options.draftIntervalMs ?? 750);
+      }, options.draftIntervalMs ?? 250);
       timer.unref();
       try {
         for await (const event of handle.events()) {
@@ -64,6 +67,16 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
               if (progress.type === "text") {
                 current = { segmentId: progress.segmentId, text: progress.text };
                 tool = "";
+                if (progress.finalized && progress.formal) {
+                  latest = "";
+                  await pending;
+                  try {
+                    if (options.deliver) await options.deliver(event, { id: progress.segmentId, text: progress.text, kind: "progress", source: progress.source });
+                    else if (options.sendProgress) await options.sendProgress(progress.text, options.chatId, progress.source ?? "execution");
+                    else await options.send(progress.text, options.chatId);
+                  } catch { /* A failed progress delivery must not prevent the final answer. */ }
+                  current = undefined;
+                }
               } else if (progress.type === "discard") {
                 if (current?.segmentId === progress.segmentId) current = undefined;
               } else {
@@ -78,8 +91,9 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             clearInterval(timer);
             await pending;
             if (event.type === "run_succeeded" && event.result?.text) {
-              const messageId = await options.send(String(event.result.text), options.chatId);
-              await options.onDelivered?.(event, messageId);
+              const delivery = options.deliver ? await options.deliver(event, { id: String(event.result.finalSegmentId ?? event.result.resultId ?? event.runId),
+                text: String(event.result.text), kind: "final", source: "execution" }) : { complete: true, messageId: await options.send(String(event.result.text), options.chatId) };
+              if (delivery.complete && delivery.messageId !== undefined) await options.onDelivered?.(event, delivery.messageId);
             } else if (event.type === "run_failed") {
               await options.send("抱歉，这条消息处理失败，请稍后重试。", options.chatId);
             } else if (event.type === "run_cancelled") {

@@ -33,7 +33,7 @@ test("structured deltas remain hidden until complete protocol validation", { tim
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const visible = new Map<number, string>();

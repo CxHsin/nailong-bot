@@ -29,7 +29,7 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const bot = new Bot("123:test", { client: { fetch: async (url) => new FetchResponse(JSON.stringify({ ok: true,

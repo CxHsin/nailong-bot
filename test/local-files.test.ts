@@ -45,7 +45,7 @@ for (const tinyfishUnavailable of [false, true]) {
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const agent = await createPiAgent({
+    const agent = await createPiAgent({ outputProtocol: "json-text-v2",
       dataDir, promptFile: "system-prompt.md", deepseekKey: "test",
       modelBaseUrl: `http://127.0.0.1:${address.port}`,
       ...(tinyfishUnavailable ? { tinyfishKey: "test", tinyfishUrl: `http://127.0.0.1:${address.port}/mcp` } : {}),

@@ -34,7 +34,7 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const log = createSqliteRuntimeLog(dir);
-  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, ...extra };
+  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, ...extra };
   let agent = await createPiAgent(options);
   const sent: string[] = [];
   const makeApp = (overrides: Partial<Parameters<typeof createApp>[0]> = {}) => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, memoryVector: agent.memoryVector, memoryDynamics: extra.memoryDynamics, purgeEmbeddingCache: agent.purgeEmbeddingCache, send: async (text) => { sent.push(text); }, ...overrides });
@@ -1031,7 +1031,7 @@ test("recovery uses the request's recorded dynamics even when current configurat
 test("invalid memory budgets and algorithm settings fail configuration before a model call", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "memory-settings-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test" };
+  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test" };
   await assert.rejects(createPiAgent({ ...options, memoryBudget: { maxTokens: 4097 } }), /预算无效/);
   await assert.rejects(createPiAgent({ ...options, memoryDynamics: { strengthMs: 0 } }), /动力学配置无效/);
   await assert.rejects(createPiAgent({ ...options, memoryRecall: { iterations: 100 } }), /召回配置无效/);

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Bot } from "grammy";
 import { createPiAgent } from "./agent/pi-agent.js";
-import { createSqliteRuntimeLog } from "./runtime/sqlite-runtime-log.js";
+import { createRuntimeEventLog } from "./runtime/event-log.js";
 import { createAgentHost } from "./application/agent-host.js";
 import { createTelegramRichTransport, telegramEnvironment } from "./channel/telegram/index.js";
 import { initializeTelegramHostChannel } from "./channel/telegram/host-channel.js";
@@ -20,10 +20,9 @@ async function main(): Promise<void> {
   const deepseekKey = required("DEEPSEEK_API_KEY");
   const dataDir = resolve(process.env.AGENT_DATA_DIR?.trim() || "data");
   const promptFile = resolve(process.env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md");
-  const log = createSqliteRuntimeLog(dataDir);
+  const log = await createRuntimeEventLog(dataDir);
   const dynamics = memoryDynamics(process.env.MEMORY_DYNAMICS ? JSON.parse(process.env.MEMORY_DYNAMICS) : undefined);
   const recall = recallConfig(process.env.MEMORY_RECALL ? JSON.parse(process.env.MEMORY_RECALL) : undefined);
-  await log.importLegacy();
   if (!process.env.EMBEDDING_BASE_URL?.trim() || !process.env.EMBEDDING_MODEL?.trim() || !process.env.EMBEDDING_API_KEY?.trim())
     console.error("Embedding 配置不完整，语义记忆未启用；普通聊天与字面记忆查询仍可使用。");
   const agent = await createPiAgent({
@@ -31,6 +30,7 @@ async function main(): Promise<void> {
     promptFile,
     deepseekKey,
     tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
+    progressModel: process.env.PROGRESS_MODEL?.trim(),
     embedding: process.env.EMBEDDING_BASE_URL?.trim() && process.env.EMBEDDING_MODEL?.trim() && process.env.EMBEDDING_API_KEY?.trim() ? {
       baseUrl: process.env.EMBEDDING_BASE_URL, model: process.env.EMBEDDING_MODEL, apiKey: process.env.EMBEDDING_API_KEY,
       timeoutMs: process.env.EMBEDDING_TIMEOUT_MS ? Number(process.env.EMBEDDING_TIMEOUT_MS) : undefined,
@@ -50,7 +50,9 @@ async function main(): Promise<void> {
     sendHtml: async (chatId, html) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" })).message_id,
     draftHtml: async (draftId, chatId, html, signal) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }, signal as Parameters<typeof bot.api.sendMessageDraft>[4]); },
   });
-  const host = createAgentHost({ log, dataDir, promptFile, agent });
+  const host = createAgentHost({ log, dataDir, promptFile, agent,
+    progressSummary: process.env.PROGRESS_SUMMARY_OPTIONS ? JSON.parse(process.env.PROGRESS_SUMMARY_OPTIONS) : undefined });
+  await host.recoverInterrupted();
   const reportFailure = (error?: unknown) => {
     console.error("Telegram 更新处理失败，请检查连接和本地记录。", error instanceof Error ? error.stack ?? error.message : error);
   };

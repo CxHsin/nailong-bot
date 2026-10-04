@@ -18,7 +18,7 @@
 | 会话隔离与跨 Channel 续聊 | 历史、提示词设置、摘要 checkpoint 和记忆按 conversationId 隔离；共用数据目录时，CLI 指定 Telegram 的 conversationId 可继续同一会话 | [`agent-host.ts`](src/application/agent-host.ts)、[`conversation-log.ts`](src/runtime/conversation-log.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | 共享控制命令 | Telegram／CLI 支持 `/help`、`/kvcache`、`/reset`、`/prompt`、`/forget`、`/memory log`；纯文字命令进入串行队列，不调用模型；Telegram 启动时同步账号专属命令菜单 | [`agent-host.ts`](src/application/agent-host.ts)、[`host-channel.ts`](src/channel/telegram/host-channel.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | Telegram 排版与交付 | 模型进展、正文预览和工具活动合并更新一个原生草稿；成功后发送阶段成果与最终正文，失败时发送可见错误回复；优先 Rich Markdown，API 不可用时回退安全 HTML 和长文分段 | [`projection.ts`](src/channel/telegram/projection.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-channel.test.ts`](test/telegram-channel.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`ui-projection.test.ts`](test/ui-projection.test.ts) |
-| 实时进展 | 模型提供简短说明，运行时提供工具开始／完成／失败事实；Host 有序转发，Telegram 默认每 750ms 合并更新，短任务直接给答案；草稿失败不阻断最终交付 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`projection.ts`](src/channel/telegram/projection.ts) | [`ui-projection.test.ts`](test/ui-projection.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
+| 实时进展 | 模型提供简短说明，运行时提供工具开始／完成／失败事实；Host 有序转发，Telegram 默认每 250ms 合并更新，短任务直接给答案；草稿失败不阻断最终交付 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`projection.ts`](src/channel/telegram/projection.ts) | [`ui-projection.test.ts`](test/ui-projection.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
 | CLI 输出 | 默认显示运行时间线；`--json`／`--ndjson` 输出逐行 JSON 事件，带 type、seq、runId 和 conversationId；入口错误写 stderr | [`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
 | 文件与网页工具 | pi 的 read、write、edit、ls、find、grep；配置 TinyFish 后增加 web_search、web_fetch | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`tinyfish.ts`](src/agent/tinyfish.ts) | [`local-files.test.ts`](test/local-files.test.ts)、[`tinyfish.test.ts`](test/tinyfish.test.ts) |
 | 运行日志与归档 | SQLite 追加记录输入、模型步骤、工具事实和运行结果；旧 JSONL 幂等导入；大工具结果完整归档，可分段读取 | [`sqlite-runtime-log.ts`](src/runtime/sqlite-runtime-log.ts)、[`tool-archive.ts`](src/runtime/tool-archive.ts)、[`archive-read.ts`](src/agent/archive-read.ts) | [`sqlite-runtime-log.test.ts`](test/sqlite-runtime-log.test.ts)、[`runtime-log.test.ts`](test/runtime-log.test.ts) |
@@ -26,7 +26,7 @@
 | Akasha 长期记忆 | 两个入口启用 `memory_search`／`memory_read`、预算内自动召回、后台历史初始化与持久遗忘；Telegram 读取可选 embedding 配置，CLI 使用字面召回和默认记忆参数 | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`memory-context.ts`](src/application/memory-context.ts)、[`memory-bootstrap.ts`](src/application/memory-bootstrap.ts) | [`memory.test.ts`](test/memory.test.ts)、[`memory-dynamics.test.ts`](test/memory-dynamics.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts) |
 | Prompt cache 与用量统计 | 稳定 system／工具前缀，冻结每轮日期与记忆快照；`/kvcache` 查看最近四次已结束模型运行及会话累计命中／未命中，摘要等辅助调用单独统计 | [`execution.ts`](src/agent/execution.ts)、[`cache-statistics.ts`](src/runtime/cache-statistics.ts) | [`cache-provider.test.ts`](test/cache-provider.test.ts)、[`agent-host.test.ts`](test/agent-host.test.ts) |
 | 回复缓存报表 | Telegram 明确回复已送达的 `/kvcache` 报表时，将持久记录中的报表快照作为模型背景，跨工具步骤保留；报表显示查询时数据，重新查询才更新 | [`reply-context.ts`](src/runtime/reply-context.ts)、[`projection.ts`](src/context/projection.ts) | [`reply-context.test.ts`](test/reply-context.test.ts) |
-| 模型执行与上下文预算 | 校验 status／result／final 输出协议，重放历史与工具结果，按窗口预算生成摘要 checkpoint，遇到协议错误或持续停滞时结束本轮 | [`execution.ts`](src/agent/execution.ts)、[`projection.ts`](src/context/projection.ts)、[`context-budget.ts`](src/context/context-budget.ts) | [`integration.test.ts`](test/integration.test.ts)、[`projection.test.ts`](test/projection.test.ts) |
+| 模型执行与上下文预算 | 接收普通 Markdown，结算进展与最终回答，重放历史与工具结果，按窗口预算生成摘要 checkpoint，遇到协议错误或持续停滞时结束本轮 | [`execution.ts`](src/agent/execution.ts)、[`projection.ts`](src/context/projection.ts)、[`context-budget.ts`](src/context/context-budget.ts) | [`integration.test.ts`](test/integration.test.ts)、[`projection.test.ts`](test/projection.test.ts) |
 
 “相关验证”指对应模块或兼容流程的测试；完整入口行为还需要按[验证](#验证)章节检查。
 
@@ -99,19 +99,19 @@ Runtime Event Log 是持久运行事实源。模型步骤、工具结果、运�
 | 记忆与向量索引 | `data/memory.sqlite`、`data/embeddings.sqlite` | 当前 Akasha 记忆的派生缓存，可由原始事实和 embedding 服务重建 |
 | 历史摘要 | `data/checkpoints/` | 经来源校验的有损上下文投影，原始事件仍可核查 |
 
-现行 pi 路径使用 `src/context/projection.ts` 与 `context-budget.ts`。每次调用估算输入大小，默认预算为模型窗口的 86%；超过预算时折叠较早的完整历史，尽量保留最近三个完整请求。Host 会话回放排除 progress／status，保留执行成果、工具事实和成功模型运行的最终答复；送达确认另行记录。完整 Provider-aware 消息投影仍待接入。
+现行 pi 路径使用 `src/context/projection.ts` 与 `context-budget.ts`。每次调用估算输入大小，默认预算为模型窗口的 86%；超过预算时折叠较早的完整历史，尽量保留最近三个完整请求。Host 会话回放包含已结算进展与有效运行摘要，保留工具事实和成功模型运行的最终答复；过程说明不进入 Akasha；送达确认另行记录。完整 Provider-aware 消息投影仍待接入。
 
 system 提示词与工具定义保持稳定，当前日期及自动记忆引文按轮次冻结为 `context_input_snapshot`，后续工具步骤和压缩复用该快照。Provider-aware cache identity 已用于 pi 会话标识；实际 DeepSeek 请求过滤其不支持的缓存参数。`/kvcache` 根据日志中的 Provider usage 统计，缺失数据明确标注，摘要等辅助调用单列；统计不代表账单。Telegram 回复已送达缓存报表时会显式引用该查询快照。
 
 `createPiAgent` 支持 contextBudgetRatio／modelBudgetRatios 参数；Telegram 入口读取 `.env.example` 中的 `PROJECTION_BUDGET_RATIOS`，CLI 入口目前使用默认预算。
 
-执行协议要求模型输出 status、result 或 final JSON；长文字可用追加帧。运行层校验格式、持久化模型和工具事件，纠正协议错误，并用停滞保护限制持续无进展的调用。模型的临时文本快照经 onProgress 进入 Host 活动流；已校验的阶段成果随最终正文正式发送。被拒绝的预览会撤回，不作为成果交付。
+生产执行器接收普通 Markdown：同一步中伴随工具调用的文字结算为进展，无工具调用的完整文字结算为最终回答。每段进展通过草稿流式展示后独立正式发送，最终答案另发。JSON 协议仅用于兼容旧入口。详见 [运行进展与迁移](docs/runtime-progress.md)。
 
-Provider 正常结束、没有工具调用且单对象 final 仅缺末尾双引号／右花括号时，运行层可补齐外壳并记录修复；正文与原始模型记录保持不变。长度截断、未完成转义、多余字段和未结束追加帧仍拒绝。见 [#79](https://github.com/CxHsin/nailong-bot/issues/79)。
+旧 json-text-v2 兼容入口仍保留受限协议恢复和原始记录；新生产路径不要求 JSON 文字外壳。
 
 文字对象与追加帧拒绝重复字段（包括转义后同名字段）。协议纠错反馈只进入当前 Run 的模型输入，不进入可复用历史摘要；旧投影策略的摘要缓存会重新生成，原始记录保留。多行预览和最终正文采用同一空白规范化规则。Telegram 草稿请求最多等待 3 秒，超时取消并停用本轮草稿更新，正式回复仍继续发送。见 [#80](https://github.com/CxHsin/nailong-bot/issues/80)。
 
-UI Projection 只使用文本快照、撤回和工具活动三种实时更新，不再维护独立的 Progress pipeline 或 quiet／normal／verbose 模式。Telegram 仅保留当前说明和工具活动，每 15 秒刷新仍在执行的同一草稿；运行终态到达后停止刷新，再发送正式消息。CLI 人类模式显示完成的说明和工具事实，JSON 模式保留实时快照。此简化见 [#78](https://github.com/CxHsin/nailong-bot/issues/78)；它保留模型上下文与 UI 的隔离，也不公开原始 reasoning。
+UI Projection 显示短命草稿和工具活动，已结算说明逐段固定交付，最终答案独立。静默 15 秒且存在新事实时，独立只读模型补充运行摘要，两次至少间隔 60 秒、每轮最多 5 次；来源明确且不参与长期记忆。生产采用新事件库，全量迁移保留原库，重启只记录中断、不补发。见 [#83](https://github.com/CxHsin/nailong-bot/issues/83)。
 
 `.env`、`data/` 和 `tinyFish.txt` 被 Git 忽略；运行数据可能包含图片、私人文件和工具参数。
 

@@ -13,7 +13,7 @@ export type ProviderCapabilities = {
   appendConfigurationUpdates: boolean;
 };
 export type ContextItem =
-  | { type: "user" | "assistant"; id: string; parts: ContentPart[] }
+  | { type: "user" | "assistant"; id: string; parts: ContentPart[]; source?: "execution" | "progress-model" }
   | { type: "image"; id: string; mimeType: string; data?: string; contentRef?: string }
   | { type: "reasoning"; id: string; text?: string; signature?: string; encryptedContent?: string; continuationMetadata?: Record<string, unknown> }
   | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> }
@@ -47,8 +47,11 @@ export function contextItemsFromEvents(events: StoredEvent[]): ContextItem[] {
       }
       return [{ type: "user", id, parts }];
     }
-    if (event.type === "text_finalized" && typeof event.text === "string" && event.contentKind === "final") {
-      return [{ type: "assistant", id, parts: [{ type: "text", text: event.text }] }];
+    if (event.type === "text_finalized" && typeof event.text === "string" &&
+      (event.contentKind === "final" || event.protocolVersion === "plain-text-v3" || event.contextPolicy === "include") &&
+      !events.some((entry) => entry.type === "text_discarded" && entry.textSegmentId === event.textSegmentId)) {
+      const summary = event.source === "progress-model";
+      return [{ type: "assistant", id, source: summary ? "progress-model" : "execution", parts: [{ type: "text", text: summary ? `运行摘要（独立进展模型）：\n${event.text}` : event.text }] }];
     }
     if (event.type === "tool_call" && typeof event.toolName === "string" && event.args && typeof event.args === "object") {
       return [{ type: "toolCall", id, name: event.toolName, arguments: event.args as Record<string, unknown> }];

@@ -47,7 +47,7 @@ test("large tool result is durably archived, pruned, and readable with the exist
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const replies: string[] = [];
@@ -110,7 +110,7 @@ for (const fault of ["archive", "tool_call", "tool_dispatch", "tool_result"] as 
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
       modelBaseUrl: `http://127.0.0.1:${address.port}` });
     t.after(() => agent.close());
     const replies: string[] = [];
@@ -184,7 +184,7 @@ test("archived long Unicode line is readable through bounded continuations", asy
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const app = createApp({ ownerId: 42, dataDir: dir, answer: agent.answer, send: async () => {} });

@@ -7,7 +7,7 @@ import { createToolArchive } from "./tool-archive.js";
 
 export type EventInput = Omit<StoredEvent, "at"> & { at?: string };
 export type SqliteEvent = StoredEvent & {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   eventId: string;
   sequence: number;
   sessionId: string;
@@ -91,21 +91,21 @@ function validateEvent(event: EventInput): void {
   }
 }
 
-function insert(db: DatabaseSync, input: EventInput, eventId: string): SqliteEvent {
+function insert(db: DatabaseSync, input: EventInput, eventId: string, schemaVersion: 1 | 2 = 1): SqliteEvent {
   validateEvent(input);
   const event = { ...input, at: input.at ?? new Date().toISOString() } as StoredEvent;
   const sessionId = typeof input.sessionId === "string" ? input.sessionId : "owner";
   const result = db.prepare(`INSERT INTO runtime_events
     (event_id, schema_version, session_id, request_id, model_step_id, text_segment_id,
-     tool_call_id, kind, content_kind, payload) VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    eventId, sessionId, typeof input.requestId === "string" ? input.requestId : null,
+     tool_call_id, kind, content_kind, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    eventId, schemaVersion, sessionId, typeof input.requestId === "string" ? input.requestId : null,
     typeof input.modelStepId === "string" ? input.modelStepId : null,
     typeof input.textSegmentId === "string" ? input.textSegmentId : null,
     typeof input.toolCallId === "string" ? input.toolCallId : null,
     event.type, typeof input.contentKind === "string" ? input.contentKind : null,
     JSON.stringify(event),
   );
-  return { ...event, schemaVersion: 1, eventId, sequence: Number(result.lastInsertRowid), sessionId };
+  return { ...event, schemaVersion, eventId, sequence: Number(result.lastInsertRowid), sessionId };
 }
 
 function validateLegacy(events: StoredEvent[]): void {
@@ -194,8 +194,8 @@ function validateLegacy(events: StoredEvent[]): void {
   }
 }
 
-export function createSqliteRuntimeLog(dataDir: string) {
-  const databaseFile = join(dataDir, "events.sqlite");
+export function createSqliteRuntimeLog(dataDir: string, options: { fileName?: string; schemaVersion?: 1 | 2; validate?: (event: EventInput) => void } = {}) {
+  const databaseFile = join(dataDir, options.fileName ?? "events.sqlite");
   const legacyFile = join(dataDir, "events.jsonl");
   const archive = createToolArchive(dataDir);
 
@@ -224,7 +224,7 @@ export function createSqliteRuntimeLog(dataDir: string) {
         const rows = db.prepare(`SELECT sequence, event_id, schema_version, session_id, payload
           FROM runtime_events WHERE sequence > ? ORDER BY sequence`).all(afterSequence) as EventRow[];
         return rows.map((row) => ({ ...JSON.parse(row.payload) as StoredEvent,
-          schemaVersion: row.schema_version as 1, eventId: row.event_id,
+          schemaVersion: row.schema_version as 1 | 2, eventId: row.event_id,
           sequence: row.sequence, sessionId: row.session_id }));
       });
     },
@@ -236,7 +236,8 @@ export function createSqliteRuntimeLog(dataDir: string) {
       return event!;
     },
     async appendBatch(inputs: EventInput[]): Promise<SqliteEvent[]> {
-      return withDatabase((db) => transact(db, () => inputs.map((input) => insert(db, input, randomUUID()))));
+      inputs.forEach((input) => options.validate?.(input));
+      return withDatabase((db) => transact(db, () => inputs.map((input) => insert(db, input, randomUUID(), options.schemaVersion ?? 1))));
     },
     async importLegacy(): Promise<number> {
       let source: string;

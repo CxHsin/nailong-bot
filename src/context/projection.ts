@@ -38,7 +38,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   const progressSteps = new Set(events.filter((event) => event.type === "text_finalized" &&
     ["progress", "status", "result"].includes(String(event.contentKind)) && typeof event.modelStepId === "string")
     .map((event) => event.modelStepId));
+  const discarded = new Set(events.filter((event) => event.type === "text_discarded").map((event) => event.textSegmentId));
   for (const [index, event] of events.entries()) {
+    if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     if (event.type === "tool_result") {
       if (results.has(key(event))) throw new Error("工具结果编号重复");
       results.set(key(event), { event, index });
@@ -72,7 +74,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         requestId: event.requestId, safe: true, summaryMessages: [] });
     } else if (event.type === "model_message") {
       const original = event.message as AssistantMessage;
-      if (event.protocolVersion && !events.some((e) => e.type === "protocol_validated" &&
+      if (event.protocolVersion && event.protocolVersion !== "plain-text-v3" && !events.some((e) => e.type === "protocol_validated" &&
         e.modelStepId === event.modelStepId && e.valid === true)) continue;
       if (original?.role !== "assistant" || !Array.isArray(original.content) ||
         original.stopReason === "error" || original.stopReason === "aborted") continue;
@@ -129,6 +131,10 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
           c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !hostConversationReplay : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
+        if ((event.protocolVersion === "plain-text-v3" || progress?.contextPolicy === "include") && progress && typeof progress.text === "string") {
+          assistant.content = assistant.content.filter((part) => part.type !== "text");
+          assistant.content.push({ type: "text", text: progress.text });
+        }
         if (progress?.contentKind === "result") {
           // Keep execution facts regardless of UI delivery, but never imply unseen text was delivered.
           assistant.content = assistant.content.filter((part) => part.type !== "text");
@@ -149,7 +155,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
     } else if (event.type === "text_finalized" && ["progress", "status", "result"].includes(String(event.contentKind)) &&
       typeof event.textSegmentId === "string" && typeof event.text === "string" && event.requestId) {
-      if (hostConversationReplay && event.contentKind !== "result") continue;
+      if ((event.protocolVersion === "plain-text-v3" || event.contextPolicy === "include") && events.some((e) => e.type === "model_message" &&
+        e.modelStepId === event.modelStepId && (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
+      if (hostConversationReplay && event.contentKind !== "result" && event.protocolVersion !== "plain-text-v3" && event.contextPolicy !== "include") continue;
       if (!hostConversationReplay && event.contentKind === "result" && !resultDelivered(event.textSegmentId)) {
         if (event.requestId !== currentId || ended.has(currentId)) continue;
         const work = `内部工作成果（尚未确认送达用户）：\n${event.text}`;
@@ -162,7 +170,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
       if (structured && events.some((e) => e.type === "model_message" && e.modelStepId === event.modelStepId &&
         (e.message as AssistantMessage)?.content?.some((c) => c.type === "toolCall"))) continue;
-      units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", event.text, timestamp)], through: index + 1,
+      const text = event.source === "progress-model" ? `运行摘要（来源：独立进展模型，仅依据已记录事实）：\n${event.text}` : event.text;
+      units.push({ messages: [replayText(event.contentKind as "progress" | "status" | "result", text, timestamp)], through: index + 1,
         requestId: event.requestId, safe: true, sourceIds: event.contentKind === "result" ? [eventIdentity(event, all.indexOf(event))] : [] });
     } else if (event.type === "delivery_succeeded" && event.requestId && delivered.has(event.requestId) &&
       (!hostConversationReplay || !events.some((e) => e.type === "run_succeeded" && e.runId === event.requestId)) ||

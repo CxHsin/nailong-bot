@@ -1,5 +1,6 @@
 import { formatMarkdownForTelegram } from "../../telegram/telegram-format.js";
 import { planTelegramText } from "../../telegram/telegram-layout.js";
+import type { DeliveryContent } from "../../runtime/content-delivery.js";
 
 export type TelegramRichTransportApi = {
   sendRich: (chatId: number, markdown: string) => Promise<number>;
@@ -48,6 +49,25 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
   }
 
   return {
+    plan(content: DeliveryContent): string[] {
+      const pages = planTelegramText(content.text);
+      if (content.kind === "final") return pages;
+      const title = content.source === "progress-model" ? "运行摘要" : "进展";
+      return pages.map((page) => `<b>${title}</b>\n<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
+    },
+    async sendPage(text: string, chatId: number): Promise<number> {
+      try { return await api.sendHtml(chatId, text); }
+      catch (error) {
+        const description = String(field(error, "description") ?? field(error, "message") ?? "");
+        if (field(error, "error_code") !== 400 || !text.includes("<blockquote expandable>") ||
+          !/parse|entity|blockquote|unsupported/i.test(description)) throw error;
+        return api.sendHtml(chatId, text.replace(/<blockquote expandable>/g, "<blockquote>"));
+      }
+    },
+    async sendProgress(text: string, chatId: number, source: "execution" | "progress-model"): Promise<number> {
+      const title = source === "progress-model" ? "运行摘要" : "进展";
+      return api.sendHtml(chatId, `<b>${title}</b>\n<blockquote expandable>${formatMarkdownForTelegram(text).replace(/<\/?blockquote>/g, "")}</blockquote>`);
+    },
     async draft(draftId: number, text: string, chatId: number, signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
       if (availability !== "unsupported") {
