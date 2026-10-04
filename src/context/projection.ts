@@ -52,6 +52,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   let current: Message | undefined;
   let legacyRequest: string | undefined;
   for (const [index, event] of events.entries()) {
+    if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
       const images = Array.isArray(event.images) ? event.images as ImageContent[] : [];
@@ -128,6 +129,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
       if (kept.length) {
         const progress = events.find((e) => e.type === "text_finalized" && e.modelStepId === event.modelStepId &&
+          !discarded.has(e.textSegmentId) &&
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
           c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !hostConversationReplay : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };

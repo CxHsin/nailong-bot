@@ -7,7 +7,7 @@ export type TelegramHostTransport = ContentTransport & {
   sendProgress?: (text: string, chatId: number, source: "execution" | "progress-model") => Promise<number>;
 };
 
-/** One best-effort live draft per Run; only the terminal message confirms delivery. */
+/** Ephemeral segment drafts and a separate serial queue for immutable formal content. */
 export function createTelegramHostProjection(options: TelegramHostTransport & {
   chatId: number;
   draftIntervalMs?: number;
@@ -18,7 +18,8 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
   let nextDraftId = 1;
   return {
     async consume(handle: RunHandle) {
-      const draftId = nextDraftId++;
+      let draftId = nextDraftId++;
+      let draftSegment: string | undefined;
       let current: { segmentId: string; text: string } | undefined;
       let tool = "";
       let latest = "";
@@ -28,11 +29,13 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
       let unavailable = false;
       let sending = false;
       let pending = Promise.resolve();
+      let formal = Promise.resolve();
       // Coalesce snapshots independently of execution and keep long-running drafts alive.
       const timer = setInterval(() => {
         if (!options.draft || finished || unavailable || sending || !latest ||
           latest === published && Date.now() - publishedAt < 15_000) return;
         const text = latest;
+        const snapshotDraftId = draftId;
         sending = true;
         pending = new Promise<void>((resolve) => {
           const controller = new AbortController();
@@ -41,7 +44,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             controller.abort();
             resolve(); // Also bound transports that ignore cancellation.
           }, options.draftTimeoutMs ?? 3_000);
-          void Promise.resolve().then(() => options.draft!(draftId, text, options.chatId, controller.signal)).then(() => {
+          void Promise.resolve().then(() => options.draft!(snapshotDraftId, text, options.chatId, controller.signal)).then(() => {
             if (!controller.signal.aborted) {
               published = text;
               publishedAt = Date.now();
@@ -65,16 +68,24 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             if (!progress) latest = event.text ?? latest; // Legacy Host envelope compatibility.
             else {
               if (progress.type === "text") {
+                if (draftSegment !== progress.segmentId) {
+                  draftSegment = progress.segmentId;
+                  draftId = nextDraftId++;
+                  published = "";
+                }
                 current = { segmentId: progress.segmentId, text: progress.text };
                 tool = "";
                 if (progress.finalized && progress.formal) {
                   latest = "";
-                  await pending;
-                  try {
-                    if (options.deliver) await options.deliver(event, { id: progress.segmentId, text: progress.text, kind: "progress", source: progress.source });
-                    else if (options.sendProgress) await options.sendProgress(progress.text, options.chatId, progress.source ?? "execution");
-                    else await options.send(progress.text, options.chatId);
-                  } catch { /* A failed progress delivery must not prevent the final answer. */ }
+                  const draftBarrier = pending;
+                  formal = formal.then(async () => {
+                    await draftBarrier;
+                    try {
+                      if (options.deliver) await options.deliver(event, { id: progress.segmentId, text: progress.text, kind: "progress", source: progress.source });
+                      else if (options.sendProgress) await options.sendProgress(progress.text, options.chatId, progress.source ?? "execution");
+                      else await options.send(progress.text, options.chatId);
+                    } catch { /* A failed progress delivery must not prevent the final answer. */ }
+                  });
                   current = undefined;
                 }
               } else if (progress.type === "discard") {
@@ -90,6 +101,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             finished = true;
             clearInterval(timer);
             await pending;
+            await formal;
             if (event.type === "run_succeeded" && event.result?.text) {
               const delivery = options.deliver ? await options.deliver(event, { id: String(event.result.finalSegmentId ?? event.result.resultId ?? event.runId),
                 text: String(event.result.text), kind: "final", source: "execution" }) : { complete: true, messageId: await options.send(String(event.result.text), options.chatId) };

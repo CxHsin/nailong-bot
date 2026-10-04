@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Request } from "./app-types.js";
-import type { StoredEvent } from "../runtime/runtime-types.js";
+import type { StoredEvent, ToolResult } from "../runtime/runtime-types.js";
+import { memoryExclusions } from "../runtime/memory-facts.js";
+import { filterMemoryToolResult, filterArchivedMemoryResult } from "../runtime/memory-exclusion.js";
 
 export type ProgressSummaryInput = { task: string; explanations: string[]; facts: Array<{ id: string; type: string; name: string; result?: string }> };
 export type ProgressSummaryGenerator = (input: ProgressSummaryInput, request: Request, signal: AbortSignal, onText: (text: string) => void) => Promise<string>;
@@ -25,33 +27,40 @@ export function startProgressSummaries(request: Request, task: string, generate:
     if (activeSegment) request.onProgress?.({ type: "discard", segmentId: activeSegment });
     activeSegment = undefined;
   };
-  const fact = (event: StoredEvent, index: number) => ({ id: String(event.eventId ?? index), type: event.type, name: String(event.toolName ?? ""),
-    ...(event.type === "tool_result" ? { result: JSON.stringify(event.modelVisible ?? event.result).slice(0, 2000) } : {}) });
+  const fact = (event: StoredEvent, index: number, events: StoredEvent[]) => {
+    const result = event.result as ToolResult | undefined;
+    const excluded = memoryExclusions(events);
+    const filtered = result && filterArchivedMemoryResult(events, event, filterMemoryToolResult(String(event.toolName), result, excluded), excluded);
+    return { id: String(event.eventId ?? index), type: event.type, name: String(event.toolName ?? ""),
+      ...(filtered ? { result: JSON.stringify({ content: filtered.content.filter((part) => part.type === "text"), isError: filtered.isError }).slice(0, 2000) } : {}) };
+  };
+  const facts = (events: StoredEvent[]) => events.map((event, index) => ({ event, index })).filter(({ event }) =>
+    event.requestId === request.id && ["tool_dispatch", "tool_result", "tool_blocked"].includes(event.type));
   const tick = async () => {
     if (checking || stopped || primaryDraft || calls >= config.maxCalls || Date.now() - lastMainText < config.silenceMs || Date.now() - lastAttempt < config.intervalMs) return;
     checking = true;
     const generation = revision;
     try {
       const events = await request.log.read();
-      const relevant = events.map((event, index) => ({ event, index })).filter(({ event }) => event.requestId === request.id &&
-        ["tool_dispatch", "tool_result", "tool_blocked"].includes(event.type));
+      const relevant = facts(events);
       const cursor = relevant.at(-1)?.index ?? -1;
       if (cursor <= consumed || !valid(generation)) return;
       consumed = cursor; calls++; lastAttempt = Date.now();
       controller = new AbortController();
       activeSegment = randomUUID(); const segmentId = activeSegment;
-      const input: ProgressSummaryInput = { task,
-        explanations: events.filter((event) => event.type === "text_finalized" && event.requestId === request.id && event.source !== "progress-model").slice(-4).map((event) => String(event.text)),
-        facts: relevant.slice(-12).map(({ event, index }) => fact(event, index)) };
+      const discarded = new Set(events.filter((event) => event.type === "text_discarded").map((event) => event.textSegmentId));
+      const input: ProgressSummaryInput = { task: task.slice(0, 8000),
+        explanations: events.filter((event) => event.type === "text_finalized" && event.requestId === request.id && !discarded.has(event.textSegmentId)).slice(-4).map((event) => String(event.text).slice(0, 2000)),
+        facts: relevant.slice(-12).map(({ event, index }) => fact(event, index, events)) };
       const text = await generate(input, request, controller.signal, (preview) => {
         if (valid(generation)) request.onProgress?.({ type: "text", segmentId, kind: "progress", text: preview, finalized: false, source: "progress-model" });
       });
-      const latestFacts = (await request.log.read()).map((event, index) => ({ event, index })).filter(({ event }) =>
-        event.requestId === request.id && ["tool_dispatch", "tool_result", "tool_blocked"].includes(event.type));
+      const latestFacts = facts(await request.log.read());
       if (!valid(generation) || !text.trim() || latestFacts.at(-1)?.index !== cursor) { discard(); return; }
       await request.log.append({ type: "text_finalized", requestId: request.id, textSegmentId: segmentId,
         text, contentKind: "progress", protocolVersion: "plain-text-v3", source: "progress-model", evidenceIds: input.facts.map((item) => item.id) });
-      if (!valid(generation)) {
+      const settledFacts = facts(await request.log.read());
+      if (!valid(generation) || settledFacts.at(-1)?.index !== cursor) {
         await request.log.append({ type: "text_discarded", requestId: request.id, textSegmentId: segmentId, reason: "stale_summary" });
         discard(); return;
       }

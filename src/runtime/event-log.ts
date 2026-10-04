@@ -3,24 +3,16 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { eventIdentity } from "./memory-facts.js";
-import { createSqliteRuntimeLog, type EventInput } from "./sqlite-runtime-log.js";
+import { createSqliteRuntimeLog } from "./sqlite-runtime-log.js";
 import type { StoredEvent, ToolArchive } from "./runtime-types.js";
+import { validateMigrationAssociations, type MigrationAssociations } from "./migration-validation.js";
+import { validateRuntimeFact } from "./event-schema.js";
+
+export type MigrationReport = MigrationAssociations & { schemaVersion: number; count: number; sourceDigest: string;
+  identitiesPreserved: boolean; referencesPreserved: boolean; originalRetained: boolean };
 
 export const RUNTIME_SCHEMA_VERSION = 2;
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-
-/** Semantic validation at the durable write boundary; previews never pass here. */
-function validateFact(event: EventInput) {
-  if (event.type === "text_finalized") {
-    if (typeof event.requestId !== "string" || typeof event.textSegmentId !== "string" ||
-      typeof event.text !== "string" || !event.text.trim() ||
-      !["progress", "final", "result", "status"].includes(String(event.contentKind)))
-      throw new Error("已结算文字缺少内容或关联身份");
-  }
-  if (["tool_dispatch", "tool_result", "tool_blocked"].includes(String(event.type)) &&
-    (typeof event.requestId !== "string" || typeof event.toolCallId !== "string" || typeof event.toolName !== "string"))
-    throw new Error("工具事实缺少关联身份");
-}
 
 async function exists(path: string) {
   try { await stat(path); return true; }
@@ -54,7 +46,7 @@ async function legacySnapshot(dataDir: string): Promise<StoredEvent[]> {
 /** Open only after the legacy writer has stopped. Source files are never rewritten. */
 export async function createRuntimeEventLog(dataDir: string) {
   await mkdir(dataDir, { recursive: true });
-  const log = createSqliteRuntimeLog(dataDir, { fileName: "runtime-v2.sqlite", schemaVersion: 2, validate: validateFact });
+  const log = createSqliteRuntimeLog(dataDir, { fileName: "runtime-v2.sqlite", schemaVersion: RUNTIME_SCHEMA_VERSION, validate: validateRuntimeFact });
   await log.read(); // Initialize the destination schema, not its source.
   const target = new DatabaseSync(join(dataDir, "runtime-v2.sqlite"));
   try {
@@ -64,6 +56,7 @@ export async function createRuntimeEventLog(dataDir: string) {
       if (migration.source_digest !== digest(await legacySnapshot(dataDir))) throw new Error("保留的旧事实源已变化，不能混用新旧 writer");
     } else {
       const source = await legacySnapshot(dataDir);
+      const associations = validateMigrationAssociations(source);
       for (const event of source) if (event.archive) await log.loadArchive(event.archive as ToolArchive);
       const converted = source.map((event) => {
         if (typeof event.type !== "string" || !Number.isFinite(Date.parse(event.at))) throw new Error("旧事件类型或时间无效");
@@ -93,12 +86,16 @@ export async function createRuntimeEventLog(dataDir: string) {
         })) throw new Error("迁移内容或身份校验失败");
         // Detect a source changed while conversion ran, before committing the handover.
         if (digest(await legacySnapshot(dataDir)) !== digest(source)) throw new Error("旧事实源仍在变化，请停止旧 writer 后迁移");
-        const report = { schemaVersion: 2, count: source.length, sourceDigest: digest(source),
+        const report: MigrationReport = { ...associations, schemaVersion: 2, count: source.length, sourceDigest: digest(source),
           identitiesPreserved: true, referencesPreserved: true, originalRetained: true };
         target.prepare("INSERT INTO runtime_migrations VALUES (?,?,?)").run(digest(source), source.length, JSON.stringify(report));
         target.exec("COMMIT");
       } catch (error) { target.exec("ROLLBACK"); throw error; }
     }
   } finally { target.close(); }
-  return log;
+  return { ...log, async migrationReport(): Promise<MigrationReport> {
+    const db = new DatabaseSync(join(dataDir, "runtime-v2.sqlite"), { readOnly: true });
+    try { return JSON.parse(String(db.prepare("SELECT report FROM runtime_migrations").get()!.report)); }
+    finally { db.close(); }
+  } };
 }

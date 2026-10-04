@@ -48,25 +48,34 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
     await api.draftHtml(draftId, chatId, rendered, signal);
   }
 
+  function plan(content: DeliveryContent): string[] {
+    const pages = planTelegramText(content.text);
+    if (content.kind === "final") return pages;
+    const title = content.source === "progress-model" ? "运行摘要" : "进展";
+    return pages.map((page) => `<b>${title}</b>\n<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
+  }
+
+  async function sendPage(text: string, chatId: number): Promise<number> {
+    try { return await api.sendHtml(chatId, text); }
+    catch (error) {
+      const description = String(field(error, "description") ?? field(error, "message") ?? "");
+      if (field(error, "error_code") !== 400 || !text.includes("<blockquote expandable>") ||
+        !/parse|entity|blockquote|unsupported/i.test(description)) throw error;
+      return api.sendHtml(chatId, text.replace(/<blockquote expandable>/g, "<blockquote>"));
+    }
+  }
+
   return {
-    plan(content: DeliveryContent): string[] {
-      const pages = planTelegramText(content.text);
-      if (content.kind === "final") return pages;
-      const title = content.source === "progress-model" ? "运行摘要" : "进展";
-      return pages.map((page) => `<b>${title}</b>\n<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
-    },
-    async sendPage(text: string, chatId: number): Promise<number> {
-      try { return await api.sendHtml(chatId, text); }
-      catch (error) {
-        const description = String(field(error, "description") ?? field(error, "message") ?? "");
-        if (field(error, "error_code") !== 400 || !text.includes("<blockquote expandable>") ||
-          !/parse|entity|blockquote|unsupported/i.test(description)) throw error;
-        return api.sendHtml(chatId, text.replace(/<blockquote expandable>/g, "<blockquote>"));
-      }
-    },
+    plan,
+    sendPage,
     async sendProgress(text: string, chatId: number, source: "execution" | "progress-model"): Promise<number> {
-      const title = source === "progress-model" ? "运行摘要" : "进展";
-      return api.sendHtml(chatId, `<b>${title}</b>\n<blockquote expandable>${formatMarkdownForTelegram(text).replace(/<\/?blockquote>/g, "")}</blockquote>`);
+      let first: number | undefined;
+      for (const page of plan({ id: "", text, kind: "progress", source })) {
+        const messageId = await sendPage(page, chatId);
+        first ??= messageId;
+      }
+      if (first === undefined) throw new Error("Telegram 进展消息为空");
+      return first;
     },
     async draft(draftId: number, text: string, chatId: number, signal?: AbortSignal): Promise<void> {
       signal?.throwIfAborted();
