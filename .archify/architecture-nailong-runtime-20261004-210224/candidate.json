@@ -1,0 +1,479 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Nailong Bot Runtime Architecture",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-nailong-runtime-20261004-210224/nailong-runtime.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/CxHsin/nailong-bot.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "d266078d42eb7c9d4b67c13eeff96c7ccaca400d"
+    }
+  },
+  "components": [
+    {
+      "id": "user",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "Telegram 私聊 / CLI",
+      "pos": [
+        35,
+        120
+      ],
+      "size": [
+        126,
+        62
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "line": 3,
+          "end_line": 4,
+          "label": "入口说明"
+        }
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "frontend",
+      "label": "Channels",
+      "sublabel": "Telegram + CLI 适配",
+      "pos": [
+        255,
+        320
+      ],
+      "size": [
+        154,
+        68
+      ],
+      "sources": [
+        {
+          "path": "src/telegram/telegram-input.ts",
+          "line": 27,
+          "end_line": 71,
+          "label": "Telegram 授权输入"
+        },
+        {
+          "path": "src/channel/telegram/index.ts",
+          "line": 12,
+          "end_line": 44,
+          "label": "归一化与投影"
+        },
+        {
+          "path": "src/cli/cli-channel.ts",
+          "line": 34,
+          "end_line": 66,
+          "label": "CLI 输入输出"
+        }
+      ]
+    },
+    {
+      "id": "telegram-api",
+      "type": "external",
+      "label": "Telegram Bot API",
+      "sublabel": "HTTPS · long polling",
+      "pos": [
+        10,
+        320
+      ],
+      "size": [
+        154,
+        68
+      ],
+      "sources": [
+        {
+          "path": "src/main.ts",
+          "line": 44,
+          "end_line": 55,
+          "label": "Bot API 与出站消息"
+        },
+        {
+          "path": "src/channel/telegram/host-channel.ts",
+          "line": 33,
+          "end_line": 36,
+          "label": "long polling"
+        }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "backend",
+      "label": "Host Runtime",
+      "sublabel": "串行 Run 队列 · 取消 · 终态",
+      "pos": [
+        520,
+        320
+      ],
+      "size": [
+        164,
+        80
+      ],
+      "sources": [
+        {
+          "path": "src/host/host.ts",
+          "line": 81,
+          "end_line": 121,
+          "label": "Run 生命周期"
+        }
+      ]
+    },
+    {
+      "id": "agent-host",
+      "type": "backend",
+      "label": "Agent Host",
+      "sublabel": "命令、会话、送达、学习",
+      "pos": [
+        755,
+        320
+      ],
+      "size": [
+        164,
+        72
+      ],
+      "sources": [
+        {
+          "path": "src/application/agent-host.ts",
+          "line": 57,
+          "end_line": 100,
+          "label": "生产编排"
+        }
+      ]
+    },
+    {
+      "id": "context-execution",
+      "type": "backend",
+      "label": "Context + Execution",
+      "sublabel": "历史投影 · 预算 · 协议校验",
+      "pos": [
+        1020,
+        320
+      ],
+      "size": [
+        176,
+        72
+      ],
+      "sources": [
+        {
+          "path": "src/agent/execution.ts",
+          "line": 78,
+          "end_line": 136,
+          "label": "Provider 执行"
+        },
+        {
+          "path": "src/context/projection.ts",
+          "line": 18,
+          "end_line": 42,
+          "label": "历史重放"
+        }
+      ]
+    },
+    {
+      "id": "pi-agent",
+      "type": "backend",
+      "label": "pi Agent Session",
+      "sublabel": "结构化输出 + 工具执行",
+      "pos": [
+        1020,
+        540
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "src/agent/pi-agent.ts",
+          "line": 89,
+          "end_line": 116,
+          "label": "Session 装配"
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "type": "external",
+      "label": "DeepSeek API",
+      "sublabel": "deepseek-v4-flash",
+      "pos": [
+        1400,
+        540
+      ],
+      "size": [
+        154,
+        68
+      ],
+      "sources": [
+        {
+          "path": "src/agent/pi-agent.ts",
+          "line": 52,
+          "end_line": 60,
+          "label": "模型与凭据"
+        },
+        {
+          "path": "src/agent/execution.ts",
+          "line": 130,
+          "end_line": 136,
+          "label": "Provider stream"
+        }
+      ]
+    },
+    {
+      "id": "runtime-log",
+      "type": "database",
+      "label": "Runtime Event Log",
+      "sublabel": "SQLite WAL + JSONL 导入 + 工具归档",
+      "pos": [
+        755,
+        120
+      ],
+      "size": [
+        204,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/runtime/sqlite-runtime-log.ts",
+          "line": 197,
+          "end_line": 266,
+          "label": "事实源"
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "database",
+      "label": "Akasha Memory",
+      "sublabel": "图召回 · 记忆学习 · 本地缓存",
+      "pos": [
+        490,
+        540
+      ],
+      "size": [
+        176,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/memory/projection.ts",
+          "line": 17,
+          "end_line": 92,
+          "label": "记忆投影"
+        },
+        {
+          "path": "src/memory/tools.ts",
+          "line": 5,
+          "end_line": 42,
+          "label": "记忆工具"
+        }
+      ]
+    },
+    {
+      "id": "tinyfish",
+      "type": "external",
+      "label": "TinyFish MCP",
+      "sublabel": "可选 web_search / web_fetch",
+      "pos": [
+        1400,
+        320
+      ],
+      "size": [
+        170,
+        68
+      ],
+      "sources": [
+        {
+          "path": "src/agent/tinyfish.ts",
+          "line": 14,
+          "end_line": 27,
+          "label": "MCP 连接"
+        }
+      ]
+    },
+    {
+      "id": "embedding",
+      "type": "external",
+      "label": "Embedding API",
+      "sublabel": "可选 OpenAI-compatible /embeddings",
+      "pos": [
+        10,
+        540
+      ],
+      "size": [
+        208,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/memory/embedding.ts",
+          "line": 20,
+          "end_line": 27,
+          "label": "向量客户端"
+        },
+        {
+          "path": "src/memory/embedding.ts",
+          "line": 70,
+          "end_line": 98,
+          "label": "HTTP 调用与降级"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "本机 Node.js 进程 / OS 用户权限",
+      "wraps": [
+        "channels",
+        "host",
+        "agent-host",
+        "context-execution",
+        "pi-agent",
+        "memory",
+        "runtime-log"
+      ],
+      "pad": 24
+    },
+    {
+      "kind": "security-group",
+      "label": "模型工具写入保护（应用策略）",
+      "wraps": [
+        "runtime-log"
+      ],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    {
+      "id": "user-api",
+      "from": "user",
+      "to": "telegram-api",
+      "label": "私聊",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-channels",
+      "from": "telegram-api",
+      "to": "channels",
+      "label": "owner 私聊",
+      "variant": "emphasis"
+    },
+    {
+      "id": "channels-host",
+      "from": "channels",
+      "to": "host",
+      "label": "HostInput",
+      "variant": "emphasis"
+    },
+    {
+      "id": "host-agent-host",
+      "from": "host",
+      "to": "agent-host",
+      "label": "queued Run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "agent-host-context",
+      "from": "agent-host",
+      "to": "context-execution",
+      "label": "会话历史",
+      "variant": "emphasis"
+    },
+    {
+      "id": "context-pi",
+      "from": "context-execution",
+      "to": "pi-agent",
+      "label": "预算内模型输入",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pi-deepseek",
+      "from": "pi-agent",
+      "to": "deepseek",
+      "label": "请求 / 流式响应",
+      "variant": "emphasis"
+    },
+    {
+      "id": "cli-input",
+      "from": "user",
+      "to": "channels",
+      "label": "本机 CLI",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "agent-log",
+      "from": "agent-host",
+      "to": "runtime-log",
+      "label": "读写运行事实",
+      "variant": "dashed"
+    },
+    {
+      "id": "pi-memory",
+      "from": "pi-agent",
+      "to": "memory",
+      "label": "召回 / 记忆工具",
+      "variant": "dashed"
+    },
+    {
+      "id": "memory-embedding",
+      "from": "memory",
+      "to": "embedding",
+      "label": "可选向量",
+      "variant": "dashed"
+    },
+    {
+      "id": "pi-tinyfish",
+      "from": "pi-agent",
+      "to": "tinyfish",
+      "label": "配置成功后 MCP",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "主路径与回程",
+      "items": [
+        "高亮主路径：用户 → Telegram Bot API → Channels → Host → Agent Host → Context/Execution → pi Session → DeepSeek。",
+        "回程复用 Host 的 RunHandle：Channel 消费 progress/终态；Telegram 发送草稿与最终正文，CLI 输出时间线或 NDJSON。",
+        "控制命令在队列内处理，不调用模型；Telegram 消息去重与 conversationId 隔离由 Agent Host 执行。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "信任边界与工具权限",
+      "items": [
+        "Telegram 仅接受配置 owner 的私聊，先验证账号再下载照片；CLI 信任启动进程的本机用户，Actor/conversationId 并非认证凭据。",
+        "外部模型输出先通过结构化协议校验；文件工具 write/edit 按真实路径检查，禁止修改程序、提示词及受保护运行数据。",
+        "文件 read/write/edit/ls/find/grep 使用进程 OS 权限，可访问 data/ 之外；未开放 bash。框线是进程/应用策略边界，不代表 OS 沙箱。",
+        "DeepSeek 接收投影后的上下文；TinyFish 接收网页工具参数；可选 Embedding 服务接收待向量化文本，URL 允许 HTTP 或 HTTPS。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "本地事实源与派生数据",
+      "items": [
+        "Host 在发布 Run 事件前追加日志；Agent Host 读写会话、生成结果与 delivery_succeeded，模型/工具记录也通过同一日志接口追加。",
+        "data/events.sqlite 使用 SQLite WAL；旧 events.jsonl 幂等导入。大工具结果归档在 tool-results/，摘要缓存在 checkpoints/。",
+        "Akasha 从原始事实派生 memory.sqlite；Embedding 向量缓存为 embeddings.sqlite。送达确认后结算模型轮次的记忆学习。",
+        "共用数据目录及 conversationId 可跨 Channel 续聊；队列仅在各 Host 实例内串行，不是全进程锁。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "可选服务与当前集成边界",
+      "items": [
+        "TinyFish key 配置且连接成功才注册 web_search/web_fetch；不可用时本地文件工具仍可使用。Telegram 入口可启用 Embedding，CLI 使用默认字面召回。",
+        "记忆自动召回与日期背景按轮次冻结；现行历史投影执行预算与摘要压缩。Provider-aware cache identity 已接入，完整新投影尚未替换旧路径。",
+        "Telegram Rich Markdown 不可用时回退 HTML；当前入口只显示基础 Host 进展，未完整接入语义进展、模型文字流式成果、完整交付重试与重启恢复。",
+        "来源固定到 d266078；分析时仅 .scratch/ 为未跟踪目录，运行数据、凭据及 .env 未读取。"
+      ]
+    }
+  ]
+}
