@@ -84,7 +84,10 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; pr
   const appendNow = async (job: Job, type: HostEventType, extra: Partial<HostEvent> = {}): Promise<HostEvent> => {
     const event: HostEvent = { type, schemaVersion: HOST_EVENT_SCHEMA_VERSION, runId: job.runId,
       conversationId: job.input.conversationId, sequence: ++job.sequence, at: new Date().toISOString(), actorId: job.input.actor.id, ...extra };
-    await options.log.append(event as unknown as Omit<StoredEvent, "at">);
+    // Host envelopes own their in-run sequence and schema version. The runtime log
+    // assigns storage identity fields itself, so never persist those reserved keys.
+    const { schemaVersion: _schemaVersion, sequence: _sequence, ...stored } = event;
+    await options.log.append(stored as unknown as Omit<StoredEvent, "at">);
     job.queue.push(event);
     return event;
   };

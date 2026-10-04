@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { createHost, normalizeHostInput, type HostEvent, type HostInput } from "../src/host/host.js";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 
 async function collect(handle: { events(): AsyncIterable<HostEvent> }) {
   const result: HostEvent[] = [];
@@ -48,6 +49,18 @@ test("Host serializes runs globally and exposes ordered terminal events", async 
   assert.deepEqual(firstEvents.map((event) => event.sequence), firstEvents.map((_, index) => index + 1));
   assert.equal(firstEvents[0]?.runId, first.runId);
   assert.equal((await log.read()).filter((event) => event.runId === first.runId).length, firstEvents.length);
+});
+
+test("Host persists envelopes through SQLite without claiming log identities", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "host-sqlite-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createSqliteRuntimeLog(dir);
+  const host = createHost({ log, execute: async () => ({ text: "ok" }) });
+  const handle = host.submit(input("sqlite"));
+  const emitted = await collect(handle);
+  const persisted = (await log.read()).filter((event) => event.runId === handle.runId);
+  assert.equal(persisted.length, emitted.length);
+  assert.deepEqual(persisted.map((event) => event.type), emitted.map((event) => event.type));
 });
 
 test("cancellation is explicit and reset is an ordered barrier", async (t) => {
