@@ -7,6 +7,7 @@ import { projectDeliveredChat } from "./runtime-projections.js";
 import type { Message, Request, Update } from "./app-types.js";
 import { cacheStatistics, cacheReportText } from "../runtime/cache-statistics.js";
 import { commitMemoryLearning } from "./memory-learning.js";
+import { cacheReplyContext } from "../runtime/reply-context.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
@@ -65,8 +66,13 @@ export function createAgentHost(options: AgentHostOptions) {
     const text = input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
     const images = input.parts.filter((part) => part.type === "image" && !!part.data)
       .map((part) => { if (part.type !== "image") throw new Error("图片格式无效"); return { type: "image" as const, mimeType: part.mimeType, data: part.data! }; });
+    const replyToMessageId = input.metadata?.replyToMessageId;
+    const replyContext = input.metadata?.channel === "telegram" && typeof replyToMessageId === "number" &&
+      Number.isSafeInteger(replyToMessageId) && replyToMessageId > 0 ? cacheReplyContext(await log.read(), replyToMessageId) : undefined;
     await log.append({ type: "message", role: "user", text, originalText: text, requestId: context.runId,
-      chatId: conversationUserId(input.conversationId), messageId: input.metadata?.messageId, ...(images.length ? { images } : {}) });
+      chatId: conversationUserId(input.conversationId), messageId: input.metadata?.messageId,
+      ...(typeof replyToMessageId === "number" ? { replyToMessageId } : {}), ...(replyContext ? { replyContext } : {}),
+      ...(images.length ? { images } : {}) });
     await log.append({ type: "request_started", requestId: context.runId });
     context.emit({ type: "progress", phase: "agent", source: "runtime", visibility: "normal", contextPolicy: "exclude", text: "处理中" });
     const history = await log.read();

@@ -8,6 +8,7 @@ import { protocolText } from "../agent/output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
 import { eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
 import { filterMemoryEvents, filterMemoryToolResult, filterArchivedMemoryResult } from "../runtime/memory-exclusion.js";
+import { userInputText } from "../runtime/reply-context.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
@@ -52,8 +53,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
       const images = Array.isArray(event.images) ? event.images as ImageContent[] : [];
+      const text = userInputText(event, excluded);
       const message: Message = { role: "user", content: images.length
-        ? [{ type: "text", text: event.text }, ...images] : event.text, timestamp };
+        ? [{ type: "text", text }, ...images] : text, timestamp };
       if (event.requestId === currentId) current = message;
       legacyRequest = event.requestId ?? `legacy:${index}`;
       const snapshot = events.find((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);

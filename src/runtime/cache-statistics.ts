@@ -65,7 +65,9 @@ function line(totals: CacheTotals): string {
 
 export function cacheReportText(report: CacheReport): string {
   const rows = report.recent.map((run, index) => `${index + 1}. ${run.runId} · ${run.state} · ${run.completedAt}\n${line(run.execution)}${run.auxiliary.calls ? `\n辅助：${line(run.auxiliary)}` : ""}`);
-  return [`KV cache · ${report.conversationId}`, "最近 4 次模型 Run：", rows.length ? rows.join("\n\n") : "暂无已结束的模型 Run。",
+  return [`KV cache · ${report.conversationId}`,
+    `查询快照：${new Date().toISOString()}（UTC）。统计截至查询时已返回的 usage，已发送消息不会自动刷新；重新 /kvcache 查看更新数据。`,
+    "最近 4 次模型 Run（时间戳为 UTC）：", rows.length ? rows.join("\n\n") : "暂无已结束的模型 Run。",
     `Conversation 累计执行：${line(report.execution)}`, `辅助调用（摘要等）：${line(report.auxiliary)}`,
     "费用估算：不可用；统计依据 Provider 已返回的 usage，不代表账单。",
     ...(report.unassignedCalls ? [`旧日志中 ${report.unassignedCalls} 次调用未能可靠归属，未计入当前 Conversation。`] : [])].join("\n\n");

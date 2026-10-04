@@ -1,6 +1,8 @@
 import type { Message } from "./app-types.js";
 import type { StoredEvent } from "../runtime/runtime-types.js";
 import { filterMemoryEvents } from "../runtime/memory-exclusion.js";
+import { memoryExclusions } from "../runtime/memory-facts.js";
+import { userInputText } from "../runtime/reply-context.js";
 
 /** Derived state only: every value can be rebuilt from the committed event prefix. */
 export function projectRequestState(events: StoredEvent[]) {
@@ -20,13 +22,14 @@ export function projectRequestState(events: StoredEvent[]) {
 
 /** Compatibility view for simple answer adapters; Pi uses replayEvents instead. */
 export function projectDeliveredChat(events: StoredEvent[]): Message[] {
+  const excluded = memoryExclusions(events);
   events = filterMemoryEvents(events);
   const reset = events.findLastIndex((event) => event.type === "reset" || event.type === "conversation_reset");
   const generated = new Map<string, string>();
   const messages: Message[] = [];
   for (const event of events.slice(reset + 1)) {
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
-      messages.push({ role: "user", text: event.text,
+      messages.push({ role: "user", text: userInputText(event, excluded),
         ...(Array.isArray(event.images) ? { images: event.images as NonNullable<Message["images"]> } : {}) });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId &&
       typeof event.text === "string") {
