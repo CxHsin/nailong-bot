@@ -27,6 +27,9 @@ export function memoryNodesForReply(events: StoredEvent[], userId: number, messa
   const requests = new Set<string>();
   const sources = new Set(events.flatMap((event, index) => {
     if (event.type === "message" && event.role === "user" && event.messageId === messageId) return [eventIdentity(event, index)];
+    if (event.type === "delivery_succeeded" && event.channel === "telegram" && event.telegramMessageId === messageId && event.requestId) {
+      requests.add(event.requestId); return [];
+    }
     if (event.type !== "telegram_delivery_succeeded" || event.telegramMessageId !== messageId) return [];
     const source = events.find((item) => item.type === "text_finalized" && item.textSegmentId === event.textSegmentId &&
       item.requestId === event.requestId && ["result", "final"].includes(String(item.contentKind)));

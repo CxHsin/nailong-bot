@@ -31,7 +31,7 @@ function humanEvent(event: HostEvent): string {
   return event.type;
 }
 
-export function createCliChannel(options: { host: { submit(input: HostInputLike): RunHandle }; actor: Actor; stdout: (line: string) => void; stderr: (line: string) => void; defaultConversationId?: string }) {
+export function createCliChannel(options: { host: { submit(input: HostInputLike): RunHandle }; actor: Actor; stdout: (line: string) => void; stderr: (line: string) => void; defaultConversationId?: string; onDelivered?: (event: HostEvent) => Promise<void> }) {
   const sessionId = options.defaultConversationId ?? `cli:${options.actor.id}`;
   async function inputParts(text: string | undefined, imagePath?: string): Promise<ContentPart[]> {
     const parts: ContentPart[] = [];
@@ -45,7 +45,10 @@ export function createCliChannel(options: { host: { submit(input: HostInputLike)
     return parts;
   }
   async function consume(handle: RunHandle, json: boolean): Promise<HostEvent> {
-    for await (const event of handle.events()) options.stdout(json ? JSON.stringify(jsonEvent(event)) : humanEvent(event));
+    for await (const event of handle.events()) {
+      options.stdout(json ? JSON.stringify(jsonEvent(event)) : humanEvent(event));
+      if (event.type === "run_succeeded") await options.onDelivered?.(event);
+    }
     return handle.done;
   }
   async function send(text: string | undefined, settings: { json?: boolean; conversationId?: string; imagePath?: string } = {}): Promise<HostEvent> {

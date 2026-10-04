@@ -42,6 +42,7 @@ export async function createPiAgent(options: {
   memoryRecall?: Partial<RecallConfig>;
   memoryBootstrap?: boolean;
   memoryMode?: MemoryMode;
+  now?: () => Date;
 }) {
   let tinyfish: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   if (options.tinyfishKey) {
@@ -94,6 +95,10 @@ export async function createPiAgent(options: {
           ...(memory && request ? memoryTools(memory, request.id) : []),
           ...(tinyfish?.tools ?? [])], sessionManager: manager,
       });
+      if (request?.conversationId) {
+        // The SDK adds a changing date to custom prompts. Keep only its stable cwd here.
+        session.agent.state.systemPrompt = `${systemPrompt}\nCurrent working directory: ${options.dataDir.replace(/\\/g, "/")}`;
+      }
       const execution = await attachExecution(session, model, options, botPrompt, systemPrompt, request, memory);
       if (request && typeof userId === "number" && options.memoryBootstrap !== false && options.memoryMode !== "dense")
         void bootstrap.start(request.log, userId, request.id, { systemPrompt: session.agent.state.systemPrompt, messages: [], tools: session.agent.state.tools });
