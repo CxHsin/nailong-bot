@@ -8,6 +8,7 @@ type 为 status、result 或 final。status 是临时处理状态；result 是�
 status 简短说明当前行动的目的、必要理由或有依据的新发现；有实质变化时才更新，不逐个复述工具名或重复“处理中”。短任务可以直接给 final，不必先写 status。
 status 和 result 表示继续处理，可以同时调用工具。开始后续工具工作前结束当前成果文字；工具参数仍遵守各自 schema。允许只调用工具而没有文字。
 final 必须没有工具调用；已有完整答案、明确阻碍或需要用户澄清时用 final。最终正文无需重复阶段性成果，也不要求接续前文。
+单对象输出写完 text 后，必须实际输出闭合双引号和右花括号；正文结束不等于 JSON 对象已闭合。
 模型不指定 Telegram 排版、HTML、消息数量或拆分位置；只输出 Markdown 正文。运行层处理长内容。
 示例：{"type":"status","text":"我会核对资料。"}；{"type":"result","text":"已确认的阶段性结论。"}；{"type":"final","text":"结论如下。"}。
 依据实际工具结果作答，不把行动承诺当作已完成事实。运行层协议反馈用于纠正格式或继续执行，不是真实用户的新请求。`;
@@ -39,6 +40,16 @@ function parseSingleText(raw: string): StructuredText {
   if (Object.keys(object).length !== 2 || !["status", "result", "final", "progress"].includes(String(object.type)) ||
     typeof object.text !== "string" || !object.text.trim()) throw new Error("文字协议需要 type 和非空 text，且不允许其他字段");
   return { type: object.type as StructuredText["type"], text: object.text };
+}
+
+/** A normal Provider stop may omit only the single final envelope's closing delimiters. */
+export function recoverFinalEnvelope(raw: string, stopReason: string, hasToolCalls: boolean): StructuredText | undefined {
+  if (stopReason !== "stop" || hasToolCalls ||
+    !/^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"text"\s*:\s*"/.test(raw)) return;
+  for (const suffix of ['"}', '}']) {
+    try { return parseSingleText(raw + suffix); }
+    catch { /* Never alter text, remove fields or synthesize append-frame completion. */ }
+  }
 }
 
 /** Validated frames let the runtime commit complete structure before generation finishes. */

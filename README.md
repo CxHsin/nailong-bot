@@ -107,6 +107,8 @@ system 提示词与工具定义保持稳定，当前日期及自动记忆引文�
 
 执行协议要求模型输出 status、result 或 final JSON；长文字可用追加帧。运行层校验格式、持久化模型和工具事件，纠正协议错误，并用停滞保护限制持续无进展的调用。模型的临时文本快照经 onProgress 进入 Host 活动流；已校验的阶段成果随最终正文正式发送。被拒绝的预览会撤回，不作为成果交付。
 
+Provider 正常结束、没有工具调用且单对象 final 仅缺末尾双引号／右花括号时，运行层可补齐外壳并记录修复；正文与原始模型记录保持不变。长度截断、未完成转义、多余字段和未结束追加帧仍拒绝。见 [#79](https://github.com/CxHsin/nailong-bot/issues/79)。
+
 UI Projection 只使用文本快照、撤回和工具活动三种实时更新，不再维护独立的 Progress pipeline 或 quiet／normal／verbose 模式。Telegram 仅保留当前说明和工具活动，每 15 秒刷新仍在执行的同一草稿；运行终态到达后停止刷新，再发送正式消息。CLI 人类模式显示完成的说明和工具事实，JSON 模式保留实时快照。此简化见 [#78](https://github.com/CxHsin/nailong-bot/issues/78)；它保留模型上下文与 UI 的隔离，也不公开原始 reasoning。
 
 `.env`、`data/` 和 `tinyFish.txt` 被 Git 忽略；运行数据可能包含图片、私人文件和工具参数。
