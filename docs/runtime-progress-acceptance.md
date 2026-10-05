@@ -31,4 +31,24 @@ Earlier prompt revisions sometimes emitted English tool commentary or inferred m
 
 **Telegram client acceptance is pending a named test chat and explicit sending authorization.** It must check actual streamed drafts, separate fixed progress messages, visible titles and expandable quotes, fallback on unsupported clients, long code/table/Unicode content on mobile and independent final answers.
 
-No production Bot restart, deployment, source migration or live message was performed. #83 and #84 remain open until the client acceptance is recorded. Source stores are retained by the migration implementation; actual production cutover requires stopping the existing writer first.
+At the initial PR acceptance, no production Bot restart, deployment, source migration or live message had been performed. #83 and #84 remain open until the client acceptance is recorded. The later authorized local handover is recorded below.
+
+## Authorized local handover — 2026-10-05
+
+Follow-up #86 fixes the startup failure after #85: `runtime.sqlite` was a zero-byte placeholder, but file existence alone was treated as a second competing event source. Source selection now verifies empty placeholders, equivalent copies and complete identity/content prefixes; truly divergent histories stop migration. `npm run migrate` provides an offline backup/verification command.
+
+The user explicitly authorized stopping the old Bot and migrating. The old process (PID 16116) was stopped. A complete local backup preceded the handover; no original source was renamed, deleted or rewritten.
+
+| Check | Actual result |
+| --- | --- |
+| Primary history | `events.sqlite`: 4,183 events |
+| Other retained sources | `runtime.sqlite`: empty; `events.jsonl`: 128 events, verified full payload prefix |
+| Destination | `runtime-v2.sqlite`: all 4,183 events, same IDs/order and original content |
+| Tool archives | 136 checked successfully |
+| Association references | 5,927 checked; 349 historical delivery attempts had no page record, all associated with old draft snapshots; retained as reported exceptions, never inferred as formal delivery |
+| History and memory | Two conversations replay successfully (340 projected messages); 45 memory nodes preserved; all 47 learning facts copied; scoped learning/exclusion/initialization verified; derived memory cache revalidated |
+| Operational command | `npm run migrate` completed and reopening did not duplicate events; migration invoked zero models and sent zero messages |
+| Restart | New Bot PID 38280 reached the Telegram receiving state; no multiple-source error or polling conflict |
+| Verification | Migration 10/10, full suite 258/258, typecheck/build/diff check passed; Standards and Spec rechecks found no substantive defect |
+
+Local backup and full report: `data/backups/runtime-handover-2026-10-05T09-38-55-420Z/`; the maintained command also produced `data/backups/runtime-handover-2026-10-05T09-44-40-095Z/`. Timestamps in these names are UTC. Source files and original archive paths remain valid. The Bot is running using the new store; native Telegram message/rendering acceptance still requires the separate authorized client exercise.

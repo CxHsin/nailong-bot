@@ -93,7 +93,7 @@ Runtime Event Log 是持久运行事实源。模型步骤、工具结果、运�
 
 | 数据 | 默认路径 | 用途 |
 | --- | --- | --- |
-| 运行事实 | `data/events.sqlite` | 用户输入、模型步骤、工具派发／结果、运行终态及交付记录 |
+| 运行事实 | `data/runtime-v2.sqlite` | 用户输入、模型步骤、工具派发／结果、运行终态及交付记录；停旧 Bot 后运行 `npm run migrate` 备份迁移，旧库保留 |
 | 旧事件日志 | `data/events.jsonl` | 启动时校验并幂等导入 SQLite，原文件保留 |
 | 工具结果归档 | `data/tool-results/` | 完整工具输出及校验信息，供 read 分段取回 |
 | 记忆与向量索引 | `data/memory.sqlite`、`data/embeddings.sqlite` | 当前 Akasha 记忆的派生缓存，可由原始事实和 embedding 服务重建 |
