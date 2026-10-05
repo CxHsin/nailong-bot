@@ -9,6 +9,7 @@
     "agent": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "chat": "node --env-file-if-exists=.env --import tsx src/cli/main.ts chat",
     "send": "node --env-file-if-exists=.env --import tsx src/cli/main.ts send",
+    "migrate": "node --env-file-if-exists=.env --import tsx src/cli/migrate-runtime.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "build": "tsc"
