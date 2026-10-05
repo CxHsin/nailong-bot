@@ -20,7 +20,7 @@ function contextMessages(replay: Replay, checkpoint?: Checkpoint): Message[] {
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
-  conversationId?: string; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
+  conversationId?: string; structured?: boolean; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
   const store = createCheckpointStore(options.dataDir, "structured-text-v1", options.conversationId);
   return {
     async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
@@ -28,7 +28,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       const ratio = resolved.ratio;
       const budget = resolved.budget - reserveTokens;
       const replayStarted = performance.now();
-      const replay = await replayEvents(options.log, options.requestId, model, true);
+      const replay = await replayEvents(options.log, options.requestId, model, options.structured ?? true);
       const replayMs = performance.now() - replayStarted;
       const processPeakRssBytes = process.resourceUsage().maxRSS * 1024;
       let checkpoint = await store.load(replay.boundary, replay.events);

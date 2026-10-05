@@ -6,6 +6,7 @@ export type Update = { userId: number; chatType: string; text?: string; images?:
 export type Message = { role: "user" | "assistant"; text: string; images?: ImageContent[] };
 export type Request = { id: string; log: RuntimeLog; conversationId?: string; botPrompt?: string; botPromptVersion?: string;
   onProgress?: (progress: RunProgress) => void;
+  signal?: AbortSignal;
   /** Compatibility callback for the old log-backed Telegram application. */
   onText?: (textSegmentId: string) => Promise<void> };
 export class DeliveryRejected extends Error {

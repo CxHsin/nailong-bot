@@ -29,7 +29,8 @@ function humanEvent(event: HostEvent): string | undefined {
   if (event.type === "progress") {
     const progress = event.progress;
     if (!progress) return event.text;
-    if (progress.type === "text") return progress.finalized && progress.kind !== "final" ? progress.text : undefined;
+    if (progress.type === "text") return progress.finalized && progress.kind !== "final" ?
+      `${progress.source === "progress-model" ? "运行摘要：" : ""}${progress.text}` : undefined;
     if (progress.type === "discard") return undefined;
     return `[tool:${progress.state}] ${progress.name}`;
   }

@@ -19,7 +19,8 @@ export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId
   } catch (error) {
     options.reportFailure(new Error("Telegram 命令菜单同步失败；聊天继续启动，下次启动将重试。", { cause: error }));
   }
-  const projection = createTelegramHostProjection({ ...options.transport, chatId: ownerId, onDelivered: options.onDelivered });
+  const projection = createTelegramHostProjection({ ...options.transport, chatId: ownerId, onDelivered: options.onDelivered,
+    deliver: (event, content) => options.host.deliverContent(event, content, options.transport) });
   const input = registerTelegramInput(bot, { ownerId, botUsername: bot.botInfo.username, download: options.download, reportFailure: options.reportFailure,
     handle: async (update, started) => {
       const image = update.images?.[0];

@@ -41,7 +41,7 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agentOptions = { dataDir: dir, promptFile, deepseekKey: "test",
+  const agentOptions = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}`, ...options };
   let agent = await createPiAgent(agentOptions);
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));

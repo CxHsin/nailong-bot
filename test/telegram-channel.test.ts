@@ -28,6 +28,28 @@ function controlledRun(runId: string) {
 
 const drain = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+test("slow formal progress keeps subsequent drafts timely, with distinct segment identities and ordered final delivery", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const drafts: Array<{ id: number; text: string }> = []; const sent: string[] = [];
+  const projection = createTelegramHostProjection({ chatId: 42,
+    draft: async (id, text) => { drafts.push({ id, text }); },
+    send: async (text) => { sent.push(text); if (text === "第一段") await blocked; return sent.length; } });
+  const run = controlledRun("slow-formal"); const consume = projection.consume(run.handle);
+  run.push("progress", { progress: { type: "text", segmentId: "p1", kind: "progress", text: "第一段", finalized: false } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  run.push("progress", { progress: { type: "text", segmentId: "p1", kind: "progress", text: "第一段", finalized: true, formal: true } });
+  run.push("progress", { progress: { type: "text", segmentId: "f", kind: "final", text: "最终草稿", finalized: false } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.equal(drafts.at(-1)?.text, "最终草稿");
+  assert.notEqual(drafts.at(-1)?.id, drafts[0]?.id);
+  run.push("run_succeeded", { result: { text: "完整答案" } }); await drain();
+  assert.deepEqual(sent, ["第一段"]);
+  release(); await consume;
+  assert.deepEqual(sent, ["第一段", "完整答案"]);
+});
+
 test("Telegram input maps private identity to a stable Host conversation and ContentParts", () => {
   assert.equal(telegramConversationId(42), "telegram:private:42");
   const input = normalizeTelegramInput({ fromId: 42, chatId: 42, chatType: "private", messageId: 7, text: "看图", image: { mimeType: "image/jpeg", data: "aW1n" } });

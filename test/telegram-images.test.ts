@@ -46,7 +46,7 @@ test("actual Telegram photo updates keep caption and images through model calls,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const options = { dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: "http://127.0.0.1:" + address.port };
+  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: "http://127.0.0.1:" + address.port };
   const inputs: Array<ReturnType<typeof registerTelegramInput>> = [];
   let agent = await createPiAgent(options);
   t.after(() => closeFixture({ server, dir, shutdown: async () => {

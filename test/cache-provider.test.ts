@@ -27,7 +27,7 @@ test("real Provider requests preserve prefixes across dates, scope Conversations
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   let now = new Date("2026-10-04T00:00:00Z");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
     memoryBootstrap: false, now: () => now });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
@@ -75,7 +75,7 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 7600 });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 7600 });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   for (let index = 0; index < 6; index++) {
@@ -117,7 +117,7 @@ test("actual memory prefixes survive new recall and tools, while forgetting remo
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   for (const [id, text] of [["old-secret", "暗号是 SECRET-ALPHA"], ["old-color", "颜色是 BLUE-BETA"]]) {
@@ -169,7 +169,7 @@ test("current input keeps its date and memory snapshot after a long tool chain i
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
     memoryBootstrap: false, contextWindow: 6000, now: () => new Date("2026-10-04T00:00:00Z") });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);

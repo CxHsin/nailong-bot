@@ -8,6 +8,10 @@ import type { Message, Request, Update } from "./app-types.js";
 import { cacheStatistics, cacheReportText } from "../runtime/cache-statistics.js";
 import { commitMemoryLearning } from "./memory-learning.js";
 import { cacheReplyContext } from "../runtime/reply-context.js";
+import { deliverContent, type DeliveryContent, type ContentTransport } from "../runtime/content-delivery.js";
+import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOptions, type ProgressSummaryGenerator } from "./progress-summaries.js";
+import { recordInterruptedRuns } from "../runtime/startup-recovery.js";
+import { projectTimeline } from "../runtime/timeline.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
@@ -18,8 +22,9 @@ export const AGENT_COMMANDS = [
   { command: "memory", description: "诊断查阅原始轮次日志", usage: "/memory log 节点引用 [字符位置]" },
 ] as const;
 
-type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; agent: {
+type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
+  summarizeProgress?: ProgressSummaryGenerator;
   memoryVector?: (text: string) => number[] | undefined;
 } };
 
@@ -55,6 +60,7 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
 
 /** Shared production Host for Telegram and CLI, including queued controls. */
 export function createAgentHost(options: AgentHostOptions) {
+  progressSummaryOptions(options.progressSummary);
   const host = createHost({ log: options.log, execute: async (input, context) => {
     const log = conversationLog(options.log, input.conversationId);
     if (input.metadata?.channel === "telegram" && typeof input.metadata.messageId === "number" &&
@@ -77,27 +83,42 @@ export function createAgentHost(options: AgentHostOptions) {
     const results = new Map<string, string>();
     const history = await log.read();
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
+    let summaries: ReturnType<typeof startProgressSummaries> | undefined;
+    const request: Request = { id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
+      onProgress: (progress) => {
+        if (progress.type === "text" && progress.source !== "progress-model") summaries?.primaryText(progress.finalized);
+        if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);
+        if (progress.type === "discard") results.delete(progress.segmentId);
+        context.emit({ type: "progress", progress });
+      }, botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
+      botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined };
+    if (options.agent.summarizeProgress) summaries = startProgressSummaries(request, text, options.agent.summarizeProgress, options.progressSummary);
     try {
-      const final = await options.agent.answer(projectDeliveredChat(history), { id: context.runId, log, conversationId: input.conversationId,
-        onProgress: (progress) => {
-          if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);
-          if (progress.type === "discard") results.delete(progress.segmentId);
-          context.emit({ type: "progress", progress });
-        },
-        botPrompt: typeof configured?.text === "string" ? configured.text : undefined,
-        botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined });
+      const final = await options.agent.answer(projectDeliveredChat(history), request);
+      summaries?.stop();
       // A protocol final may omit previously completed results; they must survive the draft.
       const answer = [...results.values(), final].join("\n\n");
       // Preserve the generated final separately from the Channel's assembled presentation.
       await log.append({ type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
+      const finalized = (await log.read()).findLast((event) => event.type === "text_finalized" && event.requestId === context.runId && event.contentKind === "final");
       return { text: answer, resultId: context.runId, kind: "model",
+        ...(finalized ? { finalSegmentId: finalized.textSegmentId } : {}),
         ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
       await log.append({ type: "request_failed", requestId: context.runId, error: String(error) });
       throw error;
+    } finally {
+      summaries?.stop();
     }
   } });
-  return { ...host, async recordDelivery(event: HostEvent, delivery: { channel: "telegram" | "cli"; telegramMessageId?: number }) {
+  return { ...host,
+    recoverInterrupted: () => recordInterruptedRuns(options.log),
+    async readTimeline(conversationId: string) { return projectTimeline(await conversationLog(options.log, conversationId).read()); },
+    async deliverContent(event: HostEvent, content: DeliveryContent, transport: ContentTransport) {
+      return deliverContent(conversationLog(options.log, event.conversationId), event.runId,
+        conversationUserId(event.conversationId), content, transport);
+    },
+    async recordDelivery(event: HostEvent, delivery: { channel: "telegram" | "cli"; telegramMessageId?: number }) {
     if (event.type !== "run_succeeded") return;
     const log = conversationLog(options.log, event.conversationId);
     await log.append({ type: "delivery_succeeded", runId: event.runId, requestId: event.runId,

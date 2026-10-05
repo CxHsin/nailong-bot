@@ -61,7 +61,7 @@ test("SQLite commits Pi tool facts before the next model step", { timeout: 60_00
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const replies: string[] = [];
@@ -99,7 +99,7 @@ test("private Telegram sees committed progress before tool work and final text i
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const messages = new Map<number, string>();
@@ -149,7 +149,7 @@ test("committed progress remains in context when tool dispatch fails", { timeout
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   let fail = true;
@@ -266,7 +266,7 @@ for (const fault of ["model_step_started", "text_snapshot", "tool_dispatch"] as 
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
       modelBaseUrl: `http://127.0.0.1:${address.port}` });
     t.after(() => agent.close());
     const faulty = { ...log, append: async (event: Parameters<typeof log.append>[0]) => {

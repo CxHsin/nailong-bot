@@ -26,7 +26,7 @@ test("a normally stopped final with only a missing closing envelope reaches Tele
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
@@ -58,7 +58,7 @@ test("raw whitespace in model JSON strings reaches Telegram without retries and 
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
@@ -162,7 +162,7 @@ test("real Pi publishes a literal multiline preview before the final envelope cl
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const host = createAgentHost({ dataDir: dir, promptFile, log: createRuntimeLog(dir), agent });
   const run = host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "多行正文" });

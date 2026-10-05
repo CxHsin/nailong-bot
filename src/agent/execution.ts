@@ -13,6 +13,7 @@ import { estimateInput, modelInputBudget } from "../context/input-budget.js";
 import { recordModelUsage } from "./model-usage.js";
 import { projectProviderContext } from "../context/provider-aware.js";
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
+import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
 
 function deepseekCacheOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
   return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
@@ -27,7 +28,9 @@ function deepseekCacheOptions(options?: SimpleStreamOptions): SimpleStreamOption
   } };
 }
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3" }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+  const plain = options.outputProtocol !== "json-text-v2" && !request?.onText;
+  const protocolVersion = plain ? PLAIN_TEXT_PROTOCOL : OUTPUT_PROTOCOL_VERSION;
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
   let dispatchedThisStep = false;
   const previousBeforeTool = session.agent.beforeToolCall;
@@ -70,7 +73,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   };
   let step = 0;
   await request?.log.append({ type: "prompt_snapshot", requestId: request.id,
-    protocolVersion: OUTPUT_PROTOCOL_VERSION, botPrompt, systemPrompt, botPromptVersion: request.botPromptVersion ?? createHash("sha256").update(botPrompt).digest("hex"),
+    protocolVersion, botPrompt, systemPrompt, botPromptVersion: request.botPromptVersion ?? createHash("sha256").update(botPrompt).digest("hex"),
     systemPromptHash: createHash("sha256").update(systemPrompt).digest("hex") });
   const providerStream = session.agent.streamFn;
   const identityEvents = request?.conversationId ? await request.log.read() : [];
@@ -83,7 +86,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const user = request && (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user");
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
-    conversationId: request.conversationId,
+    conversationId: request.conversationId, structured: !plain,
     ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
     summarize: async (context, maxTokens) => {
       const callId = randomUUID();
@@ -99,6 +102,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   });
   let snapshot = request?.conversationId ? (await request.log.read()).find((event) => event.type === "context_input_snapshot" && event.requestId === request.id) : undefined;
   session.agent.streamFn = async (selected, context, streamOptions) => {
+    let activePreview: string | undefined;
     try {
       if (request?.conversationId) context = { ...context, systemPrompt: stableSystemPrompt(systemPrompt, options.dataDir) };
       if (projectionFailure) throw projectionFailure;
@@ -129,7 +133,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
-        await request?.log.append({ type: "model_step_started", requestId: request.id, step: ++step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
+        activePreview = textSegmentId;
+        if (++step > 128) throw new Error("模型超过本轮执行步数上限");
+        await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
         const source = await providerStream(selected, combined.context, deepseekCacheOptions({ ...streamOptions,
@@ -147,7 +153,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             let preview: ReturnType<typeof previewStructuredText>;
             let validatedPrefix = false;
             let prefixChanged = false;
-            try {
+            if (plain) preview = { type: "progress", text: rawPreview };
+            else try {
               const frames = readOutputFrames(rawPreview);
               const partial = previewStructuredText(frames.rest);
               if (frames.prefix && (!partial || partial.type === frames.prefix.type)) {
@@ -179,7 +186,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           await request.log.append({ type: "memory_presented", requestId: request.id,
             modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, tokens: combined.tokens, budget: reserve });
         await request?.log.append({ type: "model_message", requestId: request.id, step,
-          modelStepId, protocolVersion: OUTPUT_PROTOCOL_VERSION, message });
+          modelStepId, protocolVersion, message });
         await request?.log.append({ type: "model_step_completed", requestId: request.id,
           step, modelStepId, stopReason: message.stopReason });
         if (attempt === 0 && message.stopReason === "error" && !producedOutput && !message.content.length &&
@@ -194,6 +201,21 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         if (message.stopReason === "length") throw new Error("模型协议输出被截断，本轮未完成");
         const raw = message.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
         const toolCalls = message.content.filter((c) => c.type === "toolCall");
+        if (plain) {
+          if (!raw.trim() && !toolCalls.length) throw new Error("模型没有提交答复或工具调用");
+          if (raw.trim()) {
+            const kind = toolCalls.length ? "progress" : "final";
+            await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+              textSegmentId, contentKind: kind, text: raw, protocolVersion, source: "execution" });
+            request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind, text: raw, finalized: true, formal: kind !== "final", source: "execution" });
+            if (kind === "final") finalText = raw;
+          }
+          for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
+            toolCallId: part.id, toolName: part.name, args: part.arguments });
+          const response = createAssistantMessageEventStream();
+          response.push({ type: "done", reason: message.stopReason, message });
+          return response;
+        }
         let parsed: ReturnType<typeof parseStructuredText> | undefined;
         let invalid: string | undefined;
         let repairedEnvelope = false;
@@ -249,6 +271,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       }
       throw new Error("模型上下文溢出重试失败");
     } catch (error) {
+      if (activePreview) request?.onProgress?.({ type: "discard", segmentId: activePreview });
       projectionFailure ??= error instanceof Error ? error : new Error(String(error));
       const response = createAssistantMessageEventStream();
       const failed = assistantText("", selected);

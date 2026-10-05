@@ -112,7 +112,7 @@ async function modelFixture(t: TestContext, responses: Array<{ type: string; tex
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: "http://127.0.0.1:" + address.port });
   t.after(() => agent.close());
   const log = createSqliteRuntimeLog(dir);
@@ -188,7 +188,7 @@ test("streaming keeps full content while bounding snapshots and full history rea
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: "http://127.0.0.1:" + address.port });
   t.after(() => agent.close());
   const sent: string[] = [];

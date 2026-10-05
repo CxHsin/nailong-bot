@@ -28,6 +28,14 @@ _Avoid_: Telegram message payload
 An ordered semantic event describing model-visible summary, runtime fact, or run state for channel projection; it is not automatically part of model context.
 _Avoid_: status string
 
+**Run Summary**:
+A short, read-only explanation produced by an auxiliary model from committed runtime facts during a silent active Run. Its provenance is recorded; valid settled summaries may enter Context Projection, but never Akasha memory content.
+_Avoid_: reasoning, execution result
+
+**Settled Text**:
+An assistant text unit committed after a normal model step. Text accompanying tool calls is progress; text ending a step without tool calls is the final answer. Draft deltas are previews rather than Settled Text.
+_Avoid_: delivered message (settlement does not prove delivery)
+
 **Context Projection**:
 The Provider-aware transformation from durable runtime records into the exact model input items for one request.
 _Avoid_: chat history (which includes records that may never be sent to a model)

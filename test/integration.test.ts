@@ -26,7 +26,7 @@ test("structured progress continues within the same request", async () => {
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const dir = await mkdtemp(join(tmpdir(), "pi-continuation-"));
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   try {
     const log = createRuntimeLog(dir);
@@ -83,7 +83,7 @@ test("Telegram entry uses real pi to select MCP search and resumes from the even
   assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
   const dir = await mkdtemp(join(tmpdir(), "pi-integration-"));
-  const options = { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", tinyfishKey: "test", modelBaseUrl: url, tinyfishUrl: `${url}/mcp` };
+  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", tinyfishKey: "test", modelBaseUrl: url, tinyfishUrl: `${url}/mcp` };
   const replies: string[] = [];
   let agent: Awaited<ReturnType<typeof createPiAgent>> | undefined;
   try {
@@ -140,7 +140,7 @@ for (const scenario of ["conflict", "invalid", "idle", "alternating", "protected
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const address = server.address(); assert.ok(address && typeof address !== "string");
-    const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+    const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
       modelBaseUrl: `http://127.0.0.1:${address.port}` });
     t.after(() => agent.close());
     const log = createRuntimeLog(dir); const replies: string[] = [];

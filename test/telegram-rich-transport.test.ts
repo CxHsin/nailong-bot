@@ -23,6 +23,20 @@ test("Rich transport sends original Markdown for drafts and final messages", asy
   ]);
 });
 
+test("formal progress pages keep folding titles, Unicode and code intact with a full-content fallback", async () => {
+  const sent: string[] = [];
+  const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {}, draftHtml: async () => {},
+    sendHtml: async (_chat, text) => { if (text.includes("expandable")) throw Object.assign(new Error("unsupported blockquote entity"), { error_code: 400 }); sent.push(text); return sent.length; } });
+  const text = "```ts\n" + "const 变量 = '😀';\n".repeat(600) + "```\n\n" + source;
+  const pages = transport.plan({ id: "p", text, kind: "progress", source: "progress-model" });
+  assert.ok(pages.length > 1);
+  assert.ok(pages.every((page) => page.length <= 4096 && page.startsWith("<b>运行摘要</b>\n<blockquote expandable>")));
+  assert.equal(await transport.sendProgress(text, 42, "progress-model"), 1);
+  assert.deepEqual(sent, pages.map((page) => page.replace("<blockquote expandable>", "<blockquote>")));
+  assert.equal(sent.join("").split("😀").length - 1, 600);
+  assert.ok(sent.every((page) => (page.match(/<pre>/g) ?? []).length === (page.match(/<\/pre>/g) ?? []).length));
+});
+
 test("Rich transport falls back once after an unavailable method", async () => {
   const richCalls: string[] = [];
   const htmlCalls: Array<{ type: string; text: string }> = [];

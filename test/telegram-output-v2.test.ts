@@ -70,7 +70,7 @@ test("model status stays temporary, results are separate, and the final draft ap
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const sent: string[] = [];
@@ -167,7 +167,7 @@ test("the real model stream can commit validated frames before the response fini
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const app = createApp({ ownerId: 42, dataDir: dir, log: createSqliteRuntimeLog(dir), answer: agent.answer,
@@ -358,7 +358,7 @@ test("malformed append frames cannot send unvalidated body or execute their tool
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test",
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
   t.after(() => agent.close());
   const app = createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer,
