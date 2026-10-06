@@ -7,7 +7,7 @@ Telegram 和 CLI `chat` / `send` 共用以下 Host 命令：
 | 命令 | 用途 |
 | --- | --- |
 | `/help` | 查看实际支持的命令与参数 |
-| `/kvcache` | 查看当前 Conversation 最近 4 次模型 Run 和累计缓存用量 |
+| `/kvcache` | 即时查看最近四次已结束的模型 Run、当前运行和累计缓存用量 |
 | `/reset` | 等待前面的工作结束，再开始新模型上下文；保留原始日志和累计用量 |
 | `/prompt` | 查看当前 Conversation 的 bot 提示词 |
 | `/prompt set 提示词` | 设置提示词，下一次普通 Run 生效 |
@@ -18,15 +18,23 @@ Telegram 和 CLI `chat` / `send` 共用以下 Host 命令：
 
 未知命令和错误参数返回帮助或用法。纯文字命令不生成模型 token；图片消息的 caption 仍作为普通多模态输入处理。Telegram 支持 `/kvcache@当前bot`，发送给其他 bot 的命令不会执行。CLI 使用同一个 `--conversation-id` 可查询同一 Conversation。
 
+`/kvcache` 是独立只读查询，不等待当前模型任务结束；同类查询仍按提交顺序处理，普通任务及 `/reset`、`/prompt`、`/forget` 等修改命令继续串行排队。每次查询读取一份日志快照，重新查询可取得新返回的 usage；已发送报表不会自动刷新，回复引用的旧报表也保留原查询数据。
+
 ## `/kvcache` 的统计口径
 
 - 最近 4 次：当前 Conversation 实际发起过执行模型调用、且已结束的 Run，按持久终态顺序从新到旧排列；包含失败和取消，但不包含控制命令和尚未调用模型就取消的 Run。
+- 当前运行单独占第五格：展示已返回的执行用量，尚未返回的模型调用标为“待结算”；没有当前运行时明确显示空闲，不拿更早一轮补位。开始/结束时间及查询快照使用北京时间。
 - 每个 Run 汇总全部实际执行调用，包括工具迭代、协议纠正和真实重试。相同调用的恢复记录不会重复计数。
-- 显示命中、未命中和总输入 token。命中率为命中 token 总数除以输入 token 总数，使用 token 加权。
-- 缺少 Provider usage 的调用显示“数据缺失”和测量覆盖度，不能解释成零消耗。零输入的命中率显示“不可用”。
+- 每轮显示状态、开始/结束时间、命中、未命中和总输入 token，以及调用数、已测量、待结算和缺失数据。命中率为命中 token 总数除以输入 token 总数，使用 token 加权，不能平均每次调用的百分比。
+- SDK `cacheRead` 计 Hit；`input + cacheWrite` 计 Miss，新写入缓存也属于本次新处理输入。输出 token 不进入命中率分母。DeepSeek 通常没有 `cacheWrite`，仍按 SDK 已归一化的缓存字段统计。
+- 已结束却缺少有效 Provider usage 的调用显示“数据缺失”；运行中尚未返回的调用显示“待结算”，两者分开，不能解释成零消耗。明确测得零输入仍计入测量次数，但命中率显示“不可用”。中断运行不把未返回的调用永久标为待结算。
 - 摘要等辅助文本模型调用单独列出，不混作普通执行调用。Embedding 用量不在本功能范围内。
 - 累计基于 Runtime Log，与 reset、重启、Channel 切换无关；不同 Conversation 隔离。无法明确归属的旧调用不计入当前累计，并显示覆盖提示。
-- 当前报告以 token 计量；费用没有可靠估算依据时显示“不可用”，也不代表 Provider 账单。
+- 当前报告以 token 计量，不据此推断 Provider 账单。
+
+## 展示风格
+
+报表标题为“📊 【奶龙赛博反刍胃囊报表】”。正文保持轻松，但 Hit/Miss、token、待结算和缺失等字段使用准确名称；根据已测输入比例给一句有限规则短评，不额外调用模型，不把缓存命中率当作回答质量或用虚构数字填补缺失。默认完整显示四次已结束和当前运行的详情，执行与辅助累计在末尾。
 
 ## 缓存行为
 
@@ -35,3 +43,7 @@ DeepSeek 默认自动缓存重复输入前缀，属于 best effort。Host 稳定
 提示词变化、重置、遗忘和必要的上下文压缩仍会生效，可能使缓存前缀变化。本功能不提供缓存开关、服务端清空、保留时间设置或本地回答缓存，也不承诺固定命中率。
 
 相关设计和验收规格：[结论 #70](https://github.com/CxHsin/nailong-bot/issues/70)、[规格 #71](https://github.com/CxHsin/nailong-bot/issues/71)、[实现任务 #72](https://github.com/CxHsin/nailong-bot/issues/72)。
+
+实时与展示调整：[结论 #90](https://github.com/CxHsin/nailong-bot/issues/90)、[实现 #91](https://github.com/CxHsin/nailong-bot/issues/91)。`test/cache-report-live.test.ts` 验证 Host／Telegram／CLI 长任务中的即时查询、Provider 流结束前后的 usage、cacheWrite 口径、四次终态与当前分离、缺失和真实零值。测试用本地 Provider 及临时日志，没有发送真实 Telegram 消息；手机上的正式排版仍需客户端检查。
+
+2026-10-06 验证：全套 **270/270** 通过（153.20 秒，无跳过／取消），Host／Provider／Channel／引用专项 **28/28**，新增实时查询 **6/6**；类型检查、构建及 `git diff --check` 通过。已从现有事件库只读生成本地报表预览，未重启生产 Bot。

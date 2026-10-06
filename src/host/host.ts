@@ -80,8 +80,9 @@ export function normalizeHostInput(input: HostInputLike): HostInput {
     conversationId: input.conversationId, parts: normalizeContentParts(raw), ...(input.metadata ? { metadata: structuredClone(input.metadata) } : {}) };
 }
 
-export function createHost(options: { log: RuntimeLog; execute: HostExecutor }) {
+export function createHost(options: { log: RuntimeLog; execute: HostExecutor; readOnly?: (input: HostInput) => boolean }) {
   let queue = Promise.resolve();
+  let readQueue = Promise.resolve();
   const jobs = new Map<string, Job>();
   const appendNow = async (job: Job, type: HostEventType, extra: Partial<HostEvent> = {}): Promise<HostEvent> => {
     const event: HostEvent = { type, schemaVersion: HOST_EVENT_SCHEMA_VERSION, runId: job.runId,
@@ -133,7 +134,10 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor }) 
     const job: Job = { input, runId, queue: eventQueue, done, resolve, reject, controller: new AbortController(), sequence: 0, cancelled: false, eventTail: Promise.resolve() };
     jobs.set(runId, job);
     const submitted = append(job, "run_submitted", { parts: structuredClone(input.parts) });
-    queue = queue.then(() => run(job, submitted)).catch((error) => { reject(error); eventQueue.close(); });
+    const execute = (tail: Promise<void>) => tail.then(() => run(job, submitted)).catch((error) => { reject(error); eventQueue.close(); });
+    // Read-only diagnostics serialize with each other, without waiting for model work.
+    if (options.readOnly?.(input)) readQueue = execute(readQueue);
+    else queue = execute(queue);
     return { runId, conversationId: input.conversationId, events: () => eventQueue.iterate(), done, cancel: () => cancel(runId) };
   };
   const cancel = async (runId: string) => { const job = jobs.get(runId); if (!job) return false; job.cancelled = true; job.controller.abort(); return true; };

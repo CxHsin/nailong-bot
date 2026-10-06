@@ -15,7 +15,7 @@ import { projectTimeline } from "../runtime/timeline.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
-  { command: "kvcache", description: "查看最近四次运行与会话缓存统计", usage: "/kvcache" },
+  { command: "kvcache", description: "查看四次已结束及当前运行的缓存详情", usage: "/kvcache" },
   { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
   { command: "prompt", description: "查看、设置或恢复 bot 提示词", usage: "/prompt；/prompt set 提示词；/prompt reset" },
   { command: "forget", description: "排除指定旧轮次的记忆和上下文", usage: "/forget 节点引用；回复目标消息发送 /forget" },
@@ -58,10 +58,13 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   return { text: handled ? response : `用法：${definition.usage}`, kind: "control" };
 }
 
-/** Shared production Host for Telegram and CLI, including queued controls. */
+/** Shared production Host: queued model/mutation work and immediate cache diagnostics. */
 export function createAgentHost(options: AgentHostOptions) {
   progressSummaryOptions(options.progressSummary);
-  const host = createHost({ log: options.log, execute: async (input, context) => {
+  const host = createHost({ log: options.log,
+    readOnly: (input) => input.parts.every((part) => part.type === "text") &&
+      input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim() === "/kvcache",
+    execute: async (input, context) => {
     const log = conversationLog(options.log, input.conversationId);
     if (input.metadata?.channel === "telegram" && typeof input.metadata.messageId === "number" &&
       (await log.read()).some((event) => event.messageId === input.metadata!.messageId &&

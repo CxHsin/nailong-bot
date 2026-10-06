@@ -154,7 +154,7 @@ test("Host cache report uses four ended model Runs and weighted durable Conversa
   };
   assert.deepEqual(report.recent.map((run) => run.runId), [runs[4]!.id, runs[3]!.id, runs[2]!.id, runs[1]!.id]);
   assert.equal(report.recent[0]!.state, "failed");
-  assert.deepEqual(report.execution, { hit: 1300, miss: 300, input: 1600, hitRate: 0.8125, calls: 6, measured: 4 });
+  assert.deepEqual(report.execution, { hit: 1300, miss: 300, input: 1600, hitRate: 0.8125, calls: 6, measured: 4, pending: 0 });
   assert.equal(report.auxiliary.hit, 10);
   assert.equal(report.auxiliary.miss, 20);
   await send("/reset");

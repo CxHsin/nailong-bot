@@ -68,9 +68,16 @@ export function createCliChannel(options: { host: { submit(input: HostInputLike)
     catch (error) { options.stderr(`CLI error: ${String(error)}`); throw error; }
   }
   async function chat(lines: AsyncIterable<string> | Iterable<string>, settings: { json?: boolean; conversationId?: string } = {}) {
-    const results: HostEvent[] = [];
-    for await (const line of lines) results.push(await send(line, settings));
-    return results;
+    const results: Array<Promise<HostEvent>> = [];
+    let queue = Promise.resolve();
+    for await (const line of lines) {
+      // Keep reading stdin so a diagnostic can pass pending ordinary work.
+      const result = line.trim() === "/kvcache" ? send(line, settings) : queue.then(() => send(line, settings));
+      results.push(result);
+      if (line.trim() !== "/kvcache") queue = result.then(() => {}, () => {});
+      void result.catch(() => {}); // Preserve rejection for Promise.all without an unhandled turn.
+    }
+    return Promise.all(results);
   }
   return { send, chat, inputParts };
 }
