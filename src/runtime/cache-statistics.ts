@@ -76,29 +76,15 @@ function line(totals: CacheTotals): string {
   const rate = totals.hitRate === null ? "不可用" : `${(totals.hitRate * 100).toFixed(2)}%`;
   const number = (value: number) => value.toLocaleString("en-US");
   const missing = totals.calls - totals.measured - totals.pending;
-  return `缓存命中率：**${rate}**\n♻️ 命中（Hit）：${number(totals.hit)} token\n🆕 未命中（Miss）：${number(totals.miss)} token\n合计输入：${number(totals.input)} token\n` +
-    `模型调用：${totals.calls} 次；已测量 ${totals.measured} 次；待结算 ${totals.pending} 次` +
-    (missing ? `；数据缺失 ${missing} 次` : "") +
-    (totals.measured < totals.calls ? "\n以上数字只包含已返回的有效 usage，尚未齐全。" : "");
+  const notes = [totals.pending ? `待结算 ${totals.pending} 次` : "", missing ? `数据缺失 ${missing} 次` : ""].filter(Boolean);
+  return `缓存命中率：**${rate}**\n♻️ 命中（Hit）：${number(totals.hit)} token\n🆕 未命中（Miss）：${number(totals.miss)} token\n合计输入：${number(totals.input)} token` +
+    (notes.length ? `\n${notes.join("；")}，以上仅计已返回的有效用量。` : "");
 }
 
-export function cacheReportText(report: CacheReport, now = new Date()): string {
-  const time = (at: string) => Number.isNaN(Date.parse(at)) ? "时间未知" : new Date(at).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
-  const state: Record<string, string> = { succeeded: "已完成", failed: "失败", cancelled: "已取消", running: "进行中" };
-  const detail = (run: CacheRun) => `${run.startedAt ? `开始：${time(run.startedAt)}\n` : ""}${run.completedAt ? `结束：${time(run.completedAt)}\n` : ""}` +
-    `${line(run.execution)}${run.auxiliary.calls ? `\n辅助调用（摘要等）：\n${line(run.auxiliary)}` : ""}`;
-  const rows = report.recent.map((run, index) => `**${index + 1}. ${state[run.state] ?? run.state}**\n${detail(run)}`);
-  const selected = [...report.recent.map((run) => run.execution), ...(report.current ? [report.current.execution] : [])];
-  const input = selected.reduce((sum, run) => sum + run.input, 0);
-  const hit = selected.reduce((sum, run) => sum + run.hit, 0);
-  const quip = !input ? "🦖 还没收到能数的输入用量，胃囊暂时不报数。" : hit / input >= 0.8 ?
-    "🦖 熟悉的内容不少，这几轮少嚼了一些重复输入。" : hit / input >= 0.5 ?
-      "🦖 一半多是熟悉的味道，新内容也在认真嚼。" : "🦖 这几轮新内容比较多，奶龙还得认真嚼。";
-  return ["📊 **【奶龙赛博反刍胃囊报表】**", quip,
-    `查询快照：${time(now.toISOString())}（北京时间）。只数已返回的 usage；这条消息不会自动刷新，再发 /kvcache 就能查看新数据。`,
-    "**当前运行**", report.current ? `进行中 · 数据还在陆续结算\n${detail(report.current)}` : "当前没有进行中的模型运行。",
-    "**最近 4 次已结束的运行（新 → 旧）**", rows.length ? rows.join("\n\n") : "暂无已结束的模型运行。",
-    `**会话累计执行**\n${line(report.execution)}`, `**累计辅助调用（摘要等，单独算）**\n${line(report.auxiliary)}`,
-    "口径：KV cache 命中率 = Hit ÷（Hit + Miss），按输入 token 加权。工具迭代等每次调用的输入逐次累计；Miss 包含新写入缓存的输入，不包含输出 token。命中率不代表回答质量，token 统计也不代表账单。",
-    ...(report.unassignedCalls ? [`旧日志中 ${report.unassignedCalls} 次调用未能可靠归属，未计入当前 Conversation。`] : [])].join("\n\n");
+export function cacheReportText(report: CacheReport): string {
+  const runs = [...(report.current ? [report.current] : []), ...report.recent];
+  const ordinals = ["第五次", "第四次", "第三次", "第二次", "第一次"];
+  const states: Record<string, string> = { running: "当前运行 · 进行中", failed: "失败", cancelled: "已取消" };
+  const rows = runs.map((run, index) => `${index + 1}.${ordinals[index]}${states[run.state] ? `（${states[run.state]}）` : ""}\n${line(run.execution)}`);
+  return ["🦖 **【奶龙赛博反刍胃囊报表】**", rows.length ? rows.join("\n\n") : "暂无模型运行数据。"].join("\n\n");
 }
