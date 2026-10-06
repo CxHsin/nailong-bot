@@ -4,6 +4,7 @@ import { filterArchivedMemoryResult, filterMemoryToolResult } from "../runtime/m
 import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { RuntimeLog, ToolArchive, ToolResult } from "../runtime/runtime-types.js";
+import { webReadPath, webResult, webResultBody, webPageBody } from "../runtime/web-result.js";
 
 const MAX_RESPONSE_BYTES = 7500;
 
@@ -30,14 +31,24 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
       if (JSON.stringify(filtered.content) !== JSON.stringify(result.content)) return {
         content: [{ type: "text", text: "该归档包含已排除的记忆来源，默认读取不再展示；原始日志仍可通过 /memory log 明确诊断查阅。" }], details,
       };
-      const lines = readableResult(result).split("\n");
+      const webCursor = fragment?.match(/^web=(\d+)&sha256=([0-9a-f]{64})&byte=(\d+)$/);
+      const page = webCursor ? Number(webCursor[1]) : 0;
+      const selectedPage = page > 0 ? webResult(result)?.pages[page - 1] : undefined;
+      const webText = event.toolName === "web_fetch" && (!fragment || webCursor) ?
+        (page === 0 ? webResultBody(result) : selectedPage ? webPageBody(selectedPage) : undefined) : undefined;
+      if (webCursor && (webText === undefined || webCursor[2] !== archive.sha256)) throw new Error("网页归档续读位置已失效");
+      if (webText === "") {
+        if (webCursor && Number(webCursor[3]) !== 0) throw new Error("网页归档续读位置已失效");
+        return { content: [{ type: "text", text: "[网页正文为空]" }], details };
+      }
+      const lines = (webText ?? readableResult(result)).split("\n");
       const offset = args.offset ?? 1;
       const limit = args.limit ?? 120;
       if (!Number.isInteger(offset) || offset < 1 || !Number.isInteger(limit) || limit < 1) {
         throw new Error("归档 offset/limit 必须为正整数");
       }
       if (offset > lines.length) throw new Error(`Offset ${offset} is beyond end of archive (${lines.length} lines)`);
-      const cursor = fragment?.match(/^sha256=([0-9a-f]{64})&byte=(\d+)$/);
+      const cursor = webCursor ? [webCursor[0], webCursor[2], webCursor[3]] : fragment?.match(/^sha256=([0-9a-f]{64})&byte=(\d+)$/);
       if (fragment && (!cursor || cursor[1] !== archive.sha256)) throw new Error("归档续读位置已失效");
       const startLine = lines.slice(0, offset - 1).reduce((n, line) => n + Buffer.byteLength(line) + 1, 0);
       const endLine = Math.min(lines.length, offset + Math.min(limit, 120) - 1);
@@ -49,18 +60,19 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
       let stop = Math.min(end, start + 5000);
       while (stop < end && (body[stop]! & 0xc0) === 0x80) stop--;
       const make = (until: number) => {
-        const next = until < end ? `${path}#sha256=${archive.sha256}&byte=${until}` : undefined;
+        const next = until < end ? (webText !== undefined ? webReadPath(archive, page, until) : `${path}#sha256=${archive.sha256}&byte=${until}`) : undefined;
         const nextOffset = until === end && end < body.length ? endLine + 1 : undefined;
+        const nextLinePath = webText !== undefined ? webReadPath(archive, page, end + 1) : path;
         const text = body.subarray(start, until).toString("utf8") + (nextOffset ? "\n" : "") +
           (next ? `\n[继续读取：read({"path":${JSON.stringify(next)},"offset":${offset},"limit":${limit}})]` :
-            nextOffset ? `\n[继续读取：read({"path":${JSON.stringify(path)},"offset":${nextOffset},"limit":${limit}})]` : "");
+            nextOffset ? `\n[继续读取：read({"path":${JSON.stringify(nextLinePath)},"offset":${nextOffset},"limit":${limit}})]` : "");
         return { content: [{ type: "text" as const, text }], details };
       };
       while (stop > start && Buffer.byteLength(JSON.stringify(make(stop))) > MAX_RESPONSE_BYTES) {
         stop--;
         while (stop > start && (body[stop]! & 0xc0) === 0x80) stop--;
       }
-      if (stop <= start) throw new Error("归档读取响应元数据超过字节预算");
+      if (stop <= start && start < end) throw new Error("归档读取响应元数据超过字节预算");
       return make(stop);
     },
   } as ToolDefinition;

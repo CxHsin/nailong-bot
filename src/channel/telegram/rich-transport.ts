@@ -51,8 +51,8 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
   function plan(content: DeliveryContent): string[] {
     const pages = planTelegramText(content.text);
     if (content.kind === "final") return pages;
-    const title = content.source === "progress-model" ? "运行摘要" : "进展";
-    return pages.map((page) => `<b>${title}</b>\n<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
+    const heading = content.source === "progress-model" ? "<b>运行摘要</b>\n" : "";
+    return pages.map((page) => `${heading}<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
   }
 
   async function sendPage(text: string, chatId: number): Promise<number> {

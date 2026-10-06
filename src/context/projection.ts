@@ -104,6 +104,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           const unfiltered = result;
           result = filterArchivedMemoryResult(rawEvents, found.event, filterMemoryToolResult(call.name, result, excluded), excluded);
           const view = replayToolResultView({ result, archive,
+            projectionVersion: found.event.modelProjectionVersion,
             sourceFiltered: result !== unfiltered, recorded: found.event.modelVisible,
             archiveRead: log.isArchiveRead(call.name, sent.event.args),
             olderThanRecent: !hostConversationReplay && !recent.includes(event.requestId) && event.requestId !== currentId,
