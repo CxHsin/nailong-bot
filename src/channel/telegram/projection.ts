@@ -4,6 +4,7 @@ import type { DeliveryContent, ContentTransport } from "../../runtime/content-de
 export type TelegramHostTransport = ContentTransport & {
   draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
+  sendSticker?: (category: string, chatId: number) => Promise<number>;
   sendAnimation?: (animation: string, caption: string, chatId: number) => Promise<number>;
   sendProgress?: (text: string, chatId: number, source: "execution" | "progress-model") => Promise<number>;
 };
@@ -27,13 +28,14 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
       let published = "";
       let publishedAt = 0;
       let finished = false;
+      let control = false;
       let unavailable = false;
       let sending = false;
       let pending = Promise.resolve();
       let formal = Promise.resolve();
       // Coalesce snapshots independently of execution and keep long-running drafts alive.
       const timer = setInterval(() => {
-        if (!options.draft || finished || unavailable || sending || !latest ||
+        if (!options.draft || control || finished || unavailable || sending || !latest ||
           latest === published && Date.now() - publishedAt < 15_000) return;
         const text = latest;
         const snapshotDraftId = draftId;
@@ -63,7 +65,9 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
       try {
         for await (const event of handle.events()) {
           if (finished) continue;
-          if (event.type === "run_started") latest = "处理中";
+          if (event.type === "run_submitted") control = !!event.parts?.length && event.parts.every((part) => part.type === "text") &&
+            event.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim().startsWith("/");
+          if (event.type === "run_started" && !control) latest = "处理中";
           if (event.type === "progress") {
             const progress = event.progress;
             if (!progress) latest = event.text ?? latest; // Legacy Host envelope compatibility.
@@ -103,7 +107,14 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             clearInterval(timer);
             await pending;
             await formal;
-            if (event.type === "run_succeeded" && event.result?.animation && options.sendAnimation) {
+            if (event.type === "run_succeeded" && event.result?.stickerCategory && options.sendSticker) {
+              // Independent API requests: don't make the sticker wait for the text round trip.
+              const [messageId] = await Promise.all([
+                options.sendSticker(String(event.result.stickerCategory), options.chatId),
+                ...(event.result.stickerText && event.result.text ? [options.send(String(event.result.text), options.chatId)] : []),
+              ]);
+              await options.onDelivered?.(event, messageId);
+            } else if (event.type === "run_succeeded" && event.result?.animation && options.sendAnimation) {
               const messageId = await options.sendAnimation(String(event.result.animation), String(event.result.text ?? ""), options.chatId);
               await options.onDelivered?.(event, messageId);
             } else if (event.type === "run_succeeded" && event.result?.text) {

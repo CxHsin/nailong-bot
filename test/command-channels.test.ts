@@ -29,7 +29,7 @@ test("Telegram startup registers owner commands before polling and routes authen
   const animations: string[] = [];
   const channel = await initializeTelegramHostChannel({ bot, ownerId: 42, host,
     transport: { send: async (text) => { responses.push(text); return 1; },
-      sendAnimation: async (animation, caption, chatId) => { animations.push(animation); assert.equal(chatId, 42); assert.match(caption, /扭/); return 2; } },
+      sendSticker: async (category, chatId) => { animations.push(category); assert.equal(chatId, 42); return 2; } },
     download: async () => ({ type: "image", mimeType: "image/png", data: "aW1n" }), reportFailure: (error) => { throw error; },
     onDelivered: (event, telegramMessageId) => host.recordDelivery(event, { channel: "telegram", telegramMessageId }) });
   await channel.start();
@@ -51,10 +51,12 @@ test("Telegram startup registers owner commands before polling and routes authen
   await send("/kvcache@other_bot"); await send("/kvcache", 99); await send("/kvcache", 42, "group");
   assert.equal(responses.length, 2); assert.equal(modelCalls, 0);
   await send("/dance@test_bot");
-  assert.deepEqual(animations, ["nailong-dance"]);
+  assert.deepEqual(animations, ["dance"]);
   assert.equal(responses.length, 2); assert.equal(modelCalls, 0);
   await send("/dance", 99); await send("/dance@other_bot");
   assert.equal(animations.length, 1);
+  await send("/feed"); assert.deepEqual(animations, ["dance", "feed"]);
+  assert.match(responses.at(-1)!, /小面包/);
   await send("/reset", 42, "private", true); assert.equal(modelCalls, 1);
   await send("remember value"); assert.equal(modelCalls, 2);
   await send("/forget", 42, "private", false, true);
@@ -91,4 +93,34 @@ test("menu registration failure preserves chat startup and CLI shares queued pro
   assert.ok(events.some((event) => event.result?.cache?.conversationId === "telegram:private:42"));
   assert.ok(events.every((event) => event.runId && event.conversationId && Number.isSafeInteger(event.seq)));
   assert.deepEqual(stderr, []);
+});
+
+test("pure commands never publish a processing draft while their receipt is pending", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "command-draft-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const base = createRuntimeLog(dir);
+  const log = { ...base, append: async (event: Parameters<typeof base.append>[0]) => {
+    if (event.type === "run_succeeded") await new Promise((resolve) => setTimeout(resolve, 40));
+    return base.append(event);
+  } };
+  const host = createAgentHost({ dataDir: dir, promptFile: "system-prompt.md", log, agent: { answer: async () => "answer" } });
+  const { createTelegramHostProjection } = await import("../src/channel/telegram/projection.js");
+  let drafts = 0;
+  const projection = createTelegramHostProjection({ chatId: 42, draftIntervalMs: 1,
+    draft: async () => { drafts++; }, send: async () => 1 });
+  await projection.consume(host.submit({ actor: { id: "owner" }, conversationId: "c", text: "/feed" }));
+  assert.equal(drafts, 0);
+});
+
+test("nailong picks only reviewed category stickers without consecutive repeats", async () => {
+  const { NAILONG_STICKERS, createNailongStickerPicker } = await import("../src/channel/telegram/nailong-stickers.js");
+  const pick = createNailongStickerPicker();
+  for (const category of ["feed", "dance"] as const) {
+    let last = "";
+    for (let i = 0; i < 30; i++) {
+      const current = pick(category);
+      assert.ok(NAILONG_STICKERS[category].some((item) => item.fileId === current));
+      assert.notEqual(current, last); last = current;
+    }
+  }
 });

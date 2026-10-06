@@ -180,7 +180,7 @@ test("feed survives Host restart, is isolated, consumed once and never enters ch
   await send("/feed"); await send("/feed");
   host = createAgentHost(options);
   await send("hello", "other");
-  assert.equal((await send("/dance")).result?.animation, "nailong-dance");
+  assert.equal((await send("/dance")).result?.stickerCategory, "dance");
   await send("/kvcache"); await send("hello"); await send("again");
   assert.deepEqual(seen, [undefined, true, undefined]);
 });

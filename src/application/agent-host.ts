@@ -46,10 +46,10 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
     const cache = cacheStatistics(await options.log.read(), input.conversationId);
     return { text: cacheReportText(cache), cache, kind: "control" };
   }
-  if (name === "dance") return { text: "奶龙扭起来啦！", animation: "nailong-dance", kind: "control" };
+  if (name === "dance") return { text: "奶龙扭起来啦！", stickerCategory: "dance", kind: "control" };
   if (name === "feed") {
     await log.append({ type: "context_feed", contextPolicy: "exclude" });
-    return { text: "你喂了奶龙一个奶香小面包，奶龙满足地拍了拍肚皮，现在的上下文精神头提升了 100%！", kind: "control" };
+    return { text: "你喂了奶龙一个奶香小面包，奶龙满足地拍了拍肚皮，现在的上下文精神头提升了 100%！", stickerCategory: "feed", stickerText: true, kind: "control" };
   }
   if (name === "reset") {
     await log.append({ type: "conversation_reset", source: "channel", contextPolicy: "exclude" });
