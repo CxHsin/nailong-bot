@@ -230,7 +230,7 @@ test("runtime status streams grow in one draft and partial checkpoint text repla
   const values: HostEvent[] = [
     { type: "run_started", schemaVersion: 1, runId: "r", conversationId: "c", sequence: 1, at: "now" },
     ...[ ["recall", "翻小本本"], ["ready", "找到相关记录"], ["checkpoint", "摘要第一段"], ["checkpoint", "摘要第一段，接着第二段"] ].map(([segmentId, text], index) => ({
-      type: "progress" as const, schemaVersion: 1, runId: "r", conversationId: "c", sequence: index + 2, at: "now",
+      type: "progress" as const, schemaVersion: 1 as const, runId: "r", conversationId: "c", sequence: index + 2, at: "now",
       progress: { type: "text" as const, segmentId: segmentId!, text: text!, kind: "status" as const, finalized: false, formal: false },
     })),
     { type: "run_succeeded", schemaVersion: 1, runId: "r", conversationId: "c", sequence: 6, at: "now", result: { text: "完成" } },
