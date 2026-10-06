@@ -17,8 +17,8 @@ test("ordinary recall reports an empty notebook truthfully and progress stays ep
   const result = await recallMemory(memory, { id: "r", log, onProgress: (event) => progress.push(event) }, "小面包");
   assert.equal(result.candidates.length, 0);
   assert.deepEqual(progress.map((event) => event.type === "text" ? event.text : ""), [
-    "等等，让奶龙翻翻小本本，找找和这次问题有关的记忆……",
-    "这次没有找到相关旧记忆，奶龙接着看当前问题！",
+    "正在检索相关记忆……",
+    "未找到相关旧记忆，继续处理当前问题。",
   ]);
   assert.ok(progress.every((event) => event.type === "text" && !event.formal && event.kind === "status"));
   assert.equal(progress[0]?.type === "text" && progress[0].actionState, "started");

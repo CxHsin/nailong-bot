@@ -93,10 +93,10 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     ratio: budgetRatio, ratios: budgetRatios,
     cacheIdentity: sourceDigestForReplay(),
     signal: request?.signal,
-    onCheckpointValidated: () => request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "小本本摘要已生成，结构和未知结果保留检查通过。", actionState: "completed", finalized: true, formal: false, source: "execution" }),
-    onRestoreProgress: (checked, total) => request?.onProgress?.({ type: "text", segmentId: `${request.id}:history`, kind: "status", text: `奶龙正在恢复历史记录：${checked}/${total} 条已检查。`, actionState: "started", finalized: true, formal: false, source: "execution" }),
+    onCheckpointValidated: () => request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "历史摘要已生成，结构检查通过。", actionState: "completed", finalized: true, formal: false, source: "execution" }),
+    onRestoreProgress: (checked, total) => request?.onProgress?.({ type: "text", segmentId: `${request.id}:history`, kind: "status", text: `正在恢复历史记录：${checked}/${total} 条已检查。`, actionState: "started", finalized: true, formal: false, source: "execution" }),
     summarize: async (context, maxTokens) => {
-      request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "奶龙正在整理小本本，把任务、进展和待办记清楚……", actionState: "started", finalized: true, formal: false, source: "execution" });
+      request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "正在整理历史摘要……", actionState: "started", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
       const stream = await providerStream(model, context, deepseekCacheOptions({ maxTokens, signal: session.agent.signal }));
@@ -105,7 +105,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         if (event.type === "start") initialUsage = event.partial.usage;
         if (event.type === "text_delta") {
           const partial = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-          request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: `奶龙正在整理小本本，已收到 ${Array.from(partial).length} 字摘要，完成后核验。`, actionState: "started", finalized: false, formal: false, source: "execution" });
+          request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: `正在生成历史摘要，已收到 ${Array.from(partial).length} 字摘要，完成后核验。`, actionState: "started", finalized: false, formal: false, source: "execution" });
         }
       }
       const response = await stream.result();
@@ -127,13 +127,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const reserve = snapshot ? 0 : (recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0) +
           (request?.conversationId ? estimateInput({ messages: [date] }) - estimateInput({ messages: [] }) : 0);
         const phase = (id: string, text: string, actionState: "started" | "completed" | "failed") => request?.onProgress?.({ type: "text", segmentId: `${request.id}:${id}`, kind: "status", text, actionState, finalized: true, formal: false, source: "execution" });
-        phase("history", "奶龙正在恢复历史上下文……", "started");
+        phase("history", "正在恢复历史上下文……", "started");
         const restoreStarted = performance.now();
         const result = projection ? await projection.project(selected, context, attempt === 1, reserve) :
           { context, maxTokens: selected.maxTokens, sourceIds: [] as string[] };
         const restoreMs = performance.now() - restoreStarted;
         phase("history", `历史上下文已恢复，${result.context.messages.length} 条消息。`, "completed");
-        phase("memory-select", "奶龙正在筛选候选记忆，检查重复内容与可用预算……", "started");
+        phase("memory-select", "正在筛选候选记忆……", "started");
         const selectStarted = performance.now();
         let combined = snapshot ? { context: result.context, shown: snapshot.shown as ReturnType<typeof composeMemory>["shown"], tokens: Number(snapshot.tokens), quotes: [] } :
           await composeMemoryLive([result.context, result.sourceIds, recalled?.candidates ?? [], recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0, String(user?.text ?? "")], (counts) => phase("memory-select", `已检查 ${counts.checked}/${counts.total} 条候选，选入 ${counts.loaded} 段引用。`, "started"), request?.signal);
@@ -154,7 +154,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           const { at: _at, ...storedSnapshot } = snapshot;
           await request.log.append({ ...storedSnapshot, requestId: request.id });
         }
-        if (request && combined.quotes.length) phase("memory-ready", `啊！奶龙已把 ${combined.quotes.length} 段可用记录放进这轮上下文。`, "completed");
+        if (request && combined.quotes.length) phase("memory-ready", `已加载 ${combined.quotes.length} 段记忆引用。`, "completed");
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
         const loadMs = performance.now() - loadStarted;
         await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
@@ -165,7 +165,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
-        request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "记忆和上下文已经准备好，奶龙正在等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
+        request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "上下文已准备好，等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
         const source = await providerStream(selected, combined.context, deepseekCacheOptions({ ...streamOptions,
           maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }));
         let producedOutput = false;
