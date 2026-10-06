@@ -175,7 +175,8 @@ test("interactive CLI reads cache queries while its ordinary answer is still pen
   const cli = createCliChannel({ host, actor: { id: "owner" }, stdout: (line) => { if (line.includes("胃囊报表")) delivered(); }, stderr: () => {} });
   const chat = cli.chat((async function* () { yield "long work"; await started; yield "/kvcache"; })());
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try { await Promise.race([cacheDelivered, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("CLI did not read the cache query during model work")), 250); })]); }
+  // Verify ordering while the model stays blocked, rather than timing Host startup/disk I/O under CI load.
+  try { await started; await Promise.race([cacheDelivered, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("CLI did not read the cache query during model work")), 5000); })]); }
   finally { clearTimeout(timer); release(); await chat; }
 });
 
