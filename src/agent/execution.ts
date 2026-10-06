@@ -15,11 +15,11 @@ import { projectProviderContext, projectNativeContext } from "../context/provide
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
 
-function deepseekCacheOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
+function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
   return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
     const customized = await options?.onPayload?.(payload, model);
     const result = customized ?? payload;
-    if (model.provider !== "deepseek" || !result || typeof result !== "object") return result;
+    if (model.api !== "openai-completions" || !result || typeof result !== "object") return result;
     const clean = { ...result } as Record<string, unknown>;
     delete clean.prompt_cache_key;
     delete clean.prompt_cache_retention;
@@ -99,8 +99,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "正在整理历史摘要……", actionState: "started", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
-      const stream = await providerStream(model, projectNativeContext(context, model), deepseekCacheOptions({ maxTokens, signal: session.agent.signal,
-        ...(model.provider === "xh" ? { reasoning: "low" as const } : {}) }));
+      const stream = await providerStream(model, projectNativeContext(context, model), providerStreamOptions({ maxTokens, signal: session.agent.signal,
+        ...(model.reasoning ? { reasoning: "low" as const } : {}) }));
       let initialUsage: Usage | undefined;
       for await (const event of stream) {
         if (event.type === "start") initialUsage = event.partial.usage;
@@ -168,7 +168,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
         request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "上下文已准备好，等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
-        const source = await providerStream(selected, combined.context, deepseekCacheOptions({ ...streamOptions,
+        const source = await providerStream(selected, combined.context, providerStreamOptions({ ...streamOptions,
           maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }));
         let producedOutput = false;
         let initialUsage: Usage | undefined;

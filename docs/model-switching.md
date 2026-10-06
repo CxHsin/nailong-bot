@@ -1,42 +1,53 @@
-# 对话模型切换
+# 模型配置与切换
 
-新对话默认 `ds`（现有 DeepSeek）。Telegram 和 CLI 都支持：
-
-- `/model`：查看当前模型与已配置的模型。
-- `/model ds`：选择 DeepSeek。
-- `/model gpt`：选择 XH 的 `gpt-6.1-sol`。
-
-切换命令排队等待当前任务结束，只影响当前 Conversation 的下一轮。选择作为运行事实持久保存；重启、`/reset` 后保留。CLI 指定同一 `--conversation-id` 时共享选择、历史和记忆。命令正文不进入模型上下文或长期记忆。
-
-## XH 配置
-
-在本地 `.env` 中配置 `XH_API_KEY`，不提交密钥。可选设置：
+所有生产模型从 `.env` 读取；模型别名、API 协议、Base URL、模型 ID 和密钥均可配置，不绑定服务商。Telegram 和 CLI 使用相同配置。
 
 ```dotenv
-XH_BASE_URL=https://newapi.xinghengcode.shop/v1
-XH_MODEL=gpt-6.1-sol
-XH_CONTEXT_WINDOW=128000
-XH_MAX_OUTPUT_TOKENS=16384
+MODEL_NAMES=ds,gpt
+MODEL_DEFAULT=ds
+
+MODEL_DS_API=openai-completions
+MODEL_DS_BASE_URL=https://api.deepseek.com
+MODEL_DS_MODEL=deepseek-flash
+MODEL_DS_API_KEY=在本地填写
+MODEL_DS_REASONING=false
+MODEL_DS_IMAGES=true
+
+MODEL_GPT_API=openai-responses
+MODEL_GPT_BASE_URL=https://你的中转地址/v1
+MODEL_GPT_MODEL=你的模型ID
+MODEL_GPT_API_KEY=在本地填写
+MODEL_GPT_REASONING=true
+MODEL_GPT_IMAGES=true
 ```
 
-容量默认值是保守的本地预算，并非已核实的 XH 模型规格；按服务实际限制调整。模型 ID 是用户确认的中转标识，不以 SDK 内置模型名替换。XH 接口使用 `/responses`、SSE、`store: false` 和 `low` 推理级别。未配置密钥时不能切换到 GPT；已经选择 GPT 的对话若重启后缺少密钥，会明确失败，可用 `/model ds` 恢复，不自动回退。认证或模型能力错误同样不会自动改换 Provider。
+`ds` 和 `gpt` 只是例子中的别名，可换成 `primary`、`backup` 等小写字母开头、包含小写字母/数字/下划线的名称。在 `MODEL_NAMES` 中添加别名，再配置对应 `MODEL_别名大写_*` 即可添加模型。不要提交本地密钥。
 
-主执行、历史压缩和静默期摘要使用这一轮同一模型配置；旧 `PROGRESS_MODEL` 环境变量不再生效。Embedding 配置独立。历史学习事实保留，不因切换模型重学历史。
+`API` 目前支持 `openai-completions`（Chat Completions）和 `openai-responses`（Responses）。Base URL 包含服务要求的前缀，例如 `/v1`；协议不根据模型名称猜测。服务不支持相应工具、图片或推理能力时，应按实际能力配置并验收。
 
-## 投影与统计
+每个条目可设置 `CONTEXT_WINDOW` 和 `MAX_OUTPUT_TOKENS`，默认分别为 128000 和 16384；这是保守本地预算，不代表服务已核实的限制。`REASONING` 默认 false，启用后使用 low 级别；`IMAGES` 默认 true，不支持图片的模型应显式设 false。价格未知，SDK 零价格占位不代表免费。
 
-继续使用现有原始事件恢复、工具归档校验、遗忘过滤和压缩边界，在实际 Provider 请求前执行原生能力投影。缓存身份按 Conversation、Provider、模型和提示词隔离，历史投影缓存按模型隔离；升级使旧派生投影缓存失效，不修改原始历史。
+已有上下文预算比例可按别名设置，例如 `PROJECTION_BUDGET_RATIOS={"ds":0.86,"gpt":0.86}`，无需知道内部 Provider 标识。
 
-用户文字、图片、结算进展、最终回答及配对工具事实保留。Responses 推理项只有同时匹配 Provider／协议／模型且带有效形状的加密续接元数据时才回放；可读推理不作为普通对话展示。切回 DS 或换模型时移除专属推理元数据，保留文字和工具关联。不同模型的输出签名不跨模型传递。摘要、草稿和送达记录仍遵循各自的上下文与 Akasha 边界。
+## 使用
 
-`/kvcache` 继续记录各模型实际返回的 token 用量。XH 价格尚未核实，SDK 的零价格占位不代表免费；token 统计不能用作费用结算依据。首次接入若服务不支持图片、加密 reasoning、工具或缓存字段，应明确诊断并调整能力配置，不猜测服务支持。
+- `/model`：查看当前模型和已经配置密钥的可选条目。
+- `/model 别名`：切换当前 Conversation，例如 `/model ds` 或 `/model gpt`。
 
-## 验收边界
+新对话使用 `MODEL_DEFAULT`；未设置时使用 `MODEL_NAMES` 的第一个条目，该条目必须已配置密钥。其他缺少密钥的条目暂不出现在可选列表。
 
-自动测试通过真实 Pi → HTTP/SSE 的本地 Provider 入口验证 DS/GPT 切换、工具结果、加密推理回放、辅助模型用量、压缩后继续、错误不回退、队列与重启行为；模拟传输验证 Telegram 菜单，CLI 共享 Conversation。
+切换排队等待当前任务结束，从下一轮生效；选择持久保存，重启和 `/reset` 后保留。CLI 指定同一 `--conversation-id` 时共享选择、历史和记忆。命令不进入模型上下文或长期记忆。主执行、历史压缩和静默摘要使用同一轮选定的模型。
 
-当前尚未配置 XH 密钥，精确模型可用性、图片及实际容量仍需真实 XH 验收。没有为此重启生产 Bot 或向 Telegram 发送测试消息。#59/#60 已收敛到上述双模型能力，不要求通用 Provider 框架、重新交付命令或进展级别命令；现有交付保护保留。
+更换中转只需修改该条目的 Base URL、模型 ID 和 API Key，并重启加载配置；不需要改代码。端点、协议或模型变化会隔离缓存身份和加密推理续接。同名条目的密钥变化不改写对话历史。已选择的条目被删除时，查询会标明配置已移除，普通模型调用明确失败；用 `/model` 选择其他模型即可，不自动回退。
 
-2026-10-06 验证：完整 `npm test` **298/298**，无失败、跳过或取消；新增双模型用例 **5/5**，与 Telegram 命令菜单专项合计 **9/9**。`npm run typecheck`、`npm run build`、`git diff --check` 通过。之后在已有 HTTP 测试中补充跨模型历史图片编码断言，双模型与菜单专项再次通过。
+## 兼容与投影
 
-首次云端运行暴露旧 CLI 缓存测试的 250ms 超时包含 Host 启动与磁盘写入。测试改为等待模型已开始、保持模型阻塞，断言缓存查询在释放模型前返回；5 秒只是挂死保护，不作为交互延迟指标。
+生产入口不再读取 `DEEPSEEK_API_KEY`、`XH_*` 和 `PROGRESS_MODEL`。本次已在本地 `.env` 补齐通用配置、迁移旧密钥而不输出密钥或覆盖已有条目；旧变量保留为迁移参考。旧应用和测试的 `createPiAgent` DeepSeek 参数暂保留兼容，生产 Telegram/CLI 始终使用通用配置。
+
+继续复用原始事件恢复、工具归档校验、遗忘过滤和压缩边界，在实际 Provider 请求前执行原生投影。文字、图片、结算进展、最终回答及配对工具事实保留；专属推理只在同端点/协议/模型配置且带有效加密续接元数据时回放，跨配置移除专属签名。图片能力在请求前检查。原始运行历史、学习事实和已有交付保护保留。
+
+## 验收
+
+测试通过真实 Pi → 本地 HTTP/SSE 验证两种协议、独立密钥、跨模型工具/图片/历史、重启选择、历史压缩和摘要、错误不回退；另验证任意别名、默认模型、缺失/错误配置、端点变化后的身份隔离以及 Telegram 菜单与 CLI 续接。
+
+真实服务模型可用性及容量仍需配置有效密钥后验收。本次不重启生产 Bot、不向 Telegram 发送测试消息，不新增重新交付或进展级别命令。

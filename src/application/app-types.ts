@@ -4,7 +4,7 @@ import type { RunProgress } from "../runtime/progress.js";
 
 export type Update = { userId: number; chatType: string; text?: string; images?: ImageContent[]; messageId: number; replyToMessageId?: number };
 export type Message = { role: "user" | "assistant"; text: string; images?: ImageContent[] };
-export type Request = { modelAlias?: "ds" | "gpt"; contextBudgetBoost?: boolean; id: string; log: RuntimeLog; conversationId?: string; botPrompt?: string; botPromptVersion?: string;
+export type Request = { modelAlias?: string; contextBudgetBoost?: boolean; id: string; log: RuntimeLog; conversationId?: string; botPrompt?: string; botPromptVersion?: string;
   onProgress?: (progress: RunProgress) => void;
   signal?: AbortSignal;
   /** Compatibility callback for the old log-backed Telegram application. */

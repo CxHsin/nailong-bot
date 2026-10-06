@@ -25,7 +25,7 @@
 | 送达记录与记忆学习 | Telegram 正文发送成功、CLI 输出成功后记录 `delivery_succeeded`；模型运行随后结算记忆，重复确认不重复学习；命令回复不参与学习 | [`agent-host.ts`](src/application/agent-host.ts)、[`memory-learning.ts`](src/application/memory-learning.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | Akasha 长期记忆 | 两个入口启用 `memory_search`／`memory_read`、预算内自动召回、后台历史初始化与持久遗忘；Telegram 读取可选 embedding 配置，CLI 使用字面召回和默认记忆参数 | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`memory-context.ts`](src/application/memory-context.ts)、[`memory-bootstrap.ts`](src/application/memory-bootstrap.ts) | [`memory.test.ts`](test/memory.test.ts)、[`memory-dynamics.test.ts`](test/memory-dynamics.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts) |
 | Prompt cache 与用量统计 | 稳定 system／工具前缀，冻结每轮日期与记忆快照；`/kvcache` 查看最近五组模型运行的缓存详情，摘要等辅助调用单独统计 | [`execution.ts`](src/agent/execution.ts)、[`cache-statistics.ts`](src/runtime/cache-statistics.ts) | [`cache-provider.test.ts`](test/cache-provider.test.ts)、[`agent-host.test.ts`](test/agent-host.test.ts) |
-| 对话模型切换 | 默认 DS；`/model ds`／`/model gpt` 排队切换，按 Conversation 持久保存；XH Responses 的历史压缩和静默摘要跟随主模型 | [`模型配置与验收`](docs/model-switching.md) | [`model-switching.test.ts`](test/model-switching.test.ts) |
+| 对话模型切换 | `.env` 配置默认模型和任意模型别名、协议、Base URL、模型 ID、API Key；`/model 别名` 排队切换，按 Conversation 持久保存；压缩和静默摘要跟随主模型 | [`模型配置与验收`](docs/model-switching.md) | [`model-switching.test.ts`](test/model-switching.test.ts) |
 | 回复缓存报表 | Telegram 明确回复已送达的 `/kvcache` 报表时，将持久记录中的报表快照作为模型背景，跨工具步骤保留；报表显示查询时数据，重新查询才更新 | [`reply-context.ts`](src/runtime/reply-context.ts)、[`projection.ts`](src/context/projection.ts) | [`reply-context.test.ts`](test/reply-context.test.ts) |
 | 模型执行与上下文预算 | 接收普通 Markdown，结算进展与最终回答，重放历史与工具结果，按窗口预算生成摘要 checkpoint，遇到协议错误或持续停滞时结束本轮 | [`execution.ts`](src/agent/execution.ts)、[`projection.ts`](src/context/projection.ts)、[`context-budget.ts`](src/context/context-budget.ts) | [`integration.test.ts`](test/integration.test.ts)、[`projection.test.ts`](test/projection.test.ts) |
 
@@ -38,7 +38,7 @@
 | 取消 | Host 提供独立 cancel API，`/reset` 已作为排队控制命令接入 | 当前入口没有用户取消命令或终端取消映射；运行中取消还需要执行器响应 AbortSignal | [`host.test.ts`](test/host.test.ts)、[`agent-host.test.ts`](test/agent-host.test.ts) |
 | 通用 Delivery pipeline | 独立模块可推导跨 Channel Run 与 Delivery 状态 | Telegram 生产正文已接入逐页尝试、成功／失败／未知和有界重试；通用模块未替换全部 Channel。通用重新交付命令已移出本轮范围 | [`delivery-pipeline.ts`](src/runtime/delivery-pipeline.ts)、[`content-delivery.ts`](src/runtime/content-delivery.ts) |
 | 结果复用与恢复 | Host 的 redeliver 按 resultId 读取已成功结果，不调用执行器；recoverRuns 从日志推导运行状态 | Telegram／CLI 启动均核对活动运行，只记录中断，不自动执行或补发。用户重新交付命令已移出本轮范围 | [`recovery.ts`](src/host/recovery.ts)、[`startup-recovery.ts`](src/runtime/startup-recovery.ts) |
-| Provider-aware Context Projection | 原始事实恢复与压缩后，按实际 Provider 的原生消息合约筛选图片和推理元数据；保留工具关联、跨模型文本和缓存身份 | DS/XH 双模型路径已接入；通用 ContextItem 编码层仍为独立模块，本轮不整体替换现有事件投影 | [`provider-aware.ts`](src/context/provider-aware.ts)、[`model-switching.test.ts`](test/model-switching.test.ts) |
+| Provider-aware Context Projection | 原始事实恢复与压缩后，按配置的原生协议筛选图片和推理元数据；保留工具关联、跨模型文本和缓存身份 | Chat Completions／Responses 已接入，端点变化隔离缓存和专属推理；通用 ContextItem 编码层仍为独立模块，本轮不整体替换现有事件投影 | [`provider-aware.ts`](src/context/provider-aware.ts)、[`model-switching.test.ts`](test/model-switching.test.ts) |
 
 Host／Channel 集成规格见 [#60](https://github.com/CxHsin/nailong-bot/issues/60)；Akasha 记忆规格见 [#49](https://github.com/CxHsin/nailong-bot/issues/49)。表中测试覆盖模块和相应装配路径，真实 Telegram 客户端与 Provider 的使用效果仍需凭据验收。
 

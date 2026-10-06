@@ -10,7 +10,7 @@ import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { createCliChannel } from "../src/cli/cli-channel.js";
 import { projectNativeContext } from "../src/context/provider-aware.js";
 import { assistantText } from "../src/agent/model-message.js";
-import { gptEnvironment, gptModel } from "../src/agent/model-config.js";
+import { modelEnvironment, configuredModel, type ModelConfiguration } from "../src/agent/model-config.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 
 test("model controls serialize, persist per Conversation and share CLI continuation without model calls", async (t) => {
@@ -19,7 +19,7 @@ test("model controls serialize, persist per Conversation and share CLI continuat
   let release!: () => void; const wait = new Promise<void>((resolve) => { release = resolve; });
   let started!: () => void; const began = new Promise<void>((resolve) => { started = resolve; });
   const choices: string[] = [];
-  const agent = { models: [{ alias: "ds" as const, name: "DS" }, { alias: "gpt" as const, name: "GPT" }],
+  const agent = { models: [{ alias: "ds", name: "DS" }, { alias: "gpt", name: "GPT" }, { alias: "work", name: "Other" }],
     answer: async (_messages: unknown, request: { modelAlias?: string }) => { choices.push(request.modelAlias!); if (choices.length === 1) { started(); await wait; } return "answer"; } };
   const make = () => createAgentHost({ log, dataDir: dir, promptFile: join(dir, "prompt.md"), agent });
   let host = make(); const submit = (text: string, conversationId = "telegram:private:42") => host.submit({ actor: { id: "owner" }, conversationId, text });
@@ -33,16 +33,17 @@ test("model controls serialize, persist per Conversation and share CLI continuat
   await submit("other", "c2").done;
   assert.match(String((await submit("/model").done).result?.text), /当前模型：gpt/);
   await submit("/reset").done; await submit("after reset").done;
-  assert.match(String((await submit("/model wrong").done).result?.text), /用法/);
+  assert.match(String((await submit("/model wrong").done).result?.text), /不存在/);
   await submit("/model ds").done; await submit("back").done;
-  assert.deepEqual(choices, ["ds", "gpt", "ds", "gpt", "ds"]);
+  await submit("/model work").done; await submit("custom alias").done;
+  assert.deepEqual(choices, ["ds", "gpt", "ds", "gpt", "ds", "work"]);
   assert.ok((await log.read()).filter((event) => event.type === "message").every((event) => !String(event.text).startsWith("/model")));
   const unavailable = createAgentHost({ log, dataDir: dir, promptFile: "unused", agent: { answer: async () => "unused" } });
   assert.match(String((await unavailable.submit({ actor: { id: "owner" }, conversationId: "c2", text: "/model gpt" }).done).result?.text), /尚未配置/);
 });
 
 test("native projection admits only same-model encrypted reasoning and preserves tool facts and images", () => {
-  const model = gptModel({ apiKey: "test" });
+  const model = configuredModel({ alias: "custom", api: "openai-responses", model: "any-model", baseUrl: "https://relay.example/v1", apiKey: "test", reasoning: true });
   const original = assistantText("answer", model);
   original.content.unshift({ type: "thinking", thinking: "hidden", thinkingSignature: JSON.stringify({ type: "reasoning", id: "rs_1", encrypted_content: "opaque", summary: [] }) });
   const same = projectNativeContext({ messages: [original] }, model).messages[0]!;
@@ -52,7 +53,31 @@ test("native projection admits only same-model encrypted reasoning and preserves
   original.content[0] = { type: "thinking", thinking: "not replayable", thinkingSignature: "malformed" };
   assert.doesNotMatch(JSON.stringify(projectNativeContext({ messages: [original] }, model)), /malformed|not replayable/);
   assert.throws(() => projectNativeContext({ messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "aW1n" }], timestamp: 0 }] }, { ...model, input: ["text"] }), /不支持/);
-  assert.throws(() => gptEnvironment({ XH_API_KEY: "test", XH_CONTEXT_WINDOW: "wrong" }), /正整数/);
+  assert.doesNotMatch(JSON.stringify(projectNativeContext({ messages: [original] }, configuredModel({ alias: "custom", api: "openai-responses", model: "any-model", baseUrl: "https://other.example/v1", apiKey: "test", reasoning: true }))), /opaque|hidden/);
+});
+
+function profiles(baseUrl: string, limits: { contextWindow?: number; maxTokens?: number } = {}): ModelConfiguration {
+  return { defaultModel: "ds", models: [
+    { alias: "ds", api: "openai-completions", model: "custom-ds", baseUrl, apiKey: "ds-key" },
+    { alias: "gpt", api: "openai-responses", model: "gpt-6.1-sol", baseUrl, apiKey: "xh-key", reasoning: true, ...limits },
+  ] };
+}
+
+test("environment controls arbitrary aliases, protocols, endpoints, model IDs and credentials", () => {
+  const env = { MODEL_NAMES: "primary,backup", MODEL_DEFAULT: "primary", MODEL_PRIMARY_API: "openai-completions",
+    MODEL_PRIMARY_BASE_URL: "https://one.example/v1", MODEL_PRIMARY_MODEL: "vendor-model", MODEL_PRIMARY_API_KEY: "secret-one",
+    MODEL_BACKUP_API: "openai-responses", MODEL_BACKUP_BASE_URL: "https://two.example/v1", MODEL_BACKUP_MODEL: "different-model", MODEL_BACKUP_API_KEY: "secret-two" };
+  const parsed = modelEnvironment(env);
+  assert.deepEqual(parsed.models.map((item) => [item.alias, item.model, item.apiKey]), [["primary", "vendor-model", "secret-one"], ["backup", "different-model", "secret-two"]]);
+  assert.equal(parsed.defaultModel, "primary");
+  assert.notEqual(configuredModel(parsed.models[0]!).provider, configuredModel({ ...parsed.models[0]!, baseUrl: "https://changed.example/v1" }).provider);
+  assert.throws(() => modelEnvironment({ ...env, MODEL_PRIMARY_CONTEXT_WINDOW: "wrong" }), /正整数/);
+  assert.throws(() => modelEnvironment({ ...env, MODEL_NAMES: "primary,primary" }), /不重复/);
+  assert.throws(() => modelEnvironment({ ...env, MODEL_PRIMARY_API: "bad" }), /只支持/);
+  assert.throws(() => modelEnvironment({ ...env, MODEL_PRIMARY_BASE_URL: "invalid secret-one" }), (error: unknown) => error instanceof Error && !error.message.includes("secret-one"));
+  assert.equal(modelEnvironment({ ...env, MODEL_BACKUP_API_KEY: "" }).models.length, 1);
+  assert.throws(() => modelEnvironment({ ...env, MODEL_PRIMARY_API_KEY: "" }), /MODEL_DEFAULT/);
+  assert.equal(modelEnvironment({ ...env, MODEL_DEFAULT: "backup" }).defaultModel, "backup");
 });
 
 function responses(res: ServerResponse, tool: boolean, text = "GPT answer") {
@@ -94,8 +119,7 @@ test("production Host switches DS → XH Responses → DS with tools, restart hi
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const baseUrl = `http://127.0.0.1:${address.port}/v1`;
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "ds-key", modelBaseUrl: baseUrl,
-    gpt: { apiKey: "xh-key", baseUrl }, memoryBootstrap: false });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, modelConfiguration: profiles(baseUrl), memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);
   let host = createAgentHost({ dataDir: dir, promptFile, log, agent });
@@ -121,7 +145,7 @@ test("production Host switches DS → XH Responses → DS with tools, restart hi
   assert.doesNotMatch(JSON.stringify(seen[4]!.body), /opaque-fixture|\/model/);
   assert.match(JSON.stringify(seen[4]!.body), /GPT answer|source evidence/);
   const facts = await log.read();
-  assert.ok(facts.some((event) => event.type === "model_usage" && event.provider === "xh" && (event.usage as { cacheRead: number }).cacheRead === 80));
+  assert.ok(facts.some((event) => event.type === "model_usage" && event.model === "gpt-6.1-sol" && (event.usage as { cacheRead: number }).cacheRead === 80));
   assert.equal(seen[1]!.body.prompt_cache_key, seen[3]!.body.prompt_cache_key);
   assert.match(JSON.stringify(seen[1]!.body), /reasoning.encrypted_content/);
   const summaryRequest = { id: gpt.runId, log, modelAlias: "gpt" as const };
@@ -143,8 +167,8 @@ test("GPT compaction uses Responses and retains a valid checkpoint for continuat
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "ds-key", memoryBootstrap: false,
-    gpt: { apiKey: "xh-key", baseUrl: `http://127.0.0.1:${address.port}/v1`, contextWindow: 7600, maxTokens: 1024 } });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false,
+    modelConfiguration: profiles(`http://127.0.0.1:${address.port}/v1`, { contextWindow: 7600, maxTokens: 1024 }) });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);
   for (let index = 0; index < 6; index++) {
@@ -160,7 +184,7 @@ test("GPT compaction uses Responses and retains a valid checkpoint for continuat
   assert.ok(summaries > 0);
   await send("continue again");
   assert.ok(requests.every((body) => body.model === "gpt-6.1-sol"));
-  assert.ok((await log.read()).some((event) => event.type === "model_usage" && event.purpose === "summary" && event.provider === "xh"));
+  assert.ok((await log.read()).some((event) => event.type === "model_usage" && event.purpose === "summary" && event.model === "gpt-6.1-sol"));
 });
 
 test("XH rejection fails the Run without silently invoking DS", async (t) => {
@@ -169,8 +193,8 @@ test("XH rejection fails the Run without silently invoking DS", async (t) => {
   const server = createServer((req, res) => { paths.push(req.url!); res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "invalid token" } })); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "ds-key", memoryBootstrap: false,
-    gpt: { apiKey: "xh-key", baseUrl: `http://127.0.0.1:${address.port}/v1` } });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false,
+    modelConfiguration: profiles(`http://127.0.0.1:${address.port}/v1`) });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   await host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "/model gpt" }).done;

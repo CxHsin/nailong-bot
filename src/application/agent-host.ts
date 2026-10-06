@@ -12,11 +12,12 @@ import { deliverContent, type DeliveryContent, type ContentTransport } from "../
 import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOptions, type ProgressSummaryGenerator } from "./progress-summaries.js";
 import { recordInterruptedRuns } from "../runtime/startup-recovery.js";
 import { projectTimeline } from "../runtime/timeline.js";
+import { validModelAlias } from "../agent/model-config.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
   { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
-  { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model ds；/model gpt" },
+  { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model 模型别名" },
   { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
   { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
   { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
@@ -28,7 +29,8 @@ export const AGENT_COMMANDS = [
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
   summarizeProgress?: ProgressSummaryGenerator;
-  models?: ReadonlyArray<{ alias: "ds" | "gpt"; name: string }>;
+  defaultModel?: string;
+  models?: ReadonlyArray<{ alias: string; name: string }>;
   memoryVector?: (text: string) => number[] | undefined;
 } };
 
@@ -47,11 +49,11 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   if (name === "model") {
     const models = options.agent.models ?? [{ alias: "ds", name: "DeepSeek" }];
     const selected = (await log.read()).findLast((event) => event.type === "model_selected");
-    const current = selected?.modelAlias === "gpt" ? "gpt" : "ds";
-    if (text === "/model") return { text: `当前模型：${current}\n可选模型：\n${models.map((item) => `${item.alias}：${item.name}`).join("\n")}\n用法：/model ds 或 /model gpt`, kind: "control" };
-    const alias = text.slice("/model ".length).trim();
-    if (!/^\/model\s+(ds|gpt)$/.test(text)) return { text: `用法：${definition.usage}`, kind: "control" };
-    if (!models.some((item) => item.alias === alias)) return { text: "GPT 尚未配置，请先设置 XH_API_KEY。当前模型未改变。", kind: "control" };
+    const current = typeof selected?.modelAlias === "string" ? selected.modelAlias : options.agent.defaultModel ?? models[0]!.alias;
+    if (text === "/model") return { text: `当前模型：${current}${models.some((item) => item.alias === current) ? "" : "（配置已移除）"}\n可选模型：\n${models.map((item) => `${item.alias}：${item.name}`).join("\n")}\n用法：/model 模型别名`, kind: "control" };
+    const alias = /^\/model\s+(\S+)$/.exec(text)?.[1];
+    if (!validModelAlias(alias)) return { text: `用法：${definition.usage}`, kind: "control" };
+    if (!models.some((item) => item.alias === alias)) return { text: "该模型尚未配置或不存在，请用 /model 查看可选项。当前模型未改变。", kind: "control" };
     await log.append({ type: "model_selected", modelAlias: alias, contextPolicy: "exclude" });
     return { text: `已切换为 ${alias}，从下一轮生效。`, kind: "control" };
   }
@@ -112,7 +114,7 @@ export function createAgentHost(options: AgentHostOptions) {
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
     const selectedModel = history.findLast((event) => event.type === "model_selected");
     let summaries: ReturnType<typeof startProgressSummaries> | undefined;
-    const request: Request = { modelAlias: selectedModel?.modelAlias === "gpt" ? "gpt" : "ds", ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
+    const request: Request = { modelAlias: typeof selectedModel?.modelAlias === "string" ? selectedModel.modelAlias : options.agent.defaultModel ?? options.agent.models?.[0]?.alias ?? "ds", ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
       onProgress: (progress) => {
         if (progress.type === "text" && progress.source !== "progress-model") summaries?.primaryText(progress.finalized);
         if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);

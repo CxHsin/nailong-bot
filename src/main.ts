@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { Bot } from "grammy";
 import { createPiAgent } from "./agent/pi-agent.js";
-import { gptEnvironment } from "./agent/model-config.js";
+import { modelEnvironment } from "./agent/model-config.js";
 import { createRuntimeEventLog } from "./runtime/event-log.js";
 import { createAgentHost } from "./application/agent-host.js";
 import { createTelegramRichTransport, telegramEnvironment } from "./channel/telegram/index.js";
@@ -10,15 +10,9 @@ import { downloadTelegramPhoto } from "./telegram/telegram-input.js";
 import { memoryDynamics } from "./memory/dynamics.js";
 import { recallConfig } from "./memory/recall.js";
 
-function required(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`缺少环境变量 ${name}；请参照 .env.example 配置 .env`);
-  return value;
-}
-
 async function main(): Promise<void> {
   const telegram = telegramEnvironment(process.env);
-  const deepseekKey = required("DEEPSEEK_API_KEY");
+  const modelConfiguration = modelEnvironment(process.env);
   const dataDir = resolve(process.env.AGENT_DATA_DIR?.trim() || "data");
   const promptFile = resolve(process.env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md");
   const log = await createRuntimeEventLog(dataDir);
@@ -29,8 +23,7 @@ async function main(): Promise<void> {
   const agent = await createPiAgent({
     dataDir,
     promptFile,
-    deepseekKey,
-    gpt: gptEnvironment(process.env),
+    modelConfiguration,
     tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
     embedding: process.env.EMBEDDING_BASE_URL?.trim() && process.env.EMBEDDING_MODEL?.trim() && process.env.EMBEDDING_API_KEY?.trim() ? {
       baseUrl: process.env.EMBEDDING_BASE_URL, model: process.env.EMBEDDING_MODEL, apiKey: process.env.EMBEDDING_API_KEY,
