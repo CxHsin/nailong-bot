@@ -20,7 +20,7 @@ function contextMessages(replay: Replay, checkpoint?: Checkpoint): Message[] {
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
-  conversationId?: string; structured?: boolean; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
+  signal?: AbortSignal; onCheckpointValidated?: () => void; onRestoreProgress?: (checked: number, total: number) => void; conversationId?: string; structured?: boolean; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
   const store = createCheckpointStore(options.dataDir, "structured-text-v1", options.conversationId);
   return {
     async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
@@ -28,7 +28,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       const ratio = resolved.ratio;
       const budget = resolved.budget - reserveTokens;
       const replayStarted = performance.now();
-      const replay = await replayEvents(options.log, options.requestId, model, options.structured ?? true);
+      const replay = await replayEvents(options.log, options.requestId, model, options.structured ?? true, options.onRestoreProgress, options.signal);
       const replayMs = performance.now() - replayStarted;
       const processPeakRssBytes = process.resourceUsage().maxRSS * 1024;
       let checkpoint = await store.load(replay.boundary, replay.events);
@@ -95,6 +95,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
                 rolling = await options.summarize(chunk, Math.max(1, Math.min(8192, model.maxTokens,
                   model.contextWindow - estimateInput(chunk))));
                 validateSummary(rolling, summarySource(chunk), estimateInput(chunk));
+                options.onCheckpointValidated?.();
                 position += low;
                 part++;
               }
@@ -107,6 +108,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
           const summary = await options.summarize(input, Math.max(1, Math.min(8192, model.maxTokens,
             model.contextWindow - estimateInput(input))));
           validateSummary(summary, summarySource(input), estimateInput(input));
+          options.onCheckpointValidated?.();
           const value = { boundary: replay.boundary, through: candidate.through,
             sourceDigest: sourceDigest(replay.events.slice(0, candidate.through)), summary,
             lastEventDigest: sourceDigest(replay.events[candidate.through - 1]),

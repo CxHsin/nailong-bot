@@ -30,13 +30,32 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
       let publishedAt = 0;
       let finished = false;
       let control = false;
-      const statusLines = new Map<string, string>();
+      const statusLines = new Map<string, { text: string; startedAt: number; active: boolean }>();
+      let actionView = false;
+      const actionText = () => [...statusLines.values()].slice(-5).map((action) => {
+        const seconds = Math.floor((Date.now() - action.startedAt) / 5000) * 5;
+        return `${action.text}${action.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : ""}`;
+      }).join("\n\n");
+      const renderActions = () => [current && current.segmentId !== "runtime-status" ? current.text : "", actionText()].filter(Boolean).join("\n\n");
+      const action = (id: string, text: string, active: boolean) => {
+        if (active) for (const [key, previous] of statusLines) if (key !== id) previous.active = false;
+        const prior = statusLines.get(id);
+        if (active && prior && !prior.active) statusLines.delete(id);
+        statusLines.set(id, { text, active, startedAt: prior?.active && active ? prior.startedAt : Date.now() });
+        if (statusLines.size > 5) statusLines.delete(statusLines.keys().next().value!);
+        if ((!current || current.segmentId === "runtime-status") && draftSegment !== "runtime-status") { draftSegment = "runtime-status"; draftId = nextDraftId++; published = ""; }
+        actionView = true;
+        tool = "";
+        latest = renderActions();
+        if (!current || current.segmentId === "runtime-status") current = { segmentId: "runtime-status", text: actionText() };
+      };
       let unavailable = false;
       let sending = false;
       let pending = Promise.resolve();
       let formal = Promise.resolve();
       // Coalesce snapshots independently of execution and keep long-running drafts alive.
       const timer = setInterval(() => {
+        if (actionView) latest = renderActions();
         if (!options.draft || control || finished || unavailable || sending || !latest ||
           latest === published && Date.now() - publishedAt < 15_000) return;
         const text = latest;
@@ -76,18 +95,11 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             else {
               if (progress.type === "text") {
                 if (progress.kind === "status") {
-                  statusLines.set(progress.segmentId, progress.text);
-                  const text = [...statusLines.values()].slice(-5).join("\n\n");
-                  if (draftSegment !== "runtime-status") {
-                    draftSegment = "runtime-status";
-                    draftId = nextDraftId++;
-                    published = "";
-                  }
-                  current = { segmentId: "runtime-status", text };
-                  tool = "";
-                  latest = text;
+                  action(progress.segmentId, progress.text, progress.actionState === "started");
                   continue;
                 }
+                actionView = statusLines.size > 0;
+                for (const previous of statusLines.values()) previous.active = false;
                 if (draftSegment !== progress.segmentId) {
                   draftSegment = progress.segmentId;
                   draftId = nextDraftId++;
@@ -96,6 +108,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
                 current = { segmentId: progress.segmentId, text: progress.text };
                 tool = "";
                 if (progress.finalized && progress.formal) {
+                  actionView = false;
                   latest = "";
                   const draftBarrier = pending;
                   formal = formal.then(async () => {
@@ -111,10 +124,16 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
               } else if (progress.type === "discard") {
                 if (current?.segmentId === progress.segmentId) current = undefined;
               } else {
+                if (progress.callId) {
+                  const verb = { started: "正在执行", completed: "已完成", failed: "调用失败", blocked: "调用被阻止" }[progress.state];
+                  action(`tool:${progress.callId}`, `${verb}：${toolDisplayName(progress.name)}`, progress.state === "started");
+                  continue;
+                }
+                actionView = false;
                 const verb = { started: "正在调用", completed: "已完成", failed: "调用失败", blocked: "调用被阻止" }[progress.state];
                 tool = `${verb}：${toolDisplayName(progress.name)}`;
               }
-              latest = [current?.text, tool].filter(Boolean).join("\n\n") || "处理中";
+              latest = (actionView ? renderActions() : [current?.text, tool].filter(Boolean).join("\n\n")) || "处理中";
             }
           }
           if (["run_succeeded", "run_failed", "run_cancelled"].includes(event.type)) {

@@ -244,3 +244,45 @@ test("runtime status streams grow in one draft and partial checkpoint text repla
   assert.match(status.at(-1)!.text, /翻小本本[\s\S]*找到相关记录[\s\S]*摘要第一段，接着第二段/);
   assert.equal(status.at(-1)!.text.split("摘要第一段").length - 1, 1);
 });
+
+test("tool actions keep identities, refresh wait time and show only execution states", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const drafts: Array<{ id: number; text: string }> = [];
+  const projection = createTelegramHostProjection({ chatId: 42, draft: async (id, text) => { drafts.push({ id, text }); }, send: async () => 1 });
+  const run = controlledRun("actions"); const pending = projection.consume(run.handle);
+  run.push("run_started");
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "one", state: "started" } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  t.mock.timers.tick(5000); await drain();
+  assert.match(drafts.at(-1)!.text, /奶龙雷达.*已等待 5 秒/);
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "one", state: "completed" } });
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "two", state: "started" } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.match(drafts.at(-1)!.text, /已完成：奶龙雷达[\s\S]*正在执行：奶龙雷达/);
+  assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "two", state: "failed" } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.match(drafts.at(-1)!.text, /调用失败：奶龙雷达/);
+  run.push("run_cancelled"); await pending;
+  const count = drafts.length; t.mock.timers.tick(10000); await drain(); assert.equal(drafts.length, count);
+});
+
+test("streaming content stays visible while tool states change alongside it", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval", "Date"] });
+  const drafts: Array<{ id: number; text: string }> = [];
+  const projection = createTelegramHostProjection({ chatId: 42, draft: async (id, text) => { drafts.push({ id, text }); }, send: async () => 1 });
+  const run = controlledRun("content-actions"); const pending = projection.consume(run.handle);
+  run.push("progress", { progress: { type: "text", segmentId: "body", text: "奶龙先检查配置", kind: "progress", finalized: false } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "search", state: "started" } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.match(drafts.at(-1)!.text, /奶龙先检查配置[\s\S]*正在执行：奶龙雷达/);
+  run.push("progress", { progress: { type: "tool", name: "grep", callId: "search", state: "completed" } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.match(drafts.at(-1)!.text, /奶龙先检查配置[\s\S]*已完成：奶龙雷达/);
+  run.push("progress", { progress: { type: "text", segmentId: "body", text: "奶龙先检查配置，已经查到", kind: "progress", finalized: false } });
+  await drain(); t.mock.timers.tick(250); await drain();
+  assert.match(drafts.at(-1)!.text, /已经查到[\s\S]*已完成：奶龙雷达/);
+  assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
+  run.push("run_succeeded", { result: { text: "完成" } }); await pending;
+});

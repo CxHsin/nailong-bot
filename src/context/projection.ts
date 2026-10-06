@@ -15,7 +15,7 @@ export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
   diagnostics: string[] };
 
-export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
+export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false, onProgress?: (checked: number, total: number) => void, signal?: AbortSignal): Promise<Replay> {
   const rawEvents = await log.read();
   const hostConversationReplay = rawEvents.some((event) => event.requestId === currentId && typeof event.conversationId === "string");
   const excluded = memoryExclusions(rawEvents);
@@ -40,6 +40,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     .map((event) => event.modelStepId));
   const discarded = new Set(events.filter((event) => event.type === "text_discarded").map((event) => event.textSegmentId));
   for (const [index, event] of events.entries()) {
+    if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     if (event.type === "tool_result") {
       if (results.has(key(event))) throw new Error("工具结果编号重复");
@@ -52,6 +53,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   let current: Message | undefined;
   let legacyRequest: string | undefined;
   for (const [index, event] of events.entries()) {
+    if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); onProgress?.(index, events.length); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
