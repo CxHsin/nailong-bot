@@ -1,8 +1,10 @@
+import { consumeProgressJournal } from "./progress-journal.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { DeliveryContent, ContentTransport } from "../../runtime/content-delivery.js";
 
 export type TelegramHostTransport = ContentTransport & {
+  editPage?: (messageId: number, html: string, chatId: number) => Promise<void>;
   draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
   sendSticker?: (category: string, chatId: number) => Promise<number>;
@@ -13,6 +15,9 @@ export type TelegramHostTransport = ContentTransport & {
 /** Ephemeral segment drafts and a separate serial queue for immutable formal content. */
 export function createTelegramHostProjection(options: TelegramHostTransport & {
   chatId: number;
+  recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
+  progressIntervalMs?: number;
+  progressTimeoutMs?: number;
   draftIntervalMs?: number;
   draftTimeoutMs?: number;
   onDelivered?: (event: HostEvent, messageId: number) => Promise<void>;
@@ -21,6 +26,20 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
   let nextDraftId = 1;
   return {
     async consume(handle: RunHandle) {
+      if (options.editPage && options.plan && options.sendPage) return consumeProgressJournal(handle, options, async (event) => {
+        if (event.type === "run_succeeded" && event.result?.stickerCategory && options.sendSticker) {
+          const [id] = await Promise.all([options.sendSticker(String(event.result.stickerCategory), options.chatId),
+            ...(event.result.stickerText && event.result.text ? [options.send(String(event.result.text), options.chatId)] : [])]);
+          await options.onDelivered?.(event, id);
+        } else if (event.type === "run_succeeded" && event.result?.animation && options.sendAnimation) {
+          const id = await options.sendAnimation(String(event.result.animation), String(event.result.text ?? ""), options.chatId);
+          await options.onDelivered?.(event, id);
+        } else if (event.type === "run_succeeded" && event.result?.text) {
+          const content: DeliveryContent = { id: String(event.result.finalSegmentId ?? event.result.resultId ?? event.runId), text: String(event.result.finalText ?? event.result.text), kind: "final", source: "execution" };
+          const delivery = options.deliver ? await options.deliver(event, content) : { complete: true, messageId: await options.send(content.text, options.chatId) };
+          if (delivery.complete && delivery.messageId !== undefined) await options.onDelivered?.(event, delivery.messageId);
+        } else if (event.type === "run_failed" || event.type === "run_cancelled") await options.send(event.type === "run_failed" ? "这条消息处理失败，请稍后重试。" : "这条消息已取消。", options.chatId);
+      });
       let draftId = nextDraftId++;
       let draftSegment: string | undefined;
       let current: { segmentId: string; text: string } | undefined;

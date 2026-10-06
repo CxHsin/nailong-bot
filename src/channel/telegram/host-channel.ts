@@ -24,6 +24,7 @@ export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId
   }
   const pickSticker = createNailongStickerPicker();
   const projection = createTelegramHostProjection({ ...options.transport,
+    recordProgress: (event, fact) => options.host.recordProgress(event, fact),
     sendSticker: options.transport.sendSticker ?? (async (category, chatId) =>
       (await bot.api.sendSticker(chatId, pickSticker(category))).message_id),
     sendAnimation: options.transport.sendAnimation ?? (async (animation, caption, chatId) => {

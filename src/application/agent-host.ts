@@ -115,7 +115,7 @@ export function createAgentHost(options: AgentHostOptions) {
       // Preserve the generated final separately from the Channel's assembled presentation.
       await log.append({ type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
       const finalized = (await log.read()).findLast((event) => event.type === "text_finalized" && event.requestId === context.runId && event.contentKind === "final");
-      return { text: answer, resultId: context.runId, kind: "model",
+      return { text: answer, finalText: final, resultId: context.runId, kind: "model",
         ...(finalized ? { finalSegmentId: finalized.textSegmentId } : {}),
         ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
@@ -131,6 +131,9 @@ export function createAgentHost(options: AgentHostOptions) {
     async deliverContent(event: HostEvent, content: DeliveryContent, transport: ContentTransport) {
       return deliverContent(conversationLog(options.log, event.conversationId), event.runId,
         conversationUserId(event.conversationId), content, transport);
+    },
+    async recordProgress(event: HostEvent, fact: Record<string, unknown>) {
+      await conversationLog(options.log, event.conversationId).append({ type: "telegram_progress_delivery", requestId: event.runId, contextPolicy: "exclude", ...fact });
     },
     async recordDelivery(event: HostEvent, delivery: { channel: "telegram" | "cli"; telegramMessageId?: number }) {
     if (event.type !== "run_succeeded") return;

@@ -6,6 +6,7 @@ export type TelegramRichTransportApi = {
   sendRich: (chatId: number, markdown: string) => Promise<number>;
   draftRich: (draftId: number, chatId: number, markdown: string, signal?: AbortSignal) => Promise<void>;
   sendHtml: (chatId: number, html: string) => Promise<number>;
+  editHtml?: (messageId: number, chatId: number, html: string) => Promise<void>;
   draftHtml: (draftId: number, chatId: number, html: string, signal?: AbortSignal) => Promise<void>;
 };
 
@@ -68,6 +69,15 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
   return {
     plan,
     sendPage,
+    ...(api.editHtml ? { editPage: async (messageId: number, text: string, chatId: number) => {
+      try { await api.editHtml!(messageId, chatId, text); }
+      catch (error) {
+        const description = String(field(error, "description") ?? field(error, "message") ?? "");
+        if (/message is not modified/i.test(description)) return;
+        if (field(error, "error_code") !== 400 || !/parse|entity|blockquote|unsupported/i.test(description)) throw error;
+        await api.editHtml!(messageId, chatId, text.replace(/<blockquote expandable>/g, "<blockquote>"));
+      }
+    } } : {}),
     async sendProgress(text: string, chatId: number, source: "execution" | "progress-model"): Promise<number> {
       let first: number | undefined;
       for (const page of plan({ id: "", text, kind: "progress", source })) {

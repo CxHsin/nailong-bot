@@ -16,7 +16,8 @@ export async function deliverContent(log: RuntimeLog, runId: string, chatId: num
   const settled = projectTimeline(facts).find((item) => item.id === content.id && item.runId === runId);
   if (settled && settled.text !== content.text) throw new Error("交付正文与已结算事实不一致");
   if (!settled && !facts.some((event) => event.type === "run_succeeded" && event.runId === runId &&
-    (event.result as { text?: unknown } | undefined)?.text === content.text)) throw new Error("内容尚未持久结算");
+    ((event.result as { text?: unknown } | undefined)?.text === content.text ||
+      content.kind === "final" && (event.result as { finalText?: unknown } | undefined)?.finalText === content.text))) throw new Error("内容尚未持久结算");
   let pages = facts.filter((event) => event.type === "telegram_page" && event.textSegmentId === content.id);
   if (!pages.length) {
     const texts = transport.plan?.(content) ?? [content.text];
