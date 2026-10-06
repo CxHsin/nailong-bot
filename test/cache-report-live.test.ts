@@ -226,3 +226,10 @@ test("cache taste thresholds preserve exact boundaries and suppress incomplete j
     assert.doesNotMatch(cacheReportText(report), /🦖 “/);
   }
 });
+
+test("feed ratio increases by 0.1, caps at 0.9 and preserves higher configuration", async () => {
+  const { fedContextRatio } = await import("../src/context/input-budget.js");
+  assert.equal(fedContextRatio(0.5), 0.6);
+  assert.equal(fedContextRatio(0.86), 0.9);
+  assert.equal(fedContextRatio(0.95), 0.95);
+});

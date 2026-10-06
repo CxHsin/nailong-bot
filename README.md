@@ -80,6 +80,8 @@ Telegram 私聊和 CLI chat／send 共用以下纯文字命令；CLI 单次调�
 | --- | --- |
 | `/help` | 查看命令帮助 |
 | `/kvcache` | 即时查询最近五组运行的缓存快照；不调用模型 |
+| `/feed` | 喂奶龙小面包，临时提升下一次普通对话上下文预算 |
+| `/dance` | Telegram 发送奶龙扭腰 GIF |
 | `/reset` | 排队开始新上下文，保留原始记录、长期记忆与累计统计 |
 | `/prompt`、`/prompt set 提示词`、`/prompt reset` | 查看、设置当前会话提示词，或恢复提示词文件中的默认值；下一请求生效 |
 | `/forget 节点引用` | 持久排除指定旧轮次；Telegram 也可回复目标消息发送 `/forget` |

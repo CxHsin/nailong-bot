@@ -1,4 +1,6 @@
-import type { Bot } from "grammy";
+import { InputFile, type Bot } from "grammy";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { createAgentHost } from "../../application/agent-host.js";
 import { AGENT_COMMANDS } from "../../application/agent-host.js";
@@ -19,7 +21,13 @@ export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId
   } catch (error) {
     options.reportFailure(new Error("Telegram 命令菜单同步失败；聊天继续启动，下次启动将重试。", { cause: error }));
   }
-  const projection = createTelegramHostProjection({ ...options.transport, chatId: ownerId, onDelivered: options.onDelivered,
+  const projection = createTelegramHostProjection({ ...options.transport,
+    sendAnimation: options.transport.sendAnimation ?? (async (animation, caption, chatId) => {
+      if (animation !== "nailong-dance") throw new Error("未知动画");
+      const sourcePath = fileURLToPath(new URL("../../../assets/nailong-dance.gif", import.meta.url));
+      const path = existsSync(sourcePath) ? sourcePath : fileURLToPath(new URL("../../../../assets/nailong-dance.gif", import.meta.url));
+      return (await bot.api.sendAnimation(chatId, new InputFile(path), { caption })).message_id;
+    }), chatId: ownerId, onDelivered: options.onDelivered,
     deliver: (event, content) => options.host.deliverContent(event, content, options.transport) });
   const input = registerTelegramInput(bot, { ownerId, botUsername: bot.botInfo.username, download: options.download, reportFailure: options.reportFailure,
     handle: async (update, started) => {

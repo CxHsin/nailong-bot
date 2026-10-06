@@ -26,14 +26,16 @@ test("Telegram startup registers owner commands before polling and routes authen
     answer: async () => { modelCalls++; return "answer"; },
   } });
   const responses: string[] = [];
+  const animations: string[] = [];
   const channel = await initializeTelegramHostChannel({ bot, ownerId: 42, host,
-    transport: { send: async (text) => { responses.push(text); return 1; } },
+    transport: { send: async (text) => { responses.push(text); return 1; },
+      sendAnimation: async (animation, caption, chatId) => { animations.push(animation); assert.equal(chatId, 42); assert.match(caption, /扭/); return 2; } },
     download: async () => ({ type: "image", mimeType: "image/png", data: "aW1n" }), reportFailure: (error) => { throw error; },
     onDelivered: (event, telegramMessageId) => host.recordDelivery(event, { channel: "telegram", telegramMessageId }) });
   await channel.start();
   const menu = methods.find((call) => call.method === "setMyCommands")!.payload;
   assert.deepEqual(menu.scope, { type: "chat", chat_id: 42 });
-  assert.deepEqual((menu.commands as Array<{ command: string }>).map((item) => item.command), ["help", "kvcache", "reset", "prompt", "forget", "memory"]);
+  assert.deepEqual((menu.commands as Array<{ command: string }>).map((item) => item.command), ["help", "kvcache", "dance", "feed", "reset", "prompt", "forget", "memory"]);
   assert.equal(menu.language_code, undefined);
   assert.ok(methods.findIndex((call) => call.method === "setMyCommands") < methods.findIndex((call) => call.method === "polling"));
   let updateId = 0;
@@ -48,6 +50,11 @@ test("Telegram startup registers owner commands before polling and routes authen
   await send("/missing@test_bot"); assert.match(responses.at(-1)!, /未知命令/);
   await send("/kvcache@other_bot"); await send("/kvcache", 99); await send("/kvcache", 42, "group");
   assert.equal(responses.length, 2); assert.equal(modelCalls, 0);
+  await send("/dance@test_bot");
+  assert.deepEqual(animations, ["nailong-dance"]);
+  assert.equal(responses.length, 2); assert.equal(modelCalls, 0);
+  await send("/dance", 99); await send("/dance@other_bot");
+  assert.equal(animations.length, 1);
   await send("/reset", 42, "private", true); assert.equal(modelCalls, 1);
   await send("remember value"); assert.equal(modelCalls, 2);
   await send("/forget", 42, "private", false, true);

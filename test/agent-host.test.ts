@@ -164,3 +164,23 @@ test("Host cache report uses five ended model Runs when idle and weighted durabl
   const other = await restored.submit({ actor: { id: "owner" }, conversationId: "c2", text: "/kvcache" }).done;
   assert.match(String(other.result?.text), /暂无/);
 });
+
+test("feed survives Host restart, is isolated, consumed once and never enters chat", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "feed-host-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  const seen: Array<boolean | undefined> = [];
+  const options = { dataDir: dir, promptFile: "system-prompt.md", log, agent: { answer: async (messages: import("../src/application/app-types.js").Message[], request: import("../src/application/app-types.js").Request) => {
+    assert.ok(messages.every((m) => !m.text.includes("/feed")));
+    seen.push(request.contextBudgetBoost); return "ok";
+  } } };
+  let host = createAgentHost(options);
+  const send = (text: string, conversationId = "c") => host.submit({ actor: { id: "owner" }, conversationId, text }).done;
+  assert.match(String((await send("/feed bad")).result?.text), /用法/);
+  await send("/feed"); await send("/feed");
+  host = createAgentHost(options);
+  await send("hello", "other");
+  assert.equal((await send("/dance")).result?.animation, "nailong-dance");
+  await send("/kvcache"); await send("hello"); await send("again");
+  assert.deepEqual(seen, [undefined, true, undefined]);
+});

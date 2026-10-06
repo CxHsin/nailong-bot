@@ -4,6 +4,7 @@ import type { DeliveryContent, ContentTransport } from "../../runtime/content-de
 export type TelegramHostTransport = ContentTransport & {
   draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
+  sendAnimation?: (animation: string, caption: string, chatId: number) => Promise<number>;
   sendProgress?: (text: string, chatId: number, source: "execution" | "progress-model") => Promise<number>;
 };
 
@@ -102,7 +103,10 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             clearInterval(timer);
             await pending;
             await formal;
-            if (event.type === "run_succeeded" && event.result?.text) {
+            if (event.type === "run_succeeded" && event.result?.animation && options.sendAnimation) {
+              const messageId = await options.sendAnimation(String(event.result.animation), String(event.result.text ?? ""), options.chatId);
+              await options.onDelivered?.(event, messageId);
+            } else if (event.type === "run_succeeded" && event.result?.text) {
               const delivery = options.deliver ? await options.deliver(event, { id: String(event.result.finalSegmentId ?? event.result.resultId ?? event.runId),
                 text: String(event.result.text), kind: "final", source: "execution" }) : { complete: true, messageId: await options.send(String(event.result.text), options.chatId) };
               if (delivery.complete && delivery.messageId !== undefined) await options.onDelivered?.(event, delivery.messageId);

@@ -15,7 +15,9 @@ import { projectTimeline } from "../runtime/timeline.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
-  { command: "kvcache", description: "查看四次已结束及当前运行的缓存详情", usage: "/kvcache" },
+  { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
+  { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
+  { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
   { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
   { command: "prompt", description: "查看、设置或恢复 bot 提示词", usage: "/prompt；/prompt set 提示词；/prompt reset" },
   { command: "forget", description: "排除指定旧轮次的记忆和上下文", usage: "/forget 节点引用；回复目标消息发送 /forget" },
@@ -37,12 +39,17 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   const definition = AGENT_COMMANDS.find((item) => item.command === name);
   await log.append({ type: "command_received", command: name, messageId: input.metadata?.messageId, contextPolicy: "exclude" });
   if (!definition) return { text: "未知命令，请发送 /help 查看帮助。", kind: "control" };
-  if (["help", "kvcache", "reset"].includes(name) && text !== `/${name}`)
+  if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
     return { text: `用法：${definition.usage}`, kind: "control" };
   if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n"), kind: "control" };
   if (name === "kvcache") {
     const cache = cacheStatistics(await options.log.read(), input.conversationId);
     return { text: cacheReportText(cache), cache, kind: "control" };
+  }
+  if (name === "dance") return { text: "奶龙扭起来啦！", animation: "nailong-dance", kind: "control" };
+  if (name === "feed") {
+    await log.append({ type: "context_feed", contextPolicy: "exclude" });
+    return { text: "你喂了奶龙一个奶香小面包，奶龙满足地拍了拍肚皮，现在的上下文精神头提升了 100%！", kind: "control" };
   }
   if (name === "reset") {
     await log.append({ type: "conversation_reset", source: "channel", contextPolicy: "exclude" });
@@ -85,9 +92,13 @@ export function createAgentHost(options: AgentHostOptions) {
     await log.append({ type: "request_started", requestId: context.runId });
     const results = new Map<string, string>();
     const history = await log.read();
+    const feedIndex = history.findLastIndex((event) => event.type === "context_feed");
+    const usedIndex = history.findLastIndex((event) => event.type === "context_feed_consumed");
+    const fed = feedIndex > usedIndex;
+    if (fed) await log.append({ type: "context_feed_consumed", requestId: context.runId, contextPolicy: "exclude" });
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
     let summaries: ReturnType<typeof startProgressSummaries> | undefined;
-    const request: Request = { id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
+    const request: Request = { ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
       onProgress: (progress) => {
         if (progress.type === "text" && progress.source !== "progress-model") summaries?.primaryText(progress.finalized);
         if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);

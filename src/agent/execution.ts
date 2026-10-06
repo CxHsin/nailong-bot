@@ -9,7 +9,7 @@ import { createToolPathPolicy } from "./tool-path-policy.js";
 import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames, normalizeOutputWhitespace, recoverFinalEnvelope } from "./output-protocol.js";
 import { composeMemory, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
 import type { createMemoryProjection } from "../memory/projection.js";
-import { estimateInput, modelInputBudget } from "../context/input-budget.js";
+import { estimateInput, modelInputBudget, fedContextRatio } from "../context/input-budget.js";
 import { recordModelUsage } from "./model-usage.js";
 import { projectProviderContext } from "../context/provider-aware.js";
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
@@ -85,9 +85,11 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   if (projectionIdentity) session.agent.sessionId = projectionIdentity.cacheKey;
   const user = request && (await request.log.read()).find((e) => e.requestId === request.id && e.role === "user");
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
+  const budgetRatio = request?.contextBudgetBoost ? fedContextRatio(modelInputBudget(model, options.contextBudgetRatio, options.modelBudgetRatios).ratio) : options.contextBudgetRatio;
+  const budgetRatios = request?.contextBudgetBoost ? undefined : options.modelBudgetRatios;
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     conversationId: request.conversationId, structured: !plain,
-    ratio: options.contextBudgetRatio, ratios: options.modelBudgetRatios,
+    ratio: budgetRatio, ratios: budgetRatios,
     summarize: async (context, maxTokens) => {
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
@@ -108,7 +110,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const inputBudget = modelInputBudget(selected, options.contextBudgetRatio, options.modelBudgetRatios).budget;
+        const inputBudget = modelInputBudget(selected, budgetRatio, budgetRatios).budget;
         const date: Message = { role: "user", timestamp: 0, content: `运行层当前日期（背景资料）：${(options.now?.() ?? new Date()).toISOString().slice(0, 10)}` };
         const reserve = snapshot ? 0 : (recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0) +
           (request?.conversationId ? estimateInput({ messages: [date] }) - estimateInput({ messages: [] }) : 0);
