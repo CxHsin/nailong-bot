@@ -76,8 +76,10 @@ test("cache report separates four ended runs, current run, pending and missing t
   assert.match(text, /奶龙赛博反刍胃囊报表/);
   assert.equal([...text.matchAll(/缓存命中率：/g)].length, 5);
   assert.doesNotMatch(text, /第[一二三四五]次/);
-  assert.deepEqual([...text.matchAll(/^(\d)\./gm)].map((match) => match[1]), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual([...text.matchAll(/^\*\*(\d)\./gm)].map((match) => match[1]), ["1", "2", "3", "4", "5"]);
   assert.equal(report.recent.length, 4);
+  assert.doesNotMatch(text.split("**2.")[0]!, /入口即化|完美反刍|半生不熟|咯牙警告|🦖 “/);
+  assert.equal(cacheReportText(report), text, "same run keeps the same quote");
   const idle = cacheStatistics([...events, { type: "run_succeeded", runId: "active", conversationId: "c", at: "2026-10-06T10:06:00Z" }], "c");
   assert.equal(idle.recent.length, 5);
   assert.equal([...cacheReportText(idle).matchAll(/缓存命中率：/g)].length, 5);
@@ -212,4 +214,15 @@ test("production Provider stream reports pending before usage and exact cache to
   assert.equal(report.recent[0]?.runId, run.runId);
   assert.deepEqual(report.execution, { hit: 80, miss: 20, input: 100, hitRate: 0.8, calls: 1, measured: 1, pending: 0 });
   assert.match(String(after.result?.text), /80\.00%/);
+});
+
+test("cache taste thresholds preserve exact boundaries and suppress incomplete judgments", () => {
+  const report = cacheStatistics([], "c");
+  for (const [rate, label] of [[0.91, "入口即化"], [0.9, "完美反刍"], [0.71, "完美反刍"], [0.7, "半生不熟"], [0.41, "半生不熟"], [0.4, "咯牙警告"]] as const) {
+    report.recent = [{ runId: "stable", state: "succeeded", completedAt: "", auxiliary: report.auxiliary,
+      execution: { hit: rate * 100, miss: (1 - rate) * 100, input: 100, hitRate: rate, calls: 1, measured: 1, pending: 0 } }];
+    assert.ok(cacheReportText(report).includes(label));
+    report.recent[0]!.execution.measured = 0;
+    assert.doesNotMatch(cacheReportText(report), /🦖 “/);
+  }
 });

@@ -81,9 +81,30 @@ function line(totals: CacheTotals): string {
     (notes.length ? `\n${notes.join("；")}，以上仅计已返回的有效用量。` : "");
 }
 
+function taste(run: CacheRun): { label: string; quote: string } | undefined {
+  const usage = run.execution;
+  if (usage.hitRate === null || usage.pending || usage.measured < usage.calls) return undefined;
+  const band = usage.hitRate > 0.9 ? {
+    label: "🟢 入口即化", quotes: ["熟悉的味道，哧溜一下就咽啦！", "这口软乎乎，奶龙不用使劲嚼！"],
+  } : usage.hitRate > 0.7 ? {
+    label: "🟢 完美反刍", quotes: ["还是熟悉的配方，吧唧吧唧，嗝～", "这口熟悉的味道不少，嚼起来香香的！"],
+  } : usage.hitRate > 0.4 ? {
+    label: "🟡 半生不熟", quotes: ["一半软一半硬，奶龙喝口水再嚼！", "这口得多嚼两下，咕噜咕噜……"],
+  } : {
+    label: "🔴 咯牙警告", quotes: ["嗷呜，这口有点硬，奶龙认真嚼！", "这口新料不少，后槽牙开始忙啦！"],
+  };
+  // Stable across repeated queries, without another model call or random output.
+  const choice = [...run.runId].reduce((hash, char) => (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0, 0);
+  return { label: band.label, quote: band.quotes[choice % band.quotes.length]! };
+}
+
 export function cacheReportText(report: CacheReport): string {
   const runs = [...(report.current ? [report.current] : []), ...report.recent];
   const states: Record<string, string> = { running: "当前运行 · 进行中", failed: "失败", cancelled: "已取消" };
-  const rows = runs.map((run, index) => `${index + 1}.${states[run.state] ? ` ${states[run.state]}` : ""}\n${line(run.execution)}`);
+  const rows = runs.map((run, index) => {
+    const flavor = taste(run);
+    const heading = `${index + 1}.${flavor ? ` ${flavor.label}` : ""}${states[run.state] ? `（${states[run.state]}）` : ""}`;
+    return `**${heading}**\n${line(run.execution)}${flavor ? `\n🦖 “${flavor.quote}”` : ""}`;
+  });
   return ["🦖 **【奶龙赛博反刍胃囊报表】**", rows.length ? rows.join("\n\n") : "暂无模型运行数据。"].join("\n\n");
 }
