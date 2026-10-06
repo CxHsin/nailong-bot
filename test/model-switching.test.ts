@@ -1,9 +1,10 @@
+import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type ServerResponse } from "node:http";
+import type { ServerResponse } from "node:http";
 import { createAgentHost } from "../src/application/agent-host.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createRuntimeEventLog } from "../src/runtime/event-log.js";
@@ -107,7 +108,7 @@ test("production Host switches DS → XH Responses → DS with tools, restart hi
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful"); await writeFile(join(dir, "note.txt"), "source evidence");
   const seen: Array<{ path: string; body: Record<string, unknown>; auth?: string }> = [];
   let gptCalls = 0;
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let text = ""; for await (const chunk of req) text += chunk;
     seen.push({ path: req.url!, body: JSON.parse(text), auth: req.headers.authorization });
     if (req.url === "/v1/responses") responses(res, ++gptCalls === 1);
@@ -157,7 +158,7 @@ test("GPT compacts oversized recent turns through Responses and continues with t
   const dir = await mkdtemp(join(tmpdir(), "xh-compaction-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   let summaries = 0; const requests: Record<string, unknown>[] = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let text = ""; for await (const chunk of req) text += chunk;
     const body = JSON.parse(text); requests.push(body);
     if (text.includes("HISTORY_COMPACTION")) {
@@ -190,7 +191,7 @@ test("GPT compacts oversized recent turns through Responses and continues with t
 test("XH rejection fails the Run without silently invoking DS", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "xh-rejection-")); const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   const paths: string[] = [];
-  const server = createServer((req, res) => { paths.push(req.url!); res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "invalid token" } })); });
+  const server = createTestServer(t, (req, res) => { paths.push(req.url!); res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "invalid token" } })); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false,

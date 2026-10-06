@@ -1,9 +1,9 @@
+import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "node:http";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createApp } from "../src/application/app.js";
@@ -120,7 +120,7 @@ test("production Pi forwards live previews, reads decoded body and restores full
   t.mock.method(Client.prototype, "listTools", async () => ({ tools: ["search", "fetch_content"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }));
   t.mock.method(Client.prototype, "callTool", async () => ({ content: result.content }));
   let calls = 0;
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const data = JSON.parse(body);
