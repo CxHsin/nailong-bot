@@ -222,7 +222,10 @@ test(`${race} during summary settlement invalidates delivery and replay`, async 
   const run = host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:42", text: "检查" }); const consume = projection.consume(run);
   t.after(async () => { release(); await consume; await rm(dir, { recursive: true, force: true }); });
   await ready; t.mock.timers.tick(15_000);
-  for (let i = 0; i < 30; i++) await raw.read();
+  const deadline = performance.now() + 5000;
+  while (!(await raw.read()).some((event) => event.type === "text_discarded" && event.reason === "stale_summary") && performance.now() < deadline) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
   const facts = await raw.read();
   assert.ok(facts.some((event) => event.type === "text_discarded" && event.reason === "stale_summary"));
   assert.deepEqual(sent, []);
