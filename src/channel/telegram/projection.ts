@@ -30,6 +30,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
       let publishedAt = 0;
       let finished = false;
       let control = false;
+      const statusLines = new Map<string, string>();
       let unavailable = false;
       let sending = false;
       let pending = Promise.resolve();
@@ -74,6 +75,19 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
             if (!progress) latest = event.text ?? latest; // Legacy Host envelope compatibility.
             else {
               if (progress.type === "text") {
+                if (progress.kind === "status") {
+                  statusLines.set(progress.segmentId, progress.text);
+                  const text = [...statusLines.values()].slice(-5).join("\n\n");
+                  if (draftSegment !== "runtime-status") {
+                    draftSegment = "runtime-status";
+                    draftId = nextDraftId++;
+                    published = "";
+                  }
+                  current = { segmentId: "runtime-status", text };
+                  tool = "";
+                  latest = text;
+                  continue;
+                }
                 if (draftSegment !== progress.segmentId) {
                   draftSegment = progress.segmentId;
                   draftId = nextDraftId++;

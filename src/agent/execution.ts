@@ -96,7 +96,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
       const stream = await providerStream(model, context, deepseekCacheOptions({ maxTokens, signal: session.agent.signal }));
       let initialUsage: Usage | undefined;
-      for await (const event of stream) if (event.type === "start") initialUsage = event.partial.usage;
+      for await (const event of stream) {
+        if (event.type === "start") initialUsage = event.partial.usage;
+        if (event.type === "text_delta") {
+          const partial = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+          request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint-stream`, kind: "status", text: `奶龙正在续写小本本：\n${Array.from(partial).slice(-800).join("")}`, finalized: false, formal: false, source: "execution" });
+        }
+      }
       const response = await stream.result();
       await recordModelUsage(request, callId, "summary", response, initialUsage);
       if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
@@ -142,6 +148,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
+        request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "记忆和上下文已经准备好，奶龙正在等待模型输出……", finalized: true, formal: false, source: "execution" });
         const source = await providerStream(selected, combined.context, deepseekCacheOptions({ ...streamOptions,
           maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }));
         let producedOutput = false;

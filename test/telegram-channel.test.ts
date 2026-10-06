@@ -222,3 +222,25 @@ test("draft deadline cancels the request and disables late draft updates", async
   run.push("run_succeeded", { result: { text: "完成" } }); await consume;
   assert.deepEqual(sent, ["完成"]);
 });
+
+test("runtime status streams grow in one draft and partial checkpoint text replaces its prior chunk", async () => {
+  const drafts: Array<{ id: number; text: string }> = [];
+  const projection = createTelegramHostProjection({ chatId: 42, draftIntervalMs: 1,
+    draft: async (id, text) => { drafts.push({ id, text }); }, send: async () => 1 });
+  const values: HostEvent[] = [
+    { type: "run_started", schemaVersion: 1, runId: "r", conversationId: "c", sequence: 1, at: "now" },
+    ...[ ["recall", "翻小本本"], ["ready", "找到相关记录"], ["checkpoint", "摘要第一段"], ["checkpoint", "摘要第一段，接着第二段"] ].map(([segmentId, text], index) => ({
+      type: "progress" as const, schemaVersion: 1, runId: "r", conversationId: "c", sequence: index + 2, at: "now",
+      progress: { type: "text" as const, segmentId: segmentId!, text: text!, kind: "status" as const, finalized: false, formal: false },
+    })),
+    { type: "run_succeeded", schemaVersion: 1, runId: "r", conversationId: "c", sequence: 6, at: "now", result: { text: "完成" } },
+  ];
+  const handle = { runId: "r", conversationId: "c", cancel: async () => false, done: Promise.resolve(values.at(-1)!),
+    events: async function* () { for (const value of values) { yield value; await new Promise((resolve) => setTimeout(resolve, 10)); } } } as RunHandle;
+  await projection.consume(handle);
+  const status = drafts.filter((draft) => draft.text.includes("翻小本本"));
+  assert.ok(status.length >= 3);
+  assert.equal(new Set(status.map((draft) => draft.id)).size, 1);
+  assert.match(status.at(-1)!.text, /翻小本本[\s\S]*找到相关记录[\s\S]*摘要第一段，接着第二段/);
+  assert.equal(status.at(-1)!.text.split("摘要第一段").length - 1, 1);
+});
