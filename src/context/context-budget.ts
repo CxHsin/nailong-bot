@@ -54,9 +54,27 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       const preferred = candidates.filter((c) => !recentIds.includes(c.requestId) && c.requestId !== options.requestId);
       const ordered = [...preferred, ...candidates.filter((c) => !preferred.includes(c))];
       let forcedOnce = false;
-      for (const candidate of ordered) {
+      while (true) {
         if (estimateInput(projected) <= budget && (!force || forcedOnce)) break;
-        if (candidate.through <= (checkpoint?.through ?? 0)) continue;
+        const remaining = ordered.filter((candidate) => candidate.through > (checkpoint?.through ?? 0));
+        if (!remaining.length) break;
+        const preferredRemaining = remaining.filter((candidate) => preferred.includes(candidate));
+        const batchCandidates = preferredRemaining.length ? preferredRemaining : remaining;
+        // Fill one summary input with complete safe turns. If the first turn itself
+        // is oversized, retain the tool-result splitting path below.
+        let candidate = batchCandidates[0]!;
+        for (const next of batchCandidates) {
+          const batch = replay.units.filter((unit) => unit.through > (checkpoint?.through ?? 0) && unit.through <= next.through);
+          if (estimateInput(summaryInput(checkpoint?.summary, batch.flatMap((unit) => unit.summaryMessages ?? unit.messages))) > budget) break;
+          candidate = next;
+          // Stop once the remaining originals fit with room for the new summary;
+          // do not consume every recent turn merely because a larger batch fits.
+          const suffix = replay.units.filter((unit) => unit.through > next.through).flatMap((unit) => unit.messages);
+          if (!suffix.includes(replay.current)) {
+            suffix.unshift(...(replay.units.find((unit) => unit.messages.includes(replay.current))?.messages ?? [replay.current]));
+          }
+          if (estimateInput({ ...context, messages: suffix }) <= budget * 0.85) break;
+        }
         const fold = replay.units.filter((u) => u.through > (checkpoint?.through ?? 0) && u.through <= candidate.through);
         const history = fold.flatMap((u) => u.summaryMessages ?? u.messages);
         try {
