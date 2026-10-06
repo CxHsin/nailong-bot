@@ -1,6 +1,40 @@
 import { createHash } from "node:crypto";
 import type { ContentPart } from "../host/content-parts.js";
 import type { StoredEvent } from "../runtime/runtime-types.js";
+import type { Api, AssistantMessage, Context, Model, Message as NativeMessage } from "@mariozechner/pi-ai";
+
+/** Only opaque, same-model Responses reasoning is eligible for native replay. */
+export function replayableReasoning(message: AssistantMessage, model: Model<Api>) {
+  if (model.api !== "openai-responses" || !model.reasoning || message.api !== model.api ||
+    message.provider !== model.provider || message.model !== model.id) return [];
+  return message.content.filter((part) => {
+    if (part.type !== "thinking" || !part.thinkingSignature || part.thinkingSignature.length > 262_144) return false;
+    try {
+      const item = JSON.parse(part.thinkingSignature);
+      return item?.type === "reasoning" && typeof item.id === "string" &&
+        typeof item.encrypted_content === "string" && item.encrypted_content.length > 0;
+    } catch { return false; }
+  }).map((part) => ({ ...part, ...(part.type === "thinking" ? { thinking: "" } : {}) }));
+}
+
+/** Preserve the existing fact/compaction pipeline; enforce the native Provider contract at its output. */
+export function projectNativeContext(context: Context, model: Model<Api>): Context {
+  return { ...context, messages: context.messages.flatMap((message): NativeMessage[] => {
+    if (message.role === "user") {
+      if (!model.input.includes("image") && Array.isArray(message.content) && message.content.some((part) => part.type === "image"))
+        throw new Error("当前模型不支持历史或当前图片输入");
+      return [message];
+    }
+    if (message.role !== "assistant") return [message];
+    const same = message.api === model.api && message.provider === model.provider && message.model === model.id;
+    const content = [...replayableReasoning(message, model), ...message.content.filter((part) => part.type !== "thinking").map((part) => {
+      if (!same && part.type === "text") { const { textSignature: _signature, ...text } = part; return text; }
+      if (!same && part.type === "toolCall") { const { thoughtSignature: _signature, ...call } = part; return call; }
+      return part;
+    })];
+    return content.length ? [{ ...message, content }] : [];
+  }) };
+}
 
 export type ProviderCapabilities = {
   provider: string;

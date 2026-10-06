@@ -40,6 +40,10 @@ _Avoid_: delivered message (settlement does not prove delivery)
 The Provider-aware transformation from durable runtime records into the exact model input items for one request.
 _Avoid_: chat history (which includes records that may never be sent to a model)
 
+**Recent Turn**:
+One user input and its replayable assistant messages and paired tool exchanges. Context Projection retains the latest three prior turns plus the current turn; older relevant memory is recalled by Akasha.
+_Avoid_: model step, three messages
+
 **Delivery Fact**:
 A durable record of a channel delivery attempt and its known outcome, scoped to a run result and channel target.
 _Avoid_: assistant message (which may exist before delivery)

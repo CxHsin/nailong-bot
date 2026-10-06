@@ -79,8 +79,8 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   for (let index = 0; index < 6; index++) {
-    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(1500), conversationId: "c1" });
-    await log.append({ type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), conversationId: "c1" });
+    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(4000), conversationId: "c1" });
+    await log.append({ type: "message", role: "assistant", text: "answer:" + "y".repeat(4000), conversationId: "c1" });
   }
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = async (text: string, conversationId = "c1") => {
@@ -96,8 +96,9 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   await send("/forget other-secret", "c2");
   const previousSummaries = summaries;
   await send("continue again");
-  assert.ok(summaryInputs.slice(previousSummaries).every((input) => input.previousSummary?.includes("Earlier work completed")),
-    "further c1 compaction must continue its checkpoint after forgetting in c2");
+  assert.ok(summaries > previousSummaries, "the remaining recent originals still require local compaction");
+  assert.equal(summaryInputs[previousSummaries]!.previousSummary, undefined,
+    "a shifted recent-turn window must not reuse a summary containing an expired turn");
   zero = true; await send("zero", "c2");
   const empty = (await send("/kvcache", "c2")).result?.cache as { execution: { input: number; measured: number; hitRate: number | null } };
   assert.equal(empty.execution.input, 0); assert.equal(empty.execution.measured, 1); assert.equal(empty.execution.hitRate, null);

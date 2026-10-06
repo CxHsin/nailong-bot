@@ -19,7 +19,7 @@ test("incremental replay equals full replay, survives restart and invalidates re
     await log.append({ type: "answer_generated", requestId: `r${i}`, text: `answer${i}` });
     await log.append({ type: "run_succeeded", runId: `r${i}`, requestId: `r${i}`, result: { kind: "model" } });
   }
-  const result = { content: [{ type: "text" as const, text: "checked file" }], details: {}, isError: false };
+  const result = { content: [{ type: "text" as const, text: "checked file ".repeat(2000) }], details: {}, isError: false };
   const archive = await log.archive(result);
   const message = assistantText("", model); message.content = [{ type: "toolCall", id: "old-call", name: "read", arguments: { path: "file" } }];
   await log.append({ type: "model_message", requestId: "r29", message });
@@ -48,14 +48,19 @@ test("incremental replay equals full replay, survives restart and invalidates re
   const nextMessage = assistantText("", model); nextMessage.content = [{ type: "toolCall", id: "new-call", name: "read", arguments: { path: "file" } }];
   await log.append({ type: "model_message", requestId: "current", message: nextMessage });
   await log.append({ type: "tool_dispatch", requestId: "current", toolCallId: "new-call", toolName: "read", args: { path: "file" } });
-  await log.append({ type: "tool_result", requestId: "current", toolCallId: "new-call", toolName: "read", result, archive });
-  await compare("current");
+  await log.append({ type: "tool_result", requestId: "current", toolCallId: "new-call", toolName: "read", result, archive, modelVisible: "archive" });
+  const live = await compare("current");
+  const liveResult = live.units.flatMap((unit) => unit.messages).find((message) => message.role === "toolResult" && message.toolCallId === "new-call");
+  assert.match(JSON.stringify(liveResult), /工具结果已归档/);
   assert.equal(recoveries, recoveredBefore, "same verified archive reused by a new step");
   await log.append({ type: "answer_generated", requestId: "r2", text: "late" });
   await log.append({ type: "run_succeeded", runId: "r2", requestId: "r2", result: { kind: "model" } });
   await compare("current");
   await log.append({ type: "message", role: "user", requestId: "new-question", text: "next question" });
-  await compare("new-question");
+  const historical = await compare("new-question");
+  const restoredResult = historical.units.flatMap((unit) => unit.messages).find((message) => message.role === "toolResult" && message.toolCallId === "new-call");
+  assert.ok(restoredResult?.role === "toolResult");
+  assert.deepEqual(restoredResult.content, result.content);
   const different = createReplayCache(dir, "c/model/changed-prompt");
   assert.equal((await different.replay(log, "current", model, false)).processedEvents, (await log.read()).length);
   await log.append({ type: "memory_excluded", nodeId: "r4" });
