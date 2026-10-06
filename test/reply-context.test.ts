@@ -48,10 +48,10 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
     await channel.finish();
   };
   await send("/kvcache"); assert.equal(seen.length, 0);
-  await send("你好"); assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /KV cache/);
+  await send("你好"); assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /奶龙赛博反刍胃囊报表/);
   await send("这数据似乎并不是实时的？", 9001);
-  assert.match(JSON.stringify(seen.at(-2)!.messages), /KV cache/);
-  assert.match(JSON.stringify(seen.at(-1)!.messages), /KV cache/);
+  assert.match(JSON.stringify(seen.at(-2)!.messages), /奶龙赛博反刍胃囊报表/);
+  assert.match(JSON.stringify(seen.at(-1)!.messages), /奶龙赛博反刍胃囊报表/);
   assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /客户端片段不是可信来源/);
   const events = await log.read();
   const question = events.find((e) => e.type === "message" && e.originalText === "这数据似乎并不是实时的？")!;
@@ -59,8 +59,8 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
   assert.equal(question.replyToMessageId, 9001);
   const reportRun = events.find((e) => e.type === "run_succeeded" && (e.result as { cache?: unknown })?.cache)!.runId;
   await log.append({ type: "memory_excluded", nodeId: reportRun, conversationId: "telegram:private:42" });
-  await send("继续"); assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /KV cache/);
-  assert.match(sent[0]!, /查询快照/);
+  await send("继续"); assert.doesNotMatch(JSON.stringify(seen.at(-1)!.messages), /奶龙赛博反刍胃囊报表/);
+  assert.match(sent[0]!, /奶龙赛博反刍胃囊报表/);
 });
 
 test("reply resolution excludes foreign, undelivered, unknown and non-cache control reports", async (t) => {
@@ -76,7 +76,7 @@ test("reply resolution excludes foreign, undelivered, unknown and non-cache cont
   await host.recordDelivery(help, { channel: "telegram", telegramMessageId: 101 });
   for (const [owner, reply] of [[99, 100], [42, 999], [42, 101]]) {
     await host.submit(normalizeTelegramInput({ fromId: owner!, chatId: owner!, chatType: "private", messageId: reply!, replyToMessageId: reply, text: "这数据" })).done;
-    assert.doesNotMatch(histories.at(-1)!, /KV cache|查看命令帮助/);
+    assert.doesNotMatch(histories.at(-1)!, /奶龙赛博反刍胃囊报表|查看命令帮助/);
   }
   assert.equal((await log.read()).some((e) => e.type === "delivery_succeeded" && e.runId === undelivered.runId), false);
 });

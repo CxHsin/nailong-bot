@@ -58,6 +58,10 @@ test("production Pi progress reaches Telegram and stage results survive final de
   assert.deepEqual(sent, ["目录中有 prompt.md。\n\n检查完成。"]);
   assert.equal(calls, 3);
   assert.deepEqual(observed.flatMap((event) => event.progress?.type === "tool" ? [event.progress.state] : []), ["started", "completed"]);
+  const toolProgress = observed.flatMap((event) => event.progress?.type === "tool" ? [event.progress] : []);
+  assert.ok(toolProgress[0]?.callId);
+  assert.equal(toolProgress[0]?.callId, toolProgress[1]?.callId);
+  assert.ok((await log.read()).some((event) => event.type === "context_phase_timing" && typeof event.restoreMs === "number" && typeof event.selectMs === "number" && typeof event.loadMs === "number"));
   assert.ok(inputs.every((messages) => !messages.some((message) => JSON.stringify(message.content).includes("正在调用"))));
   const events = await log.read();
   assert.ok(events.some((event) => event.type === "tool_dispatch" && event.toolName === "ls"));

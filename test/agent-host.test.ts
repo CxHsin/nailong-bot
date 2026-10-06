@@ -118,7 +118,7 @@ test("reset is queued behind active work and cancelled consumption and legacy ow
   assert.equal(restored.execution.hit, 15); assert.equal(restored.execution.miss, 5); assert.equal(restored.unassignedCalls, 1);
 });
 
-test("Host cache report uses four ended model Runs and weighted durable Conversation totals", async (t) => {
+test("Host cache report uses five ended model Runs when idle and weighted durable Conversation totals", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "host-cache-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const log = createRuntimeLog(dir);
@@ -152,9 +152,9 @@ test("Host cache report uses four ended model Runs and weighted durable Conversa
     execution: { hit: number; miss: number; input: number; hitRate: number; calls: number; measured: number };
     auxiliary: { hit: number; miss: number };
   };
-  assert.deepEqual(report.recent.map((run) => run.runId), [runs[4]!.id, runs[3]!.id, runs[2]!.id, runs[1]!.id]);
+  assert.deepEqual(report.recent.map((run) => run.runId), [runs[4]!.id, runs[3]!.id, runs[2]!.id, runs[1]!.id, runs[0]!.id]);
   assert.equal(report.recent[0]!.state, "failed");
-  assert.deepEqual(report.execution, { hit: 1300, miss: 300, input: 1600, hitRate: 0.8125, calls: 6, measured: 4 });
+  assert.deepEqual(report.execution, { hit: 1300, miss: 300, input: 1600, hitRate: 0.8125, calls: 6, measured: 4, pending: 0 });
   assert.equal(report.auxiliary.hit, 10);
   assert.equal(report.auxiliary.miss, 20);
   await send("/reset");
@@ -163,4 +163,24 @@ test("Host cache report uses four ended model Runs and weighted durable Conversa
   assert.deepEqual(after.result?.cache, report);
   const other = await restored.submit({ actor: { id: "owner" }, conversationId: "c2", text: "/kvcache" }).done;
   assert.match(String(other.result?.text), /暂无/);
+});
+
+test("feed survives Host restart, is isolated, consumed once and never enters chat", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "feed-host-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  const seen: Array<boolean | undefined> = [];
+  const options = { dataDir: dir, promptFile: "system-prompt.md", log, agent: { answer: async (messages: import("../src/application/app-types.js").Message[], request: import("../src/application/app-types.js").Request) => {
+    assert.ok(messages.every((m) => !m.text.includes("/feed")));
+    seen.push(request.contextBudgetBoost); return "ok";
+  } } };
+  let host = createAgentHost(options);
+  const send = (text: string, conversationId = "c") => host.submit({ actor: { id: "owner" }, conversationId, text }).done;
+  assert.match(String((await send("/feed bad")).result?.text), /用法/);
+  await send("/feed"); await send("/feed");
+  host = createAgentHost(options);
+  await send("hello", "other");
+  assert.equal((await send("/dance")).result?.stickerCategory, "dance");
+  await send("/kvcache"); await send("hello"); await send("again");
+  assert.deepEqual(seen, [undefined, true, undefined]);
 });

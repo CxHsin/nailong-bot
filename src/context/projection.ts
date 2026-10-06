@@ -13,9 +13,9 @@ import { userInputText } from "../runtime/reply-context.js";
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
-  diagnostics: string[] };
+  diagnostics: string[]; processedEvents?: number };
 
-export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false): Promise<Replay> {
+export async function replayEvents(log: RuntimeLog, currentId: string, model: Model<Api>, structured = false, onProgress?: (checked: number, total: number) => void, signal?: AbortSignal, seed?: { replay: Replay; start: number }): Promise<Replay> {
   const rawEvents = await log.read();
   const hostConversationReplay = rawEvents.some((event) => event.requestId === currentId && typeof event.conversationId === "string");
   const excluded = memoryExclusions(rawEvents);
@@ -25,8 +25,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   const reset = all.findLastIndex((event) => event.type === "reset" || event.type === "conversation_reset");
   const events = all.slice(reset + 1);
   const resultDelivered = (segmentId: unknown) => segmentDelivery(events, segmentId).complete;
-  const units: ReplayUnit[] = [];
-  const diagnostics: string[] = [];
+  const units: ReplayUnit[] = seed ? structuredClone(seed.replay.units.filter((unit) => unit.through <= seed.start && !(unit.summaryMessages?.length === 0 && unit.requestId !== currentId))) : [];
+  const affectedIds = new Set(events.slice(seed?.start ?? 0).map((event) => event.requestId ?? event.runId).filter((id): id is string => typeof id === "string"));
+  const diagnostics: string[] = seed ? seed.replay.diagnostics.filter((item) => !item.startsWith("unmatched_tool_") && ![...affectedIds].some((id) => item.startsWith(`outcome_unknown:${id}:`))) : [];
   const key = (e: StoredEvent) => `${e.requestId}:${String(e.toolCallId)}`;
   const results = new Map<string, { event: StoredEvent; index: number }>();
   const dispatch = new Map<string, { event: StoredEvent; index: number }>();
@@ -40,6 +41,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     .map((event) => event.modelStepId));
   const discarded = new Set(events.filter((event) => event.type === "text_discarded").map((event) => event.textSegmentId));
   for (const [index, event] of events.entries()) {
+    if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     if (event.type === "tool_result") {
       if (results.has(key(event))) throw new Error("工具结果编号重复");
@@ -52,6 +54,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   let current: Message | undefined;
   let legacyRequest: string | undefined;
   for (const [index, event] of events.entries()) {
+    if (index < (seed?.start ?? 0)) continue;
+    if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); onProgress?.(index - (seed?.start ?? 0), events.length - (seed?.start ?? 0)); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
@@ -104,6 +108,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           const unfiltered = result;
           result = filterArchivedMemoryResult(rawEvents, found.event, filterMemoryToolResult(call.name, result, excluded), excluded);
           const view = replayToolResultView({ result, archive,
+            projectionVersion: found.event.modelProjectionVersion,
             sourceFiltered: result !== unfiltered, recorded: found.event.modelVisible,
             archiveRead: log.isArchiveRead(call.name, sent.event.args),
             olderThanRecent: !hostConversationReplay && !recent.includes(event.requestId) && event.requestId !== currentId,
@@ -188,10 +193,10 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       }
     }
   }
-  for (const identity of results.keys()) if (!used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);
+  for (const [identity, found] of results) if (found.index >= (seed?.start ?? 0) && !used.has(identity)) diagnostics.push(`unmatched_tool_result:${identity}`);
   if (!current) throw new Error("缺少当前用户消息");
   // Older checkpoints may contain cross-Run feedback. Keep raw events, but never
   // reuse summaries created under the previous projection policy.
   const boundary = `${reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1))}:current-run-feedback-v1`;
-  return { events, boundary: excluded.size ? `${boundary}:${sourceDigest([...excluded].sort())}` : boundary, units, current, diagnostics };
+  return { events, boundary: excluded.size ? `${boundary}:${sourceDigest([...excluded].sort())}` : boundary, units, current, diagnostics, processedEvents: events.length - (seed?.start ?? 0) };
 }

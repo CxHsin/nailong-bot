@@ -23,3 +23,8 @@ export function estimateInput(context: Context): number {
   return Math.ceil(Buffer.byteLength(JSON.stringify({ system: context.systemPrompt ?? "", tools: context.tools ?? [], messages })) / 3) +
     imageTokens + 12 * (messages.length + (context.tools?.length ?? 0) + 1);
 }
+
+/** Feed is capped and never reduces an already higher configured budget. */
+export function fedContextRatio(ratio: number): number {
+  return Math.max(ratio, Math.min(0.9, ratio + 0.1));
+}

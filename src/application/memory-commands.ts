@@ -24,7 +24,7 @@ export async function handleMemoryCommand(log: RuntimeLog, options: { dataDir: s
     if (!Number.isSafeInteger(offset)) { await options.send("原始日志读取位置无效。", update); return true; }
     const body = node.messages.map((message) => `[${message.role} ${message.at} ${message.id}]\n${message.text}`).join("\n");
     const points = Array.from(body); const end = Math.min(points.length, offset + 1800);
-    await options.send(`原始日志诊断查阅，不恢复记忆、不参与强化：\n${points.slice(offset, end).join("")}\n${end < points.length ? `续读：/memory log ${node.id} ${end}` : "读取完毕"}`, update);
+    await options.send(`等等，让奶龙翻翻小本本……找到了这轮记录！\n原始日志诊断查阅，不恢复记忆、不参与强化：\n${points.slice(offset, end).join("")}\n${end < points.length ? `续读：/memory log ${node.id} ${end}` : "读取完毕"}`, update);
     return true;
   }
   const targetText = text.replace(/^\/forget\s*|^(?:请)?(?:帮我)?(?:忘掉|忘记|不要再记得)\s*/, "").trim();

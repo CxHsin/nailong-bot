@@ -47,6 +47,7 @@ async function main(): Promise<void> {
   const transport = createTelegramRichTransport({
     sendRich: async (chatId, markdown) => (await bot.api.sendRichMessage(chatId, { markdown })).message_id,
     draftRich: async (draftId, chatId, markdown, signal) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessageDraft>[4]); },
+    editHtml: async (messageId, chatId, html) => { await bot.api.editMessageText(chatId, messageId, html, { parse_mode: "HTML" }); },
     sendHtml: async (chatId, html) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" })).message_id,
     draftHtml: async (draftId, chatId, html, signal) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }, signal as Parameters<typeof bot.api.sendMessageDraft>[4]); },
   });

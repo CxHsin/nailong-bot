@@ -42,12 +42,13 @@ export async function connectTinyfish(apiKey: string, url = endpoint) {
   const fetch = defineTool({
     name: "web_fetch",
     label: "Read Web Page",
-    description: "Read public URLs with TinyFish to inspect page content. Include the source URLs in your answer.",
+    description: "Read public URLs with TinyFish to inspect page content. Defaults to ttl=0 to prefer a live fetch; set ttl explicitly to allow older cached content. Include the source URLs in your answer.",
     parameters: fetchSchema as TSchema,
     execute: async (_id, params) => ({
       content: [{ type: "text" as const, text: tinyfishResultText(await client.callTool({
         name: "fetch_content",
-        arguments: params as Record<string, unknown>,
+        // TinyFish accepts arbitrarily old cached pages when ttl is omitted.
+        arguments: { ...params as Record<string, unknown>, ttl: (params as Record<string, unknown>).ttl ?? 0 },
       })) }],
       details: {},
     }),
