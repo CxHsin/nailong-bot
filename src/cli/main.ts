@@ -3,6 +3,7 @@ import { stdin, stdout, stderr } from "node:process";
 import { resolve } from "node:path";
 import { createRuntimeEventLog } from "../runtime/event-log.js";
 import { createPiAgent } from "../agent/pi-agent.js";
+import { gptEnvironment } from "../agent/model-config.js";
 import { createAgentHost } from "../application/agent-host.js";
 import { createCliChannel, parseCliArgs } from "./cli-channel.js";
 
@@ -13,7 +14,7 @@ async function main() {
   const key = process.env.DEEPSEEK_API_KEY?.trim();
   if (!key) throw new Error("缺少 DEEPSEEK_API_KEY；请参照 .env.example 配置 .env");
   const log = await createRuntimeEventLog(dataDir);
-  const agent = await createPiAgent({ dataDir, promptFile, deepseekKey: key, tinyfishKey: process.env.TINYFISH_API_KEY?.trim(), progressModel: process.env.PROGRESS_MODEL?.trim() });
+  const agent = await createPiAgent({ dataDir, promptFile, deepseekKey: key, gpt: gptEnvironment(process.env), tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
   const host = createAgentHost({ log, dataDir, promptFile, agent,
     progressSummary: process.env.PROGRESS_SUMMARY_OPTIONS ? JSON.parse(process.env.PROGRESS_SUMMARY_OPTIONS) : undefined });
   await host.recoverInterrupted();

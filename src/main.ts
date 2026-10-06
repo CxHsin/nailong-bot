@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Bot } from "grammy";
 import { createPiAgent } from "./agent/pi-agent.js";
+import { gptEnvironment } from "./agent/model-config.js";
 import { createRuntimeEventLog } from "./runtime/event-log.js";
 import { createAgentHost } from "./application/agent-host.js";
 import { createTelegramRichTransport, telegramEnvironment } from "./channel/telegram/index.js";
@@ -29,8 +30,8 @@ async function main(): Promise<void> {
     dataDir,
     promptFile,
     deepseekKey,
+    gpt: gptEnvironment(process.env),
     tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
-    progressModel: process.env.PROGRESS_MODEL?.trim(),
     embedding: process.env.EMBEDDING_BASE_URL?.trim() && process.env.EMBEDDING_MODEL?.trim() && process.env.EMBEDDING_API_KEY?.trim() ? {
       baseUrl: process.env.EMBEDDING_BASE_URL, model: process.env.EMBEDDING_MODEL, apiKey: process.env.EMBEDDING_API_KEY,
       timeoutMs: process.env.EMBEDDING_TIMEOUT_MS ? Number(process.env.EMBEDDING_TIMEOUT_MS) : undefined,

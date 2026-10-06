@@ -8,6 +8,7 @@ type ContentFact = RequestFact & { textSegmentId: string };
 type PageFact = ContentFact & { partIndex: number; target: number };
 /** Core v2 semantic shapes. Legacy and memory metadata retain their own compatibility schemas. */
 export type RuntimeSemanticFact =
+  | ({ type: "model_selected"; conversationId: string; modelAlias: "ds" | "gpt"; contextPolicy: "exclude" })
   | (RequestFact & { type: "message"; role: "user" | "assistant"; text: string })
   | ({ type: "run_submitted" | "run_started" | "run_succeeded" | "run_failed" | "run_cancelled"; runId: string; conversationId?: string; result?: Record<string, unknown> })
   | (RequestFact & { type: "request_started" | "request_completed" | "request_failed" | "request_interrupted" })
@@ -29,6 +30,10 @@ export function validateRuntimeFact(event: EventInput): void {
     if (!Number.isSafeInteger(event[field]) || Number(event[field]) < minimum) throw new Error(`运行事实数字无效：${field}`);
   };
   const type = String(event.type);
+  if (type === "model_selected") {
+    strings("conversationId");
+    if (!["ds", "gpt"].includes(String(event.modelAlias)) || event.contextPolicy !== "exclude") throw new Error("模型选择事实无效");
+  }
   if (["run_submitted", "run_started", "run_succeeded", "run_failed", "run_cancelled"].includes(type)) strings("runId");
   if (type === "run_succeeded" && (!event.result || typeof event.result !== "object")) throw new Error("成功 Run 缺少结算结果");
   if (["request_started", "request_completed", "request_failed", "request_interrupted"].includes(type)) strings("requestId");

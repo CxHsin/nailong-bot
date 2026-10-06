@@ -35,7 +35,7 @@ test("Telegram startup registers owner commands before polling and routes authen
   await channel.start();
   const menu = methods.find((call) => call.method === "setMyCommands")!.payload;
   assert.deepEqual(menu.scope, { type: "chat", chat_id: 42 });
-  assert.deepEqual((menu.commands as Array<{ command: string }>).map((item) => item.command), ["help", "kvcache", "dance", "feed", "reset", "prompt", "forget", "memory"]);
+  assert.deepEqual((menu.commands as Array<{ command: string }>).map((item) => item.command), ["help", "kvcache", "model", "dance", "feed", "reset", "prompt", "forget", "memory"]);
   assert.equal(menu.language_code, undefined);
   assert.ok(methods.findIndex((call) => call.method === "setMyCommands") < methods.findIndex((call) => call.method === "polling"));
   let updateId = 0;

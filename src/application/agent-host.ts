@@ -16,6 +16,7 @@ import { projectTimeline } from "../runtime/timeline.js";
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
   { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
+  { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model ds；/model gpt" },
   { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
   { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
   { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
@@ -27,6 +28,7 @@ export const AGENT_COMMANDS = [
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
   summarizeProgress?: ProgressSummaryGenerator;
+  models?: ReadonlyArray<{ alias: "ds" | "gpt"; name: string }>;
   memoryVector?: (text: string) => number[] | undefined;
 } };
 
@@ -42,6 +44,17 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
     return { text: `用法：${definition.usage}`, kind: "control" };
   if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n"), kind: "control" };
+  if (name === "model") {
+    const models = options.agent.models ?? [{ alias: "ds", name: "DeepSeek" }];
+    const selected = (await log.read()).findLast((event) => event.type === "model_selected");
+    const current = selected?.modelAlias === "gpt" ? "gpt" : "ds";
+    if (text === "/model") return { text: `当前模型：${current}\n可选模型：\n${models.map((item) => `${item.alias}：${item.name}`).join("\n")}\n用法：/model ds 或 /model gpt`, kind: "control" };
+    const alias = text.slice("/model ".length).trim();
+    if (!/^\/model\s+(ds|gpt)$/.test(text)) return { text: `用法：${definition.usage}`, kind: "control" };
+    if (!models.some((item) => item.alias === alias)) return { text: "GPT 尚未配置，请先设置 XH_API_KEY。当前模型未改变。", kind: "control" };
+    await log.append({ type: "model_selected", modelAlias: alias, contextPolicy: "exclude" });
+    return { text: `已切换为 ${alias}，从下一轮生效。`, kind: "control" };
+  }
   if (name === "kvcache") {
     const cache = cacheStatistics(await options.log.read(), input.conversationId);
     return { text: cacheReportText(cache), cache, kind: "control" };
@@ -97,8 +110,9 @@ export function createAgentHost(options: AgentHostOptions) {
     const fed = feedIndex > usedIndex;
     if (fed) await log.append({ type: "context_feed_consumed", requestId: context.runId, contextPolicy: "exclude" });
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
+    const selectedModel = history.findLast((event) => event.type === "model_selected");
     let summaries: ReturnType<typeof startProgressSummaries> | undefined;
-    const request: Request = { ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
+    const request: Request = { modelAlias: selectedModel?.modelAlias === "gpt" ? "gpt" : "ds", ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
       onProgress: (progress) => {
         if (progress.type === "text" && progress.source !== "progress-model") summaries?.primaryText(progress.finalized);
         if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);

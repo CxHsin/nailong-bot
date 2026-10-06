@@ -9,6 +9,7 @@ import { replayToolResultView } from "./tool-result-projection.js";
 import { eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
 import { filterMemoryEvents, filterMemoryToolResult, filterArchivedMemoryResult } from "../runtime/memory-exclusion.js";
 import { userInputText } from "../runtime/reply-context.js";
+import { replayableReasoning } from "./provider-aware.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
   through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
@@ -84,7 +85,12 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       if (original?.role !== "assistant" || !Array.isArray(original.content) ||
         original.stopReason === "error" || original.stopReason === "aborted") continue;
       const toolCalls = original.content.filter((c): c is ToolCall => c.type === "toolCall");
-      if (!toolCalls.length) continue; // Final text is admitted by delivery, not generation.
+      if (!toolCalls.length) {
+        const reasoning = replayableReasoning(original, model);
+        if (hostConversationReplay && reasoning.length) units.push({ messages: [{ ...original, content: reasoning }],
+          through: index + 1, requestId: event.requestId, safe: true });
+        continue; // Final text is admitted by settlement/delivery, not raw generation.
+      }
       const kept: ToolCall[] = [];
       const responses: Message[] = [];
       const summaryResponses: Message[] = [];
@@ -138,6 +144,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
           ["progress", "status", "result"].includes(String(e.contentKind)));
         const assistant = { ...original, content: original.content.filter((c) =>
           c.type === "toolCall" ? kept.includes(c) : c.type === "thinking" ? !hostConversationReplay : c.type !== "text" || (!structured && !progressSteps.has(event.modelStepId))) };
+        if (hostConversationReplay) assistant.content.unshift(...replayableReasoning(original, model));
         if ((event.protocolVersion === "plain-text-v3" || progress?.contextPolicy === "include") && progress && typeof progress.text === "string") {
           assistant.content = assistant.content.filter((part) => part.type !== "text");
           assistant.content.push({ type: "text", text: progress.text });
@@ -197,6 +204,6 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
   if (!current) throw new Error("缺少当前用户消息");
   // Older checkpoints may contain cross-Run feedback. Keep raw events, but never
   // reuse summaries created under the previous projection policy.
-  const boundary = `${reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1))}:current-run-feedback-v1`;
+  const boundary = `${reset < 0 ? "initial" : sourceDigest(all.slice(0, reset + 1))}:provider-replay-v2`;
   return { events, boundary: excluded.size ? `${boundary}:${sourceDigest([...excluded].sort())}` : boundary, units, current, diagnostics, processedEvents: events.length - (seed?.start ?? 0) };
 }

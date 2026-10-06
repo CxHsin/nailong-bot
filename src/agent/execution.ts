@@ -11,7 +11,7 @@ import { composeMemory, composeMemoryLive, memoryBudget, recallMemory, type Memo
 import type { createMemoryProjection } from "../memory/projection.js";
 import { estimateInput, modelInputBudget, fedContextRatio } from "../context/input-budget.js";
 import { recordModelUsage } from "./model-usage.js";
-import { projectProviderContext } from "../context/provider-aware.js";
+import { projectProviderContext, projectNativeContext } from "../context/provider-aware.js";
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
 
@@ -99,7 +99,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "正在整理历史摘要……", actionState: "started", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
-      const stream = await providerStream(model, context, deepseekCacheOptions({ maxTokens, signal: session.agent.signal }));
+      const stream = await providerStream(model, projectNativeContext(context, model), deepseekCacheOptions({ maxTokens, signal: session.agent.signal,
+        ...(model.provider === "xh" ? { reasoning: "low" as const } : {}) }));
       let initialUsage: Usage | undefined;
       for await (const event of stream) {
         if (event.type === "start") initialUsage = event.partial.usage;
@@ -155,6 +156,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           await request.log.append({ ...storedSnapshot, requestId: request.id });
         }
         if (request && combined.quotes.length) phase("memory-ready", `已加载 ${combined.quotes.length} 段记忆引用。`, "completed");
+        combined = { ...combined, context: projectNativeContext(combined.context, selected) };
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
         const loadMs = performance.now() - loadStarted;
         await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
