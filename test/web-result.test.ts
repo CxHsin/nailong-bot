@@ -112,7 +112,7 @@ test("single long web line can be read without cutting Unicode code points", asy
   assert.equal(collected, text);
 });
 
-test("production Pi forwards page previews, reads decoded body and replays the same view", async (t) => {
+test("production Pi forwards live previews, reads decoded body and restores full recent results", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "web-pi-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   t.mock.method(Client.prototype, "connect", async () => {});
@@ -136,7 +136,8 @@ test("production Pi forwards page previews, reads decoded body and replays the s
       if (calls === 3) {
         assert.match(String(data.messages.at(-1).content), /# 文档\n定义：chief-of-staff/);
         assert.doesNotMatch(String(data.messages.at(-1).content), /"part"/);
-      } else assert.ok(data.messages.some((message: { role: string; content: string }) => message.role === "tool" && /engineering\nin-progress\nproductivity/.test(message.content)));
+      } else assert.ok(data.messages.some((message: { role: string; content: string }) =>
+        message.role === "tool" && message.content === result.content.filter((part) => part.type === "text").map((part) => part.text).join("\n")));
       delta = { content: JSON.stringify({ type: "final", text: "已核查" }) };
     }
     res.writeHead(200, { "content-type": "text/event-stream" });

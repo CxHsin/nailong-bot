@@ -121,7 +121,36 @@ test("real Provider correction survives its retry but not the next Run after res
 
 const summary = "## Goal\nContinue the task.\n## Progress\nEarlier work completed.\n## Constraints\nKeep the user's requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue recent work.\n## Critical Context\nUse the original log for exact details.";
 
-test("model window budget folds old history, preserves three requests, and reuses a validated checkpoint", async (t) => {
+test("recent turns retain complete tool pairs and settled text across restart while old archives are not recovered", async (t) => {
+  const f = await fixture(t, (data, res) => {
+    const last = data.messages.at(-1)!;
+    if (last.role === "user" && last.content?.startsWith("round-")) {
+      reply(res, "", { id: last.content, name: "read", args: { path: `${last.content}.txt` } });
+    } else reply(res, "complete answer");
+  });
+  for (let index = 0; index < 5; index++) await f.send(`round-${index}`);
+  await f.restart();
+  await f.send("continue recent turns");
+  const messages = f.seen.at(-1)!.messages;
+  const text = JSON.stringify(messages);
+  assert.doesNotMatch(text, /round-0|round-1|历史摘要/);
+  for (const id of ["round-2", "round-3", "round-4"]) {
+    assert.equal(messages.flatMap((message) => message.tool_calls ?? []).filter((call) => call.id === id).length, 1);
+    assert.equal(messages.filter((message) => message.role === "tool" && message.tool_call_id === id).length, 1);
+  }
+  assert.equal(messages.filter((message) => message.role === "assistant" && message.content?.includes("complete answer")).length, 3);
+  const log = createRuntimeLog(f.dir);
+  const model = getModel("deepseek", "deepseek-v4-flash");
+  const currentId = (await log.read()).findLast((event) => event.type === "message" && event.role === "user")!.requestId!;
+  const older = new Set((await log.read()).filter((event) => event.type === "tool_result" && ["round-0", "round-1"].includes(String(event.toolCallId)))
+    .map((event) => sourceDigest(event.archive)));
+  await replayEvents({ ...log, recoverArchive: async (archive, source) => {
+    assert.ok(!older.has(sourceDigest(archive)), "outside-window archives must not be read");
+    return log.recoverArchive(archive, source);
+  } }, currentId, model);
+});
+
+test("restart restores only three complete recent turns without summarizing older history", async (t) => {
   let summaries = 0;
   const f = await fixture(t, (data, res) => {
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
@@ -135,10 +164,10 @@ test("model window budget folds old history, preserves three requests, and reuse
   await writeFile(join(f.dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   await f.send("continue");
   assert.equal(f.replies.at(-1), "finished");
-  assert.ok(summaries > 0);
+  assert.equal(summaries, 0);
   const normal = f.seen.at(-1)!;
   const history = JSON.stringify(normal.messages);
-  assert.match(history, /历史摘要/);
+  assert.doesNotMatch(history, /历史摘要/);
   assert.doesNotMatch(history, /old-0:/);
   assert.match(history, /old-3:/);
   assert.match(history, /old-5:/);
@@ -148,16 +177,10 @@ test("model window budget folds old history, preserves three requests, and reuse
   await f.restart();
   await f.send("again");
   assert.equal(summaries, before);
-  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
-  const names = (await readdir(join(f.dir, "checkpoints"))).filter((n) => n.endsWith(".json"));
-  assert.ok(names.length > 0);
-  for (const name of names) {
-    const path = join(f.dir, "checkpoints", name);
-    const body = await readFile(path, "utf8");
-    await writeFile(path, body.replace("Earlier work completed.", "Tampered summary."));
-  }
-  await f.send("after tampering");
-  assert.ok(summaries > before, "invalid checkpoint must be rebuilt from source events");
+  const restarted = JSON.stringify(f.seen.at(-1)!.messages);
+  assert.doesNotMatch(restarted, /历史摘要|old-3:/);
+  assert.match(restarted, /old-4:/);
+  assert.match(restarted, /old-5:/);
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /old-0:/);
 });
 
@@ -246,7 +269,7 @@ test("an input that cannot be split is rejected before provider dispatch at a pe
   assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /预算/);
 });
 
-test("archive references remain pruned on restart and corrupt copies recover from events", async (t) => {
+test("recent archived results restore complete content on restart and corrupt copies recover from events", async (t) => {
   const f = await fixture(t, (data, res) => {
     if (data.messages.at(-1)?.content === "read large") {
       reply(res, "", { id: "large", name: "read", args: { path: "large.txt" } });
@@ -257,8 +280,8 @@ test("archive references remain pruned on restart and corrupt copies recover fro
   await f.restart();
   await f.send("continue");
   const tool = f.seen.at(-1)!.messages.find((m) => m.role === "tool")!;
-  assert.match(tool.content!, /工具结果已归档/);
-  assert.doesNotMatch(tool.content!, /big-evidence/);
+  assert.doesNotMatch(tool.content!, /工具结果已归档/);
+  assert.match(tool.content!, /big-evidence/);
   const events = (await readFile(join(f.dir, "events.jsonl"), "utf8")).trim().split("\n").map((s) => JSON.parse(s));
   const result = events.find((e) => e.type === "tool_result");
   assert.equal(result.modelVisible, "archive");
@@ -335,7 +358,7 @@ test("an oversized old request is summarized in complete tool steps", async (t) 
   assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
 });
 
-test("compaction reads the original archived result while ordinary replay stays pruned", async (t) => {
+test("recent-history compaction reads the complete original archived result", async (t) => {
   const compactInputs: string[] = [];
   let normalCalls = 0;
   const f = await fixture(t, (data, res) => {

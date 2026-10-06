@@ -437,8 +437,8 @@ test("existing original context qualifies for learning but summary-only history 
   }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
   for (let index = 0; index < 5; index++) {
     const requestId = `summary-source-${index}`;
-    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId, text: `limboo original_marker_${index} ` + "x".repeat(2500) });
-    await fixture.log.append({ type: "answer_generated", requestId, text: "y".repeat(2500) });
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId, text: `limboo original_marker_${index} ` + "x".repeat(4000) });
+    await fixture.log.append({ type: "answer_generated", requestId, text: "y".repeat(4000) });
     await fixture.log.append({ type: "delivery_succeeded", requestId });
     await fixture.log.append({ type: "request_completed", requestId });
   }
@@ -752,7 +752,8 @@ test("excluded memory cannot return through archived read results including recu
   await fixture.send("读来源归档");
   await fixture.send(`/forget ${target}`); await fixture.send("普通新问题");
   assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /archive_sensitive/);
-  assert.equal(fixture.seen.at(-1)!.messages.filter((message) => message.role === "tool").length, 5);
+  assert.equal(fixture.seen.at(-1)!.messages.filter((message) => message.role === "tool").length, 3,
+    "only the latest three archived-read turns remain in recent context");
   await fixture.restart(); await fixture.send("重启后新问题");
   assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /archive_sensitive/);
 });

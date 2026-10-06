@@ -153,7 +153,7 @@ test("production Host switches DS → XH Responses → DS with tools, restart hi
   assert.equal(seen[5]!.auth, "Bearer xh-key");
 });
 
-test("GPT compaction uses Responses and retains a valid checkpoint for continuation", async (t) => {
+test("GPT compacts oversized recent turns through Responses and continues with the selected model", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "xh-compaction-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   let summaries = 0; const requests: Record<string, unknown>[] = [];
@@ -172,8 +172,8 @@ test("GPT compaction uses Responses and retains a valid checkpoint for continuat
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);
   for (let index = 0; index < 6; index++) {
-    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(1500), conversationId: "c1" });
-    await log.append({ type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), conversationId: "c1" });
+    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(4000), conversationId: "c1" });
+    await log.append({ type: "message", role: "assistant", text: "answer:" + "y".repeat(4000), conversationId: "c1" });
   }
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = async (text: string) => {

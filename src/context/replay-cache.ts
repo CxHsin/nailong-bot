@@ -9,7 +9,7 @@ import { replayEvents, type Replay } from "./projection.js";
 
 type Snapshot = { version: 1; key: string; raw: StoredEvent[]; replay: Replay; results: Record<string, ToolResult> };
 export function createReplayCache(dataDir: string, identity: string) {
-  const key = sourceDigest({ version: 1, policy: "provider-replay-v2", identity });
+  const key = sourceDigest({ version: 1, policy: "recent-three-v1", identity });
   const path = join(dataDir, "context-projections", `${key}.json`);
   let cached: Snapshot | undefined;
   let loaded = false;
@@ -36,6 +36,12 @@ export function createReplayCache(dataDir: string, identity: string) {
         if (!invalidates && host && cached.replay.events.length <= events.length) {
           start = cached.replay.events.length;
           const affected = new Set<string>([currentId]);
+          // The previous active Run now needs complete historical tool results,
+          // rather than its bounded live-step view.
+          const previousCurrent = cached.replay.units.find((unit) => unit.messages.some((message) =>
+            message.role === "user" && message.timestamp === cached!.replay.current.timestamp &&
+            sourceDigest(message) === sourceDigest(cached!.replay.current)));
+          if (previousCurrent?.requestId && previousCurrent.requestId !== currentId) affected.add(previousCurrent.requestId);
           for (const event of delta) {
             const id = event.requestId ?? event.runId;
             if (typeof id === "string") affected.add(id);

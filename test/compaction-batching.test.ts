@@ -16,8 +16,8 @@ test("long history batches complete turns instead of summarizing one old turn pe
   t.after(() => rm(dir, { recursive: true, force: true }));
   const log = createRuntimeLog(dir);
   for (let index = 0; index < 12; index++) {
-    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(1600) });
-    await log.append({ type: "message", role: "assistant", text: "y".repeat(1600) });
+    await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(4000) });
+    await log.append({ type: "message", role: "assistant", text: "y".repeat(4000) });
   }
   await log.append({ type: "message", role: "user", requestId: "current", text: "current task" });
   let calls = 0;
@@ -25,7 +25,7 @@ test("long history batches complete turns instead of summarizing one old turn pe
   const projection = createContextProjection({ log, dataDir: dir, requestId: "current", structured: false,
     summarize: async (input) => { calls++; assert.ok(estimateInput(input) <= Math.floor(7600 * 0.86)); return summary; } });
   const result = await projection.project(model, { messages: [] });
-  assert.ok(calls <= 2, `expected at most two batched summaries, observed ${calls}`);
+  assert.ok(calls > 0 && calls <= 2, `expected one or two batched summaries, observed ${calls}`);
   assert.equal(result.context.messages.at(-1)?.content, "current task");
   assert.ok(JSON.stringify(result.context.messages).includes("old-11:"), "retain recent original turns");
   assert.ok(estimateInput(result.context) <= Math.floor(7600 * 0.86));
