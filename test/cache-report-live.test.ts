@@ -76,6 +76,7 @@ test("cache report separates four ended runs, current run, pending and missing t
   assert.match(text, /奶龙赛博反刍胃囊报表/);
   assert.equal([...text.matchAll(/缓存命中率：/g)].length, 5);
   assert.doesNotMatch(text, /第[一二三四五]次/);
+  assert.deepEqual([...text.matchAll(/^(\d)\./gm)].map((match) => match[1]), ["1", "2", "3", "4", "5"]);
   assert.equal(report.recent.length, 4);
   const idle = cacheStatistics([...events, { type: "run_succeeded", runId: "active", conversationId: "c", at: "2026-10-06T10:06:00Z" }], "c");
   assert.equal(idle.recent.length, 5);

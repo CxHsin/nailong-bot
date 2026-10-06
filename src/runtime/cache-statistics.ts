@@ -84,6 +84,6 @@ function line(totals: CacheTotals): string {
 export function cacheReportText(report: CacheReport): string {
   const runs = [...(report.current ? [report.current] : []), ...report.recent];
   const states: Record<string, string> = { running: "当前运行 · 进行中", failed: "失败", cancelled: "已取消" };
-  const rows = runs.map((run) => `${states[run.state] ? `${states[run.state]}\n` : ""}${line(run.execution)}`);
+  const rows = runs.map((run, index) => `${index + 1}.${states[run.state] ? ` ${states[run.state]}` : ""}\n${line(run.execution)}`);
   return ["🦖 **【奶龙赛博反刍胃囊报表】**", rows.length ? rows.join("\n\n") : "暂无模型运行数据。"].join("\n\n");
 }
