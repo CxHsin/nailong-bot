@@ -91,6 +91,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     conversationId: request.conversationId, structured: !plain,
     ratio: budgetRatio, ratios: budgetRatios,
     summarize: async (context, maxTokens) => {
+      request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "奶龙正在整理小本本，把任务、进展和待办记清楚……", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
       const stream = await providerStream(model, context, deepseekCacheOptions({ maxTokens, signal: session.agent.signal }));
@@ -118,6 +119,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           { context, maxTokens: selected.maxTokens, sourceIds: [] as string[] };
         let combined = snapshot ? { context: result.context, shown: snapshot.shown as ReturnType<typeof composeMemory>["shown"], tokens: Number(snapshot.tokens), quotes: [] } :
           composeMemory(result.context, result.sourceIds, recalled?.candidates ?? [], recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0, String(user?.text ?? ""));
+        if (request && !snapshot && combined.quotes.length) request.onProgress?.({ type: "text", segmentId: `${request.id}:memory-ready`, kind: "status", text: "啊！奶龙在小本本上记过相关事情，已把可用记录放进这轮上下文。", finalized: true, formal: false, source: "execution" });
         if (request?.conversationId && !snapshot) {
           const currentIndex = combined.context.messages.findLastIndex((message) => message.role === "user");
           const memoryMessage = combined.quotes.length ? combined.context.messages[currentIndex - 1] : undefined;

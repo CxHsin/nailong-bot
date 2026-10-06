@@ -83,7 +83,7 @@ test("Telegram Host projection closes failed runs with a visible error", async (
   ];
   const handle = { runId: "r2", conversationId: "c1", events: async function* () { yield* events; }, done: Promise.resolve(events.at(-1)!), cancel: async () => false } as RunHandle;
   await projection.consume(handle);
-  assert.deepEqual(calls, ["send:抱歉，这条消息处理失败，请稍后重试。"]);
+  assert.deepEqual(calls, ["send:哎呀，奶龙的脑瓜子嗡嗡的！这条消息处理失败，请稍后重试。"]);
 });
 
 test("legacy Telegram environment variables remain accepted with migration guidance", () => {
@@ -159,7 +159,7 @@ test("discarded previews are withdrawn and in-flight draft finishes before the t
   run.push("run_failed"); await drain();
   assert.equal(calls.length, 1);
   release(); await consume;
-  assert.deepEqual(calls, ["处理中", "draft-finished", "抱歉，这条消息处理失败，请稍后重试。"]);
+  assert.deepEqual(calls, ["处理中", "draft-finished", "哎呀，奶龙的脑瓜子嗡嗡的！这条消息处理失败，请稍后重试。"]);
 });
 
 test("long silent runs refresh the same truthful draft without adding chat messages", async (t) => {
@@ -173,7 +173,7 @@ test("long silent runs refresh the same truthful draft without adding chat messa
   run.push("progress", { progress: { type: "tool", name: "web_fetch", state: "started" } });
   await drain(); t.mock.timers.tick(750); await drain();
   t.mock.timers.tick(15_000); await drain();
-  assert.deepEqual(drafts, ["正在调用：web_fetch", "正在调用：web_fetch"]);
+  assert.deepEqual(drafts, ["正在调用：奶龙翻网页小本本", "正在调用：奶龙翻网页小本本"]);
   assert.deepEqual(sent, []);
   run.push("run_cancelled"); await consume;
 });

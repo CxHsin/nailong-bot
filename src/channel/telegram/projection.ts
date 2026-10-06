@@ -1,3 +1,4 @@
+import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { DeliveryContent, ContentTransport } from "../../runtime/content-delivery.js";
 
@@ -97,7 +98,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
                 if (current?.segmentId === progress.segmentId) current = undefined;
               } else {
                 const verb = { started: "正在调用", completed: "已完成", failed: "调用失败", blocked: "调用被阻止" }[progress.state];
-                tool = `${verb}：${progress.name}`;
+                tool = `${verb}：${toolDisplayName(progress.name)}`;
               }
               latest = [current?.text, tool].filter(Boolean).join("\n\n") || "处理中";
             }
@@ -122,7 +123,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
                 text: String(event.result.text), kind: "final", source: "execution" }) : { complete: true, messageId: await options.send(String(event.result.text), options.chatId) };
               if (delivery.complete && delivery.messageId !== undefined) await options.onDelivered?.(event, delivery.messageId);
             } else if (event.type === "run_failed") {
-              await options.send("抱歉，这条消息处理失败，请稍后重试。", options.chatId);
+              await options.send("哎呀，奶龙的脑瓜子嗡嗡的！这条消息处理失败，请稍后重试。", options.chatId);
             } else if (event.type === "run_cancelled") {
               await options.send("这条消息已取消。", options.chatId);
             }

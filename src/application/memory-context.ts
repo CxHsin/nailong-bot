@@ -11,13 +11,17 @@ export function memoryBudget(inputBudget: number, config: MemoryBudget = {}): nu
   return Math.floor(Math.min(max, inputBudget * ratio));
 }
 export async function recallMemory(memory: ReturnType<typeof createMemoryProjection>, request: Request, query: string) {
+  const status = (text: string) => request.onProgress?.({ type: "text", segmentId: `${request.id}:memory-recall`, kind: "status", text, finalized: true, formal: false, source: "execution" });
+  status("等等，让奶龙翻翻小本本，找找和这次问题有关的记忆……");
   try {
     const candidates = await memory.search(query, 72, request.id);
     const snapshotId = randomUUID();
     await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId, query, version: "memory-v1", mode: memory.mode, dynamics: memory.dynamics,
       degraded: memory.diagnostics(), candidates: candidates.map((c) => ({ nodeId: c.node.id, score: c.score, sources: c.sources, paths: c.paths, initialization: c.initialization })) });
+    status(candidates.length ? "奶龙找到了一些相关记录，正在挑选可用的内容……" : "这次没有找到相关旧记忆，奶龙接着看当前问题！");
     return { snapshotId, candidates };
   } catch {
+    status("奶龙的小本本暂时翻不开，先根据当前对话继续。");
     await request.log.append({ type: "memory_degraded", requestId: request.id, reason: "recall_unavailable" }).catch(() => undefined);
     return { snapshotId: undefined, candidates: [] as MemoryCandidate[] };
   }

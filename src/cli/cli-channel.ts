@@ -1,3 +1,4 @@
+import { toolDisplayName } from "../runtime/tool-display.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import type { Actor, HostInputLike, RunHandle } from "../host/host.js";
@@ -32,7 +33,7 @@ function humanEvent(event: HostEvent): string | undefined {
     if (progress.type === "text") return progress.finalized && progress.kind !== "final" ?
       `${progress.source === "progress-model" ? "运行摘要：" : ""}${progress.text}` : undefined;
     if (progress.type === "discard") return undefined;
-    return `[tool:${progress.state}] ${progress.name}`;
+    return `[tool:${progress.state}] ${toolDisplayName(progress.name)}`;
   }
   if (event.type === "run_succeeded") return `run_succeeded ${event.result?.text ?? ""}`.trim();
   if (event.type === "run_failed") return `run_failed ${event.error ?? ""}`.trim();
