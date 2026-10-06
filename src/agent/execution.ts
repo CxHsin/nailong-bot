@@ -87,9 +87,11 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const budgetRatio = request?.contextBudgetBoost ? fedContextRatio(modelInputBudget(model, options.contextBudgetRatio, options.modelBudgetRatios).ratio) : options.contextBudgetRatio;
   const budgetRatios = request?.contextBudgetBoost ? undefined : options.modelBudgetRatios;
+  const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools, protocolVersion })).digest("hex");
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     conversationId: request.conversationId, structured: !plain,
     ratio: budgetRatio, ratios: budgetRatios,
+    cacheIdentity: sourceDigestForReplay(),
     signal: request?.signal,
     onCheckpointValidated: () => request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "小本本摘要已生成，结构和未知结果保留检查通过。", actionState: "completed", finalized: true, formal: false, source: "execution" }),
     onRestoreProgress: (checked, total) => request?.onProgress?.({ type: "text", segmentId: `${request.id}:history`, kind: "status", text: `奶龙正在恢复历史记录：${checked}/${total} 条已检查。`, actionState: "started", finalized: true, formal: false, source: "execution" }),

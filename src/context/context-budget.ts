@@ -1,3 +1,4 @@
+import { createReplayCache } from "./replay-cache.js";
 import { estimateInput, modelInputBudget } from "./input-budget.js";
 import { summaryInput, summarySource, validateSummary } from "./history-summary.js";
 import { createHash } from "node:crypto";
@@ -20,15 +21,20 @@ function contextMessages(replay: Replay, checkpoint?: Checkpoint): Message[] {
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
 export function createContextProjection(options: { log: RuntimeLog; dataDir: string; requestId: string;
-  signal?: AbortSignal; onCheckpointValidated?: () => void; onRestoreProgress?: (checked: number, total: number) => void; conversationId?: string; structured?: boolean; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
+  cacheIdentity?: string; signal?: AbortSignal; onCheckpointValidated?: () => void; onRestoreProgress?: (checked: number, total: number) => void; conversationId?: string; structured?: boolean; ratio?: number; ratios?: Record<string, number>; summarize: Summarize }) {
   const store = createCheckpointStore(options.dataDir, "structured-text-v1", options.conversationId);
+  const caches = new Map<string, ReturnType<typeof createReplayCache>>();
   return {
     async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
       const resolved = modelInputBudget(model, options.ratio, options.ratios);
       const ratio = resolved.ratio;
       const budget = resolved.budget - reserveTokens;
       const replayStarted = performance.now();
-      const replay = await replayEvents(options.log, options.requestId, model, options.structured ?? true, options.onRestoreProgress, options.signal);
+      const cacheKey = sourceDigest({ conversation: options.conversationId, model, structured: options.structured ?? true, identity: options.cacheIdentity });
+      let cache = caches.get(cacheKey);
+      if (!cache) { cache = createReplayCache(options.dataDir, cacheKey); caches.set(cacheKey, cache); }
+      const replay = options.conversationId ? await cache.replay(options.log, options.requestId, model, options.structured ?? true, options.onRestoreProgress, options.signal) :
+        await replayEvents(options.log, options.requestId, model, options.structured ?? true, options.onRestoreProgress, options.signal);
       const replayMs = performance.now() - replayStarted;
       const processPeakRssBytes = process.resourceUsage().maxRSS * 1024;
       let checkpoint = await store.load(replay.boundary, replay.events);
@@ -132,7 +138,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       if (estimatedTokens > budget || (force && !forcedOnce)) throw new Error("上下文超过预算且没有可压缩的完整历史");
       await options.log.append({ type: "context_projected", requestId: options.requestId, estimatedTokens, budget,
         checkpointId: checkpoint?.id, diagnostics: replay.diagnostics,
-        logBytes: await options.log.bytes(), replayMs, processPeakRssBytes });
+        logBytes: await options.log.bytes(), replayMs, replayProcessedEvents: replay.processedEvents, processPeakRssBytes });
       return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)),
         sourceIds: replay.units.filter((u) => u.through > (checkpoint?.through ?? 0)).flatMap((u) => u.sourceIds ?? []) };
     },
