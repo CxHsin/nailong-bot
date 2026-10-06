@@ -74,7 +74,12 @@ test("cache report separates four ended runs, current run, pending and missing t
   assert.equal(report.execution.hitRate, 0.8, "cache writes are new input, not cache hits");
   const text = cacheReportText(report);
   assert.match(text, /奶龙赛博反刍胃囊报表/);
-  assert.deepEqual([...text.matchAll(/\d\.(第.次)/g)].map((match) => match[1]), ["第五次", "第四次", "第三次", "第二次", "第一次"]);
+  assert.equal([...text.matchAll(/缓存命中率：/g)].length, 5);
+  assert.doesNotMatch(text, /第[一二三四五]次/);
+  assert.equal(report.recent.length, 4);
+  const idle = cacheStatistics([...events, { type: "run_succeeded", runId: "active", conversationId: "c", at: "2026-10-06T10:06:00Z" }], "c");
+  assert.equal(idle.recent.length, 5);
+  assert.equal([...cacheReportText(idle).matchAll(/缓存命中率：/g)].length, 5);
   assert.doesNotMatch(text, /查询快照|开始：|结束：|模型调用：|累计|辅助调用/);
   assert.match(text, /当前运行/);
   assert.match(text, /待结算.*1/);
@@ -149,7 +154,7 @@ test("unknown, zero and cancelled usage remain distinct and calls do not count t
   assert.deepEqual(report.execution, { hit: 0, miss: 0, input: 0, hitRate: null, calls: 3, measured: 1, pending: 0 });
   assert.equal(report.auxiliary.hitRate, 0.5);
   const text = cacheReportText(report);
-  assert.match(text, /第五次（已取消）/);
+  assert.match(text, /已取消/);
   assert.match(text, /数据缺失 2/);
   assert.match(text, /命中率：\*\*不可用\*\*/);
 });

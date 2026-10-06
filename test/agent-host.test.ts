@@ -118,7 +118,7 @@ test("reset is queued behind active work and cancelled consumption and legacy ow
   assert.equal(restored.execution.hit, 15); assert.equal(restored.execution.miss, 5); assert.equal(restored.unassignedCalls, 1);
 });
 
-test("Host cache report uses four ended model Runs and weighted durable Conversation totals", async (t) => {
+test("Host cache report uses five ended model Runs when idle and weighted durable Conversation totals", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "host-cache-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const log = createRuntimeLog(dir);
@@ -152,7 +152,7 @@ test("Host cache report uses four ended model Runs and weighted durable Conversa
     execution: { hit: number; miss: number; input: number; hitRate: number; calls: number; measured: number };
     auxiliary: { hit: number; miss: number };
   };
-  assert.deepEqual(report.recent.map((run) => run.runId), [runs[4]!.id, runs[3]!.id, runs[2]!.id, runs[1]!.id]);
+  assert.deepEqual(report.recent.map((run) => run.runId), [runs[4]!.id, runs[3]!.id, runs[2]!.id, runs[1]!.id, runs[0]!.id]);
   assert.equal(report.recent[0]!.state, "failed");
   assert.deepEqual(report.execution, { hit: 1300, miss: 300, input: 1600, hitRate: 0.8125, calls: 6, measured: 4, pending: 0 });
   assert.equal(report.auxiliary.hit, 10);

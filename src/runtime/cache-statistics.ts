@@ -58,7 +58,7 @@ export function cacheStatistics(events: StoredEvent[], conversationId: string): 
   const execution = own.filter((call) => call.purpose === "execution");
   const auxiliary = own.filter((call) => call.purpose !== "execution");
   const recent = [...terminals.entries()].filter(([runId]) => execution.some((call) => call.runId === runId))
-    .sort((left, right) => right[1].index - left[1].index).slice(0, 4)
+    .sort((left, right) => right[1].index - left[1].index).slice(0, 5)
     .map(([runId, terminal]) => ({ runId, state: terminal.state, startedAt: starts.get(runId)?.startedAt, completedAt: terminal.completedAt,
       // A terminal Run cannot still have pending calls; unreturned usage is missing.
       execution: totals(execution.filter((call) => call.runId === runId).map((call) => ({ ...call, settled: true }))),
@@ -68,7 +68,7 @@ export function cacheStatistics(events: StoredEvent[], conversationId: string): 
   const current = active ? { runId: active[0], state: "running", startedAt: active[1].startedAt, completedAt: "",
     execution: totals(execution.filter((call) => call.runId === active[0])), auxiliary: totals(auxiliary.filter((call) => call.runId === active[0])) } : undefined;
   const settledOwn = (values: Call[]) => values.map((call) => call.runId && terminals.has(call.runId) ? { ...call, settled: true } : call);
-  return { conversationId, recent, ...(current ? { current } : {}), execution: totals(settledOwn(execution)), auxiliary: totals(settledOwn(auxiliary)),
+  return { conversationId, recent: recent.slice(0, current ? 4 : 5), ...(current ? { current } : {}), execution: totals(settledOwn(execution)), auxiliary: totals(settledOwn(auxiliary)),
     unassignedCalls: [...calls.values()].filter((call) => !call.owner).length };
 }
 
@@ -83,8 +83,7 @@ function line(totals: CacheTotals): string {
 
 export function cacheReportText(report: CacheReport): string {
   const runs = [...(report.current ? [report.current] : []), ...report.recent];
-  const ordinals = ["第五次", "第四次", "第三次", "第二次", "第一次"];
   const states: Record<string, string> = { running: "当前运行 · 进行中", failed: "失败", cancelled: "已取消" };
-  const rows = runs.map((run, index) => `${index + 1}.${ordinals[index]}${states[run.state] ? `（${states[run.state]}）` : ""}\n${line(run.execution)}`);
+  const rows = runs.map((run) => `${states[run.state] ? `${states[run.state]}\n` : ""}${line(run.execution)}`);
   return ["🦖 **【奶龙赛博反刍胃囊报表】**", rows.length ? rows.join("\n\n") : "暂无模型运行数据。"].join("\n\n");
 }
