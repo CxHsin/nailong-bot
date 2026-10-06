@@ -1,5 +1,6 @@
+import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
-import { createServer, type ServerResponse } from "node:http";
+import type { ServerResponse } from "node:http";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +32,7 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
   const promptFile = join(dir, "prompt.md");
   await writeFile(promptFile, "Be helpful.");
   const seen: Payload[] = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const data: Payload = JSON.parse(body);

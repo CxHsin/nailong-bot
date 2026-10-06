@@ -1,6 +1,7 @@
+import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createServer, type ServerResponse } from "node:http";
+import type { ServerResponse } from "node:http";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +21,7 @@ test("real Provider requests preserve prefixes across dates, scope Conversations
   const dir = await mkdtemp(join(tmpdir(), "cache-provider-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   const seen: Payload[] = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     seen.push(JSON.parse(body)); final(res, seen.length !== 2);
   });
@@ -63,7 +64,7 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   let summaries = 0; let zero = false;
   const summaryInputs: Array<{ previousSummary?: string }> = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const payload: Payload = JSON.parse(body);
     const isSummary = payload.messages.some((message) => message.content.includes("HISTORY_COMPACTION"));
@@ -108,7 +109,7 @@ test("actual memory prefixes survive new recall and tools, while forgetting remo
   const dir = await mkdtemp(join(tmpdir(), "cache-memory-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   const seen: Payload[] = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const payload: Payload = JSON.parse(body); seen.push(payload);
     if (payload.messages.at(-1)!.content === "暗号") {
@@ -155,7 +156,7 @@ test("current input keeps its date and memory snapshot after a long tool chain i
   await writeFile(join(dir, "source.txt"), "evidence ".repeat(500));
   const executionInputs: Payload[] = [];
   let tools = 0; let summaries = 0;
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const payload: Payload = JSON.parse(body);
     const isSummary = payload.messages.some((message) => message.content?.includes("HISTORY_COMPACTION"));
