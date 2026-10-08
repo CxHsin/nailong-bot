@@ -1,5 +1,5 @@
 import { formatMarkdownForTelegram } from "../../telegram/telegram-format.js";
-import { planTelegramText } from "../../telegram/telegram-layout.js";
+import { planTelegramText, telegramVisibleLength } from "../../telegram/telegram-layout.js";
 import type { DeliveryContent } from "../../runtime/content-delivery.js";
 
 export type TelegramRichTransportApi = {
@@ -50,10 +50,24 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
   }
 
   function plan(content: DeliveryContent): string[] {
-    const pages = planTelegramText(content.text);
-    if (content.kind === "final") return pages;
+    if (content.kind === "final") return planTelegramText(content.text);
+    // Native collapsed quotes show the beginning of their text. Keep the preview
+    // plain and bounded, reserving its space before paginating the full journal.
+    const preview = (content.preview ?? []).slice(0, 2).map((text) => {
+      const line = text.replace(/\s+/gu, " ").trim();
+      const segments = [...new Intl.Segmenter("zh", { granularity: "grapheme" }).segment(line)].map((item) => item.segment);
+      let clipped = "";
+      for (const segment of segments) {
+        if (clipped.length + segment.length > 60) break;
+        clipped += segment;
+      }
+      return (clipped + (clipped.length < line.length ? "…" : ""))
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }).filter(Boolean).join("\n");
+    const prefix = preview ? `${preview}\n\n` : "";
+    const pages = planTelegramText(content.text, true, 4000 - telegramVisibleLength(prefix));
     const heading = content.source === "progress-model" ? "<b>运行摘要</b>\n" : "";
-    return pages.map((page) => `${heading}<blockquote expandable>${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
+    return pages.map((page, index) => `${heading}<blockquote expandable>${index === 0 ? prefix : ""}${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
   }
 
   async function sendPage(text: string, chatId: number): Promise<number> {
