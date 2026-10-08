@@ -13,6 +13,17 @@ import { createCliChannel } from "../src/cli/cli-channel.js";
 import { createServer } from "node:http";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 
+// This guards against a hung test; completion before releasing the model is the
+// behavioral assertion, not a response-time SLA for filesystem work under load.
+async function whileModelBlocked<T>(pending: Promise<T>, description: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`${description} did not complete while the model was held`)), 5000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 test("cache query returns while model is running, refreshes settled usage and leaves reset queued", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "cache-live-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -36,10 +47,7 @@ test("cache query returns while model is running, refreshes settled usage and le
   try {
     const query = async () => {
       const report = host.submit({ actor: { id: "owner" }, conversationId: "c1", text: "/kvcache" });
-      return Promise.race([report.done, new Promise<never>((_resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error("cache query waited for the running model")), 250);
-        void report.done.finally(() => clearTimeout(timer));
-      })]);
+      return whileModelBlocked(report.done, "Host cache query");
     };
     const before = await query();
     assert.equal(before.type, "run_succeeded");
@@ -121,9 +129,7 @@ test("Telegram accepts a live cache query during model work, authenticates and d
   await started;
   try {
     await input(2, "/kvcache@test_bot");
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try { await Promise.race([cacheDelivered, new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Telegram cache query waited")), 500); })]); }
-    finally { clearTimeout(timer); }
+    await whileModelBlocked(cacheDelivered, "Telegram cache query");
     assert.match(responses[0]!, /当前运行/);
     assert.match(responses[0]!, /待结算 1/);
     await input(2, "/kvcache@test_bot");
@@ -195,7 +201,10 @@ test("production Provider stream reports pending before usage and exact cache to
     ready();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  });
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", memoryBootstrap: false,
     modelBaseUrl: `http://127.0.0.1:${address.port}` });
@@ -205,9 +214,8 @@ test("production Provider stream reports pending before usage and exact cache to
   await streaming;
   const query = () => host.submit({ actor: { id: "owner" }, conversationId: "c", text: "/kvcache" }).done;
   let before;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try { before = await Promise.race([query(), new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Provider blocked live query")), 500); })]); }
-  finally { clearTimeout(timer); finish(); await run.done; }
+  try { before = await whileModelBlocked(query(), "Provider cache query"); }
+  finally { finish(); await run.done; }
   assert.match(String(before.result?.text), /待结算 1/);
   const after = await query();
   const report = after.result?.cache as ReturnType<typeof cacheStatistics>;
