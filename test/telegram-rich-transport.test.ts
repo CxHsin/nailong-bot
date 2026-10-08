@@ -3,8 +3,23 @@ import test from "node:test";
 import { createServer } from "node:http";
 import { Api } from "grammy";
 import { createTelegramRichTransport, isRichApiUnavailable } from "../src/channel/telegram/rich-transport.js";
+import { telegramVisibleLength } from "../src/telegram/telegram-layout.js";
 
 const source = "# 标题\n\n**加粗**\n\n| 名称 | 值 |\n| --- | --- |\n| 一 | 二 |";
+
+test("live preview escapes text, clips whole Unicode characters and leaves room for all journal pages", () => {
+  const transport = createTelegramRichTransport({ sendRich: async () => 1, sendHtml: async () => 1,
+    draftRich: async () => {}, draftHtml: async () => {} });
+  const text = "```ts\n" + "const 原始 = '😀';\n".repeat(600) + "```";
+  const pages = transport.plan({ id: "p", text, kind: "progress", preview: ["<最新> & 状态\n继续", "😀".repeat(40)] });
+  assert.ok(pages.length > 1);
+  assert.ok(pages.every((page) => telegramVisibleLength(page) <= 4096));
+  assert.ok(pages[0]!.startsWith(`<blockquote expandable>&lt;最新&gt; &amp; 状态 继续\n${"😀".repeat(30)}…\n\n<pre>`));
+  const journal = [pages[0]!.slice(pages[0]!.indexOf("\n\n") + 2), ...pages.slice(1)].join("");
+  assert.equal(journal.split("const 原始").length - 1, 600);
+  assert.ok(pages.every((page) => (page.match(/<pre>/g) ?? []).length === (page.match(/<\/pre>/g) ?? []).length));
+  assert.deepEqual(transport.plan({ id: "f", text: "答案", kind: "final", preview: ["不应显示"] }), ["答案"]);
+});
 
 test("Rich transport sends original Markdown for drafts and final messages", async () => {
   const calls: Array<{ type: string; text: string }> = [];

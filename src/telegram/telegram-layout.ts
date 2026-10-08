@@ -9,7 +9,7 @@ export function telegramVisibleLength(html: string): number {
 }
 
 /** Splits rendered HTML, maintaining entity and tag boundaries in every message. */
-function splitHtml(html: string): string[] {
+function splitHtml(html: string, capacity: number): string[] {
   const parts: string[] = [];
   const stack: { name: string; opening: string }[] = [];
   let current = "";
@@ -36,7 +36,7 @@ function splitHtml(html: string): string[] {
     while (start < units.length) {
       let stop = start;
       let size = 0;
-      while (stop < units.length && length + size + units[stop]!.size <= CAPACITY) size += units[stop++]!.size;
+      while (stop < units.length && length + size + units[stop]!.size <= capacity) size += units[stop++]!.size;
       if (stop === start) {
         if (length) { flush(); continue; }
         // An adversarial combining sequence can itself exceed the platform cap.
@@ -62,7 +62,7 @@ function splitHtml(html: string): string[] {
 }
 
 /** Parse the whole source before pagination so fences never change meaning at a split. */
-export function planTelegramText(text: string, complete = true): string[] {
+export function planTelegramText(text: string, complete = true, capacity = CAPACITY): string[] {
   // Reference labels/definitions can retroactively change any earlier block.
   // Withhold early commits for bracket syntax; final rendering still supports references.
   if (!complete && text.includes("[")) return [];
@@ -73,13 +73,13 @@ export function planTelegramText(text: string, complete = true): string[] {
   for (const token of tokens) {
     const rendered = renderTelegramBlocks([token]);
     if (!rendered || !telegramVisibleLength(rendered)) continue;
-    const chunks = splitHtml(rendered);
+    const chunks = splitHtml(rendered, capacity);
     if (chunks.length > 1) {
       if (current) { parts.push(current); current = ""; }
       parts.push(...chunks);
     } else {
       const candidate = current ? current + "\n\n" + rendered : rendered;
-      if (telegramVisibleLength(candidate) > CAPACITY) {
+      if (telegramVisibleLength(candidate) > capacity) {
         parts.push(current);
         current = rendered;
       } else current = candidate;

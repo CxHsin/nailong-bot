@@ -7,24 +7,28 @@ export async function consumeProgressJournal(handle: RunHandle, options: Telegra
   chatId: number; progressIntervalMs?: number; progressTimeoutMs?: number;
   recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
 }, finish: (event: HostEvent) => Promise<void>) {
-  const entries = new Map<string, { text: string; active: boolean; started: number }>();
+  const entries = new Map<string, { text: string; active: boolean; started: number; updated: number }>();
+  let revision = 0;
   const pages: Array<{ id: number; text: string }> = [];
   let control = false; let ended = false; let disabled = false; let busy = false;
   let pending = Promise.resolve(); let lastAttempt = -Infinity; let lastEvent: HostEvent | undefined;
   const record = async (fact: Record<string, unknown>) => { if (lastEvent) await options.recordProgress?.(lastEvent, fact); };
-  const render = () => [...entries.values()].map((entry) => {
+  const renderEntry = (entry: { text: string; active: boolean; started: number }) => {
     const seconds = Math.floor((Date.now() - entry.started) / 5000) * 5;
     return entry.text + (entry.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : "");
-  }).filter(Boolean).join("\n\n");
+  };
+  const render = () => [...entries.values()].map(renderEntry).filter(Boolean).join("\n\n");
   const update = (id: string, text: string, active = false) => {
     const prior = entries.get(id);
     if (active) for (const [key, item] of entries) if (key !== id) item.active = false;
-    entries.set(id, { text, active, started: prior?.active && active ? prior.started : Date.now() });
+    entries.set(id, { text, active, started: prior?.active && active ? prior.started : Date.now(), updated: ++revision });
   };
   const flush = async () => {
     if (disabled || control || !entries.size) return;
     const text = render();
-    const planned = options.plan!({ id: `${handle.runId}:journal`, text, kind: "progress", source: "execution" });
+    const preview = [...entries.values()].filter((entry) => entry.text.trim())
+      .sort((a, b) => b.updated - a.updated).slice(0, 2).map(renderEntry);
+    const planned = options.plan!({ id: `${handle.runId}:journal`, text, kind: "progress", source: "execution", preview });
     for (let index = 0; index < planned.length; index++) {
       if (disabled) return;
       const html = planned[index]!;

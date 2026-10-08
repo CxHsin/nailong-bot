@@ -3,7 +3,7 @@ import type { RuntimeLog } from "./runtime-types.js";
 import { DeliveryRejected } from "../application/app-types.js";
 import { projectTimeline } from "./timeline.js";
 
-export type DeliveryContent = { id: string; text: string; kind: "progress" | "final"; source?: "execution" | "progress-model" };
+export type DeliveryContent = { id: string; text: string; kind: "progress" | "final"; source?: "execution" | "progress-model"; preview?: string[] };
 export type ContentTransport = {
   send: (text: string, chatId: number) => Promise<number>;
   plan?: (content: DeliveryContent) => string[];
