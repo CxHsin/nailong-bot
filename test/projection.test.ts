@@ -9,10 +9,12 @@ import { createApp } from "../src/application/app.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { assistantText } from "../src/agent/model-message.js";
 import { getModel } from "@mariozechner/pi-ai";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createRuntimeEventLog } from "../src/runtime/event-log.js";
+import type { StoredEvent, ToolArchive } from "../src/runtime/runtime-types.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 import { replayEvents } from "../src/context/projection.js";
 import { createCheckpointStore } from "../src/context/checkpoint.js";
+import { createToolArchive } from "../src/runtime/tool-archive.js";
 import { sourceDigest } from "../src/runtime/event-digest.js";
 
 type WireMessage = { role: string; content?: string; tool_call_id?: string;
@@ -27,7 +29,8 @@ function reply(res: ServerResponse, content: string, call?: { id: string; name: 
     finish_reason: call ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
 }
 async function fixture(t: TestContext, respond: (data: Payload, res: ServerResponse) => void,
-  options: Partial<Parameters<typeof createPiAgent>[0]> = {}) {
+  options: Partial<Parameters<typeof createPiAgent>[0]> = {},
+  legacySource?: (dir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "projection-"));
   const promptFile = join(dir, "prompt.md");
   await writeFile(promptFile, "Be helpful.");
@@ -46,14 +49,16 @@ async function fixture(t: TestContext, respond: (data: Payload, res: ServerRespo
     modelBaseUrl: `http://127.0.0.1:${address.port}`, ...options };
   let agent = await createPiAgent(agentOptions);
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
+  await legacySource?.(dir);
+  let log = await createRuntimeEventLog(dir);
   const replies: string[] = [];
-  const makeApp = () => createApp({ ownerId: 42, dataDir: dir, answer: agent.answer,
+  const makeApp = () => createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer,
     send: async (text) => { replies.push(text); } });
   let app = makeApp();
   let messageId = 0;
-  return { dir, seen, replies,
+  return { dir, seen, replies, get log() { return log; },
     async send(text: string) { await app.handle({ userId: 42, chatType: "private", text, messageId: ++messageId }); },
-    async restart() { await agent.close(); agent = await createPiAgent(agentOptions); app = makeApp(); },
+    async restart() { await agent.close(); log = await createRuntimeEventLog(dir); agent = await createPiAgent(agentOptions); app = makeApp(); },
   };
 }
 
@@ -65,7 +70,7 @@ test("restart replays tool exchanges, including errors, without duplicating call
     } else reply(res, "finished");
   });
   await f.send("read missing");
-  assert.equal(f.replies.at(-1), "finished", await readFile(join(f.dir, "events.jsonl"), "utf8"));
+  assert.equal(f.replies.at(-1), "finished", JSON.stringify(await f.log.read()));
   await f.restart();
   await f.send("continue");
   const history = f.seen.at(-1)!.messages;
@@ -77,12 +82,12 @@ test("restart replays tool exchanges, including errors, without duplicating call
   await f.send("new");
   assert.equal(f.seen.at(-1)!.messages.filter((m) => m.role === "user").length, 1);
   assert.equal(f.seen.at(-1)!.messages.some((m) => m.role === "tool"), false);
-  assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /same-id/);
+  assert.match(JSON.stringify(await f.log.read()), /same-id/);
 });
 
 test("protocol feedback corrects only its current Run and is excluded from compaction input", async (t) => {
   const f = await fixture(t, (_data, res) => reply(res, "finished"));
-  const log = createRuntimeLog(f.dir);
+  const log = f.log;
   await log.append({ type: "message", role: "user", requestId: "old", text: "old user" });
   await log.append({ type: "protocol_feedback", requestId: "old", text: "STALE_PROTOCOL_FEEDBACK" });
   await log.append({ type: "request_failed", requestId: "old" });
@@ -140,7 +145,7 @@ test("recent turns retain complete tool pairs and settled text across restart wh
     assert.equal(messages.filter((message) => message.role === "tool" && message.tool_call_id === id).length, 1);
   }
   assert.equal(messages.filter((message) => message.role === "assistant" && message.content?.includes("complete answer")).length, 3);
-  const log = createRuntimeLog(f.dir);
+  const log = f.log;
   const model = getModel("deepseek", "deepseek-v4-flash");
   const currentId = (await log.read()).findLast((event) => event.type === "message" && event.role === "user")!.requestId!;
   const older = new Set((await log.read()).filter((event) => event.type === "tool_result" && ["round-0", "round-1"].includes(String(event.toolCallId)))
@@ -162,7 +167,7 @@ test("restart restores only three complete recent turns without summarizing olde
     { type: "message", role: "user", text: `old-${i}:` + "x".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
     { type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
   ]).flat();
-  await writeFile(join(f.dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  await f.log.appendBatch(events);
   await f.send("continue");
   assert.equal(f.replies.at(-1), "finished");
   assert.equal(summaries, 0);
@@ -182,7 +187,7 @@ test("restart restores only three complete recent turns without summarizing olde
   assert.doesNotMatch(restarted, /历史摘要|old-3:/);
   assert.match(restarted, /old-4:/);
   assert.match(restarted, /old-5:/);
-  assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /old-0:/);
+  assert.match(JSON.stringify(await f.log.read()), /old-0:/);
 });
 
 test("a stopped dispatched tool is projected as unknown without persisting a fabricated result", async (t) => {
@@ -191,14 +196,14 @@ test("a stopped dispatched tool is projected as unknown without persisting a fab
   message.content.push({ type: "toolCall", id: "uncertain", name: "write", arguments: { path: "note", content: "text" } });
   const events = [
     { type: "message", role: "user", text: "save", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
+    { type: "model_message", requestId: "old", modelStepId: "old-step", message },
     { type: "tool_dispatch", requestId: "old", toolCallId: "uncertain", toolName: "write" },
     { type: "request_failed", requestId: "old" },
   ].map((e) => ({ ...e, at: "2026-01-01T00:00:00Z" }));
-  await writeFile(join(f.dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  await f.log.appendBatch(events);
   await f.send("check status");
   assert.match(f.seen.at(-1)!.messages.find((m) => m.role === "tool")!.content!, /outcome_unknown/);
-  const stored = (await readFile(join(f.dir, "events.jsonl"), "utf8")).trim().split("\n").map((e) => JSON.parse(e));
+  const stored = await f.log.read();
   assert.equal(stored.some((e) => e.type === "tool_result"), false);
 });
 
@@ -211,10 +216,10 @@ test("provider overflow compacts and retries the rejected model step once", asyn
       res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
     } else reply(res, "recovered");
   });
-  await writeFile(join(f.dir, "events.jsonl"), [
+  await f.log.appendBatch([
     { type: "message", role: "user", text: "old goal " + "a".repeat(1500) },
     { type: "message", role: "assistant", text: "old answer " + "b".repeat(1500) },
-  ].map((e) => JSON.stringify({ ...e, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  ].map((e) => ({ ...e, at: "2026-01-01T00:00:00Z" })));
   await f.send("continue");
   assert.equal(f.replies.at(-1), "recovered");
   assert.equal(normal, 2);
@@ -231,10 +236,10 @@ test("a second provider overflow fails after one retry", async (t) => {
       res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
     }
   });
-  await writeFile(join(f.dir, "events.jsonl"), [
+  await f.log.appendBatch([
     { type: "message", role: "user", text: "old goal " + "a".repeat(1500) },
     { type: "message", role: "assistant", text: "old answer " + "b".repeat(1500) },
-  ].map((e) => JSON.stringify({ ...e, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  ].map((e) => ({ ...e, at: "2026-01-01T00:00:00Z" })));
   await f.send("continue");
   assert.equal(normal, 2);
   assert.match(f.replies.at(-1)!, /溢出重试失败/);
@@ -251,7 +256,7 @@ test("a single long tool chain compacts settled earlier steps while keeping the 
   }, { contextWindow: 6000 });
   await writeFile(join(f.dir, "source.txt"), "evidence ".repeat(500));
   await f.send("inspect all evidence");
-  assert.equal(f.replies.at(-1), "chain finished", await readFile(join(f.dir, "events.jsonl"), "utf8"));
+  assert.equal(f.replies.at(-1), "chain finished", JSON.stringify(await f.log.read()));
   assert.equal(compacted, true);
   const final = f.seen.at(-1)!.messages;
   assert.equal(final.filter((m) => m.content === "inspect all evidence").length, 1);
@@ -267,7 +272,13 @@ test("an input that cannot be split is rejected before provider dispatch at a pe
   assert.equal(f.seen.length, 0);
   assert.match(f.replies.at(-1)!, /处理失败/);
   assert.match(f.replies.at(-1)!, /预算/);
-  assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /预算/);
+  const events = await f.log.read();
+  const input = events.find((event) => event.type === "message" && event.role === "user");
+  const failure = events.find((event) => event.type === "request_failed" && event.requestId === input?.requestId);
+  assert.match(String(failure?.error), /预算/);
+  assert.ok(events.some((event) => event.type === "memory_bootstrap_started"), "background memory bootstrap must remain enabled");
+  assert.ok((await readdir(f.dir)).includes("runtime-v2.sqlite"), "projection fixture must use the production SQLite store");
+  assert.ok(!(await readdir(f.dir)).includes("events.jsonl"), "ordinary projection runs must not write JSONL");
 });
 
 test("recent archived results restore complete content on restart and corrupt copies recover from events", async (t) => {
@@ -283,17 +294,19 @@ test("recent archived results restore complete content on restart and corrupt co
   const tool = f.seen.at(-1)!.messages.find((m) => m.role === "tool")!;
   assert.doesNotMatch(tool.content!, /工具结果已归档/);
   assert.match(tool.content!, /big-evidence/);
-  const events = (await readFile(join(f.dir, "events.jsonl"), "utf8")).trim().split("\n").map((s) => JSON.parse(s));
+  const events = await f.log.read();
   const result = events.find((e) => e.type === "tool_result");
-  assert.equal(result.modelVisible, "archive");
-  await writeFile(result.archive.rawPath, "corrupted");
+  assert.equal(result?.modelVisible, "archive");
+  assert.ok(result?.archive);
+  const archive = result.archive as ToolArchive;
+  await writeFile(archive.rawPath, "corrupted");
   await f.send("check again");
   assert.equal(f.replies.at(-1), "finished");
-  assert.match(await readFile(result.archive.rawPath, "utf8"), /big-evidence/);
+  assert.match(await readFile(archive.rawPath, "utf8"), /big-evidence/);
   await rm(join(f.dir, "tool-results"), { recursive: true, force: true });
   await f.send("recover missing archive directory");
   assert.equal(f.replies.at(-1), "finished");
-  assert.match(await readFile(result.archive.rawPath, "utf8"), /big-evidence/);
+  assert.match(await readFile(archive.rawPath, "utf8"), /big-evidence/);
 });
 
 test("a result before matching dispatch is not replayed as an executed tool", async (t) => {
@@ -302,14 +315,13 @@ test("a result before matching dispatch is not replayed as an executed tool", as
   message.content.push({ type: "toolCall", id: "orphan", name: "write", arguments: { path: "note" } });
   const old = [
     { type: "message", role: "user", text: "save", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
+    { type: "model_message", requestId: "old", modelStepId: "old-step", message },
     { type: "tool_result", requestId: "old", toolCallId: "orphan", toolName: "write",
       result: { content: [{ type: "text", text: "success" }], details: {}, isError: false } },
     { type: "tool_dispatch", requestId: "old", toolCallId: "orphan", toolName: "write" },
     { type: "request_failed", requestId: "old" },
   ];
-  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
-    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.log.appendBatch(old);
   await f.send("check");
   assert.equal(f.seen.at(-1)!.messages.some((m) => m.role === "tool"), false);
   assert.equal(f.seen.at(-1)!.messages.some((m) => m.tool_calls?.some((c) => c.id === "orphan")), false);
@@ -322,14 +334,13 @@ test("a crashed dispatched tool is marked interrupted before its outcome becomes
   const old = [
     { type: "message", role: "user", text: "save", requestId: "old" },
     { type: "request_started", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
+    { type: "model_message", requestId: "old", modelStepId: "old-step", message },
     { type: "tool_dispatch", requestId: "old", toolCallId: "pending", toolName: "write" },
   ];
-  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
-    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.log.appendBatch(old);
   await f.send("check");
   assert.match(f.seen.at(-1)!.messages.find((m) => m.role === "tool")!.content!, /outcome_unknown/);
-  assert.match(await readFile(join(f.dir, "events.jsonl"), "utf8"), /request_interrupted/);
+  assert.match(JSON.stringify(await f.log.read()), /request_interrupted/);
 });
 
 test("an oversized old request is summarized in complete tool steps", async (t) => {
@@ -340,19 +351,18 @@ test("an oversized old request is summarized in complete tool steps", async (t) 
     } else reply(res, "continued");
   }, { contextWindow: 6000 });
   const model = getModel("deepseek", "deepseek-v4-flash");
-  const old: object[] = [{ type: "message", role: "user", text: "inspect files", requestId: "old" }];
+  const old: Omit<StoredEvent, "at">[] = [{ type: "message", role: "user", text: "inspect files", requestId: "old" }];
   for (let i = 0; i < 3; i++) {
     const message = assistantText("", model);
     message.content.push({ type: "toolCall", id: `read-${i}`, name: "read", arguments: { path: `file-${i}` } });
-    old.push({ type: "model_message", requestId: "old", message },
+    old.push({ type: "model_message", requestId: "old", modelStepId: `old-step-${i}`, message },
       { type: "tool_dispatch", requestId: "old", toolCallId: `read-${i}`, toolName: "read" },
       { type: "tool_result", requestId: "old", toolCallId: `read-${i}`, toolName: "read",
         result: { content: [{ type: "text", text: "evidence-".repeat(1300) }], details: {}, isError: false } });
   }
   old.push({ type: "answer_generated", requestId: "old", text: "complete" },
     { type: "delivery_succeeded", requestId: "old" }, { type: "request_completed", requestId: "old" });
-  await writeFile(join(f.dir, "events.jsonl"), old.map((e) => JSON.stringify({ ...e,
-    at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  await f.log.appendBatch(old);
   await f.send("continue");
   assert.equal(f.replies.at(-1), "continued");
   assert.ok(summarizeCalls >= 2);
@@ -371,7 +381,7 @@ test("recent-history compaction reads the complete original archived result", as
       res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
     } else reply(res, "continued");
   }, { contextWindow: 6000 });
-  const log = createRuntimeLog(f.dir);
+  const log = f.log;
   const result = { content: [
     { type: "text" as const, text: "specific-evidence-A:" + "龙".repeat(9000) },
     { type: "text" as const, text: "specific-evidence-B:" + "虎".repeat(9000) },
@@ -382,7 +392,7 @@ test("recent-history compaction reads the complete original archived result", as
   message.content.push({ type: "toolCall", id: "source-call", name: "read", arguments: { path: "file-A" } });
   for (const event of [
     { type: "message", role: "user", text: "inspect file", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
+    { type: "model_message", requestId: "old", modelStepId: "old-step", message },
     { type: "tool_dispatch", requestId: "old", toolCallId: "source-call", toolName: "read", args: { path: "file-A" } },
     { type: "tool_result", requestId: "old", toolCallId: "source-call", toolName: "read", result, archive,
       modelVisible: "archive" },
@@ -391,7 +401,7 @@ test("recent-history compaction reads the complete original archived result", as
     { type: "request_completed", requestId: "old" },
   ]) await log.append(event);
   await f.send("continue");
-  assert.equal(f.replies.at(-1), "continued", await readFile(join(f.dir, "events.jsonl"), "utf8"));
+  assert.equal(f.replies.at(-1), "continued", JSON.stringify(await f.log.read()));
   assert.ok(compactInputs.length > 1);
   assert.ok(compactInputs.some((input) => input.includes("specific-evidence-A")));
   assert.ok(compactInputs.some((input) => input.includes("specific-evidence-B")));
@@ -401,21 +411,22 @@ test("recent-history compaction reads the complete original archived result", as
   assert.ok(files.some((name) => name.endsWith(".json")));
 });
 
-test("legacy archive-only events fail clearly when their copy is missing", async (t) => {
-  const f = await fixture(t, (_data, res) => reply(res, "unexpected"));
-  const log = createRuntimeLog(f.dir);
-  const result = { content: [{ type: "text" as const, text: "old evidence" }], details: {}, isError: false };
-  const archive = await log.archive(result);
-  const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
-  message.content.push({ type: "toolCall", id: "old-call", name: "read", arguments: { path: "old" } });
-  for (const event of [
-    { type: "message", role: "user", text: "old", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
-    { type: "tool_dispatch", requestId: "old", toolCallId: "old-call", toolName: "read", args: { path: "old" } },
-    { type: "tool_result", requestId: "old", toolCallId: "old-call", toolName: "read", archive,
-      modelVisible: "archive" },
-    { type: "request_completed", requestId: "old" },
-  ]) await log.append(event);
+test("legacy JSONL archive-only events imported into SQLite fail clearly when their copy is missing", async (t) => {
+  let archive!: Awaited<ReturnType<ReturnType<typeof createToolArchive>["archive"]>>;
+  const f = await fixture(t, (_data, res) => reply(res, "unexpected"), {}, async (dir) => {
+    const result = { content: [{ type: "text" as const, text: "old evidence" }], details: {}, isError: false };
+    archive = await createToolArchive(dir).archive(result);
+    const message = assistantText("", getModel("deepseek", "deepseek-v4-flash"));
+    message.content.push({ type: "toolCall", id: "old-call", name: "read", arguments: { path: "old" } });
+    const events = [
+      { type: "message", role: "user", text: "old", requestId: "old" },
+      { type: "model_message", requestId: "old", message },
+      { type: "tool_dispatch", requestId: "old", toolCallId: "old-call", toolName: "read", args: { path: "old" } },
+      { type: "tool_result", requestId: "old", toolCallId: "old-call", toolName: "read", archive, modelVisible: "archive" },
+      { type: "request_completed", requestId: "old" },
+    ];
+    await writeFile(join(dir, "events.jsonl"), events.map((event) => JSON.stringify({ ...event, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  });
   await rm(archive.rawPath);
   await f.send("continue");
   assert.equal(f.seen.length, 0);
@@ -423,19 +434,20 @@ test("legacy archive-only events fail clearly when their copy is missing", async
 });
 
 
-test("legacy tool progress without text segments gains protocol identity on replay", async (t) => {
-  const f = await fixture(t, (_data, res) => reply(res, "checked"));
+test("legacy JSONL tool progress imported into SQLite gains protocol identity on replay", async (t) => {
   const message = assistantText("准备查看目录。", getModel("deepseek", "deepseek-v4-flash"));
   message.content.push({ type: "toolCall", id: "legacy-ls", name: "ls", arguments: { path: "." } });
   const events = [
     { type: "message", role: "user", text: "查看目录", requestId: "old" },
-    { type: "model_message", requestId: "old", message },
+    { type: "model_message", requestId: "old", modelStepId: "old-step", message },
     { type: "tool_dispatch", requestId: "old", toolCallId: "legacy-ls", toolName: "ls" },
     { type: "tool_result", requestId: "old", toolCallId: "legacy-ls", toolName: "ls",
       result: { content: [{ type: "text", text: "note.md" }], details: {}, isError: false } },
     { type: "request_failed", requestId: "old" },
   ];
-  await writeFile(join(f.dir, "events.jsonl"), events.map((event) => JSON.stringify({ ...event, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  const f = await fixture(t, (_data, res) => reply(res, "checked"), {}, async (dir) => {
+    await writeFile(join(dir, "events.jsonl"), events.map((event) => JSON.stringify({ ...event, at: "2026-01-01T00:00:00Z" })).join("\n") + "\n");
+  });
   await f.send("继续");
   const assistant = f.seen.at(-1)!.messages.find((m) => m.tool_calls?.some((c) => c.id === "legacy-ls"));
   assert.deepEqual(JSON.parse(assistant!.content!), { type: "progress", text: "准备查看目录。" });
