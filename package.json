@@ -5,6 +5,8 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "run:diagnose": "node --import tsx src/cli/diagnose-run.ts",
     "context:diagnose": "node --import tsx src/cli/diagnose-context.ts",
     "start": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "agent": "node --env-file-if-exists=.env --import tsx src/main.ts",

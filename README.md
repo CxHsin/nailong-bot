@@ -166,6 +166,8 @@ Telegram 入口可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDIN
 
 代码检查：`npm run typecheck`、`npm test`、`npm run build`。完整集成回归可串行运行 `node --import tsx --test --test-concurrency=1 test/*.test.ts`，避免短时间窗测试受并行 SDK 负载影响。文档修改核对功能地图中的路径、启动命令与接入状态即可。
 
+新 checkout 用 `npm run hooks:install` 安装 [本地分支保护](docs/agents/git-hooks.md)。检查单次失败用 `npm run run:diagnose -- --run-id ID`；上下文范围与只读诊断说明见 [离线诊断](docs/context-diagnostics.md)。
+
 Akasha 配置、初始化与故障重建见 [操作与诊断](docs/memory-operations.md)；其中自然语言遗忘和部分送达行为属于兼容流程，当前入口边界以本页功能地图为准。dense 对照、错误关联及复现命令见 [对照验收](docs/memory-evaluation.md)。
 
 配置真实凭据后，分别检查 Telegram 文字／图片、Markdown 正文与草稿、CLI chat／send、图片输入、JSON 输出、文件／网页工具，以及同一 conversationId 的跨 Channel 续聊、共享命令和长期记忆。`/kvcache` 应在任务运行中及时返回，显示最近五组运行详情、待结算／缺失提示；Telegram 明确回复报表后，模型应能解释该查询快照。新 Runtime 已接入逐段进展、独立最终答案、静默摘要和启动只记录中断；真实客户端验收状态见 [验收记录](docs/runtime-progress-acceptance.md)，自动测试不能替代客户端验证。

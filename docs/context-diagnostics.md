@@ -1,5 +1,21 @@
 # 离线上下文诊断
 
+## 单次运行失败
+
+检查截图中的失败或模型调用中断，先按 Run 查询：
+
+```powershell
+npm run run:diagnose -- --run-id "待排查Run" --data-dir data
+```
+
+命令只读 `runtime-v2.sqlite` 中该 Run 的事实，不加载 `.env`、启动 Bot、调用模型、读取工具归档或写缓存。输出终止状态、工具结果与错误计数、最近一次上下文预算，以及每次模型调用的停止原因、HTTP 状态、服务端 request ID、耗时和脱敏错误分类。不会输出对话、工具参数/结果、请求正文、认证头、异常 message/stack 或 socket 数据。
+
+新增 `model_transport` 事实通过 Provider 的响应回调和 Node/Undici 诊断通道记录；错误 cause 仅保留已知名称与错误码。缺失的信息显示 `null` 或空列表，旧记录不会被补写。未使用 Undici 的传输可能没有 cause；这些信息用于定位，不能单独证明具体网络节点故障。摘要调用也关联自己的 call ID。
+
+原生与兼容 Responses 的断流回归通过真实 Host → Agent → 本地 Provider：工具执行一次，客户端确认收到草稿后断开连接；本轮失败，不结算草稿，也不重跑已执行工具。自动重试策略保持现状。
+
+## 上下文范围
+
 排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0003](adr/0003-recent-turn-context.md)，再运行：
 
 ```powershell
