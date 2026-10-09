@@ -9,6 +9,7 @@ import { initializeTelegramHostChannel } from "./channel/telegram/host-channel.j
 import { downloadTelegramPhoto } from "./telegram/telegram-input.js";
 import { memoryDynamics } from "./memory/dynamics.js";
 import { recallConfig } from "./memory/recall.js";
+import { capabilityEnvironment } from "./agent/capability-config.js";
 
 async function main(): Promise<void> {
   const telegram = telegramEnvironment(process.env);
@@ -21,6 +22,7 @@ async function main(): Promise<void> {
   if (!process.env.EMBEDDING_BASE_URL?.trim() || !process.env.EMBEDDING_MODEL?.trim() || !process.env.EMBEDDING_API_KEY?.trim())
     console.error("Embedding 配置不完整，语义记忆未启用；普通聊天与字面记忆查询仍可使用。");
   const agent = await createPiAgent({
+    ...await capabilityEnvironment(process.env),
     dataDir,
     promptFile,
     modelConfiguration,

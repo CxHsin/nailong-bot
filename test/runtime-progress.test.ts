@@ -22,7 +22,7 @@ test("ordinary assistant progress is delivered separately, replayed once and exc
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     inputs.push(body);
-    const delta = calls++ === 0 ? { content: "先检查目录，以确认文件是否存在。", tool_calls: [{ index: 0, id: "list", type: "function", function: { name: "ls", arguments: '{"path":"."}' } }] } : { content: "目录中有 prompt.md，检查完成。" };
+    const delta = calls++ === 0 ? { content: "先检查目录，以确认文件是否存在。", tool_calls: [{ index: 0, id: "list", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] } : { content: "目录中有 prompt.md，检查完成。" };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     await new Promise((resolve) => setTimeout(resolve, 30));

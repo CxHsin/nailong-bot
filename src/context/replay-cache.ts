@@ -9,7 +9,7 @@ import { replayEvents, type Replay } from "./projection.js";
 
 type Snapshot = { version: 1; key: string; raw: StoredEvent[]; replay: Replay; results: Record<string, ToolResult> };
 export function createReplayCache(dataDir: string, identity: string) {
-  const key = sourceDigest({ version: 1, policy: "recent-three-v1", identity });
+  const key = sourceDigest({ version: 1, policy: "recent-three-skills-v2", identity });
   const path = join(dataDir, "context-projections", `${key}.json`);
   let cached: Snapshot | undefined;
   let loaded = false;

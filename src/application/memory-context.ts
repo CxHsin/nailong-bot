@@ -3,6 +3,7 @@ import type { Context, Message } from "@mariozechner/pi-ai";
 import { estimateInput } from "../context/input-budget.js";
 import { literalTerms, type MemoryCandidate, type createMemoryProjection } from "../memory/projection.js";
 import type { Request } from "./app-types.js";
+import { toolProvenance } from "../runtime/tool-provenance.js";
 
 export type MemoryBudget = { maxTokens?: number; ratio?: number };
 export function memoryBudget(inputBudget: number, config: MemoryBudget = {}): number {
@@ -31,7 +32,9 @@ function* composeMemorySteps(context: Context, sourceIds: string[], candidates: 
   const shown: Array<{ nodeId: string; messageId: string; offset: number; end: number; existing: boolean }> = [];
   for (const message of context.messages) {
     const snapshotText = message.role === "user" && typeof message.content === "string" && message.content.startsWith("长期记忆原文引用") ? message.content : undefined;
-    if (!snapshotText && (message.role !== "toolResult" || !["memory_search", "memory_read"].includes(message.toolName) || message.isError)) continue;
+    const source = message.role === "toolResult" ? toolProvenance(message.toolName, message) : undefined;
+    const memoryTool = message.role === "toolResult" && (["memory_search", "memory_read"].includes(message.toolName) || source?.source === "memory");
+    if (!snapshotText && (!memoryTool || message.role !== "toolResult" || message.isError)) continue;
     try {
       const text = snapshotText ? snapshotText.slice(snapshotText.indexOf("\n") + 1) :
         Array.isArray(message.content) ? message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") : "";

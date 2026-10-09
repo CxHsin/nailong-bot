@@ -45,7 +45,7 @@ export async function createToolPathPolicy(dataDir: string, promptFile: string) 
     const part = relative(data, target).replaceAll("\\", "/").toLowerCase();
     const protectedData = ["events.jsonl", "auth.json", "runtime.sqlite", "runtime.sqlite-wal", "runtime.sqlite-shm"];
     if ((inside(application, target) && !inside(data, target)) || inside(program, target) || target.toLowerCase() === prompt.toLowerCase() ||
-      protectedData.includes(part) || /^(checkpoints|tool-results)(\/|$)/.test(part) ||
+      protectedData.includes(part) || /^(checkpoints|tool-results|skills|context-projections)(\/|$)/.test(part) ||
       (inside(data, target) && /\.(sqlite|sqlite3|db)(-wal|-shm)?$/i.test(part)))
       throw new Error("该路径属于受保护的程序或运行配置，不能通过普通工具修改");
   };

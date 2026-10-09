@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { createAssistantMessageEventStream, isContextOverflow } from "@mariozechner/pi-ai";
-import type { Api, Model, Message, Usage, SimpleStreamOptions } from "@mariozechner/pi-ai";
+import type { Api, Model, Message, Usage, SimpleStreamOptions, Tool } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
 import { createContextProjection } from "../context/context-budget.js";
@@ -28,7 +28,7 @@ function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptio
   } };
 }
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3" }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3"; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
   const plain = options.outputProtocol !== "json-text-v2" && !request?.onText;
   const protocolVersion = plain ? PLAIN_TEXT_PROTOCOL : OUTPUT_PROTOCOL_VERSION;
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
@@ -79,7 +79,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const identityEvents = request?.conversationId ? await request.log.read() : [];
   const resetIndex = identityEvents.findLastIndex((event) => event.type === "conversation_reset" || event.type === "reset");
   const projectionIdentity = request?.conversationId ? projectProviderContext({ conversationId: request.conversationId,
-    capabilities: { provider: model.provider, model: model.id, promptProfile: createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools,
+    capabilities: { provider: model.provider, model: model.id, promptProfile: createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest,
       reset: resetIndex < 0 ? "initial" : eventIdentity(identityEvents[resetIndex]!, resetIndex), excluded: [...memoryExclusions(identityEvents)].sort() })).digest("hex"),
       reasoningReplay: false, promptCaching: true, images: true, compaction: true, appendConfigurationUpdates: false }, items: [] }) : undefined;
   if (projectionIdentity) session.agent.sessionId = projectionIdentity.cacheKey;
@@ -87,7 +87,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const budgetRatio = request?.contextBudgetBoost ? fedContextRatio(modelInputBudget(model, options.contextBudgetRatio, options.modelBudgetRatios).ratio) : options.contextBudgetRatio;
   const budgetRatios = request?.contextBudgetBoost ? undefined : options.modelBudgetRatios;
-  const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools, protocolVersion })).digest("hex");
+  const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest, protocolVersion })).digest("hex");
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     conversationId: request.conversationId, structured: !plain,
     ratio: budgetRatio, ratios: budgetRatios,
@@ -119,6 +119,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   session.agent.streamFn = async (selected, context, streamOptions) => {
     let activePreview: string | undefined;
     try {
+      if (options.visibleTools) context = { ...context, tools: options.visibleTools };
       if (request?.conversationId) context = { ...context, systemPrompt: stableSystemPrompt(systemPrompt, options.dataDir) };
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;

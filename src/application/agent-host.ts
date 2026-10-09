@@ -13,11 +13,13 @@ import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOpt
 import { recordInterruptedRuns } from "../runtime/startup-recovery.js";
 import { projectTimeline } from "../runtime/timeline.js";
 import { validModelAlias } from "../agent/model-config.js";
+import { SkillReferenceError } from "../agent/skills.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
   { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
   { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model 模型别名" },
+  { command: "skill", description: "显式安装或更新技能", usage: "/skill install 链接；/skill update 链接" },
   { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
   { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
   { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
@@ -28,6 +30,8 @@ export const AGENT_COMMANDS = [
 
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
+  prepareCapabilities?: (text: string, request: Request) => Promise<void>;
+  installSkill?: (text: string, request: Request) => Promise<string | undefined>;
   summarizeProgress?: ProgressSummaryGenerator;
   defaultModel?: string;
   models?: ReadonlyArray<{ alias: string; name: string }>;
@@ -43,6 +47,7 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   const definition = AGENT_COMMANDS.find((item) => item.command === name);
   await log.append({ type: "command_received", command: name, messageId: input.metadata?.messageId, contextPolicy: "exclude" });
   if (!definition) return { text: "未知命令，请发送 /help 查看帮助。", kind: "control" };
+  if (name === "skill") return undefined;
   if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
     return { text: `用法：${definition.usage}`, kind: "control" };
   if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n"), kind: "control" };
@@ -124,6 +129,10 @@ export function createAgentHost(options: AgentHostOptions) {
       botPromptVersion: typeof configured?.version === "string" ? configured.version : undefined };
     if (options.agent.summarizeProgress) summaries = startProgressSummaries(request, text, options.agent.summarizeProgress, options.progressSummary);
     try {
+      request.channel = typeof input.metadata?.channel === "string" ? input.metadata.channel : undefined;
+      const installation = await options.agent.installSkill?.(text, request);
+      if (installation !== undefined) return { text: installation, kind: "control" };
+      await options.agent.prepareCapabilities?.(text, request);
       const final = await options.agent.answer(projectDeliveredChat(history), request);
       summaries?.stop();
       // A protocol final may omit previously completed results; they must survive the draft.
@@ -136,6 +145,9 @@ export function createAgentHost(options: AgentHostOptions) {
         ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
       await log.append({ type: "request_failed", requestId: context.runId, error: String(error) });
+      if (error instanceof SkillReferenceError) return { text: error.message, kind: "control" };
+      if (request.loadedSkillPaths?.length && error instanceof Error && /预算/.test(error.message))
+        return { text: "skill 加载失败：完整指令超过本次模型输入预算。请缩小技能正文或使用更大的模型窗口。", kind: "control" };
       throw error;
     } finally {
       summaries?.stop();

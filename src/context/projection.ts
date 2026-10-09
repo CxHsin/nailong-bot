@@ -82,6 +82,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       const supplemental = quotesExcluded ? snapshotMessages.slice(0, 1) : snapshotMessages;
       units.push({ messages: [...supplemental, message], through: Math.max(index + 1, snapshot ? events.indexOf(snapshot) + 1 : 0), requestId: legacyRequest, safe: true,
         sourceIds: [eventIdentity(event, all.indexOf(event))] });
+    } else if (event.type === "skill_loaded" && event.mode === "explicit" && typeof event.body === "string") {
+      units.push({ messages: [{ role: "user", timestamp, content: `运行层按用户显式引用加载的 skill 指令（${String(event.source)}:${String(event.name)}；根目录 ${String(event.root)}；版本 ${String(event.digest)}）：\n${event.body}` }],
+        through: index + 1, requestId: event.requestId, safe: event.requestId !== currentId });
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
       units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
         requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });

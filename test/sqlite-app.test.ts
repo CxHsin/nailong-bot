@@ -52,7 +52,7 @@ test("SQLite commits Pi tool facts before the next model step", { timeout: 60_00
     observed.push((await log.read()).map((event) => event.type));
     const first = observed.length === 1;
     const delta = first ? { tool_calls: [{ index: 0, id: "read-one", type: "function",
-      function: { name: "ls", arguments: JSON.stringify({ path: dir }) } }] } : { content: JSON.stringify({ type: "final", text: "已查看目录" }) };
+      function: { name: "read", arguments: JSON.stringify({ path: "system-prompt.md" }) } }] } : { content: JSON.stringify({ type: "final", text: "已查看目录" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
       finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
@@ -90,7 +90,7 @@ test("private Telegram sees committed progress before tool work and final text i
     contexts.push(JSON.parse(body).messages);
     calls++;
     const delta = calls === 1 ? { content: JSON.stringify({ type: "progress", text: "我先查看目录。" }), tool_calls: [{ index: 0, id: "ls-one", type: "function",
-      function: { name: "ls", arguments: JSON.stringify({ path: dir }) } }] } : { content: JSON.stringify({ type: "final", text: "目录已查看。" }) };
+      function: { name: "read", arguments: JSON.stringify({ path: "system-prompt.md" }) } }] } : { content: JSON.stringify({ type: "final", text: "目录已查看。" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
       finish_reason: calls === 1 ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
@@ -139,7 +139,7 @@ test("committed progress remains in context when tool dispatch fails", { timeout
     contexts.push(JSON.parse(body).messages);
     const first = contexts.length === 1;
     const delta = first ? { content: JSON.stringify({ type: "progress", text: "我先检查目录。" }), tool_calls: [{ index: 0, id: "ls-one",
-      type: "function", function: { name: "ls", arguments: JSON.stringify({ path: dir }) } }] }
+      type: "function", function: { name: "read", arguments: JSON.stringify({ path: "system-prompt.md" }) } }] }
       : { content: JSON.stringify({ type: "final", text: "继续处理" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,

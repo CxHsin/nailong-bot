@@ -1,6 +1,8 @@
 # Nailong bot
 
-在本机运行的个人 Agent，通过 Telegram 私聊或 CLI 接收文字和图片，使用 pi SDK 调用 DeepSeek，并提供本机文件工具和可选的 TinyFish 网页工具。
+在本机运行的个人 Agent，通过 Telegram 私聊或 CLI 接收文字和图片，使用 pi SDK 调用配置的模型，并提供本机文件工具、TinyFish 网页查询、按需 MCP 工具及 skills。
+
+[工具发现、MCP 与 skill 配置和使用](docs/capabilities.md)：五个稳定工具，其他能力按需搜索；Telegram 可用 `@skill名称` 指定技能，用 `安装 skill 链接` 或 `/skill install 链接` 显式安装。
 
 [功能地图](#功能地图-feature-map) · [启动与使用](#启动与使用) · [运行数据与上下文](#运行数据与上下文) · [长期记忆](#长期记忆) · [代码结构](#代码结构) · [验证](#验证)
 
