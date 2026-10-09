@@ -145,6 +145,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const selectMs = performance.now() - selectStarted;
         phase("memory-select", snapshot ? "已复用本轮记忆快照。" : `筛选完成，实际选入 ${combined.quotes.length} 段引用；重复或超预算内容未加入。`, "completed");
         const loadStarted = performance.now();
+        phase("context-load", "正在装载上下文与记忆引用……", "started");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (request?.signal?.aborted) throw new DOMException("上下文装载已取消", "AbortError");
         if (request?.conversationId && !snapshot) {
           const currentIndex = combined.context.messages.findLastIndex((message) => message.role === "user");
           const memoryMessage = combined.quotes.length ? combined.context.messages[currentIndex - 1] : undefined;
@@ -160,8 +163,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           await request.log.append({ ...storedSnapshot, requestId: request.id });
         }
         if (request && combined.quotes.length) phase("memory-ready", `已加载 ${combined.quotes.length} 段记忆引用。`, "completed");
+        phase("context-load", `上下文已装载，${combined.context.messages.length} 条消息。`, "completed");
+        phase("context-check", "正在核对上下文预算……", "started");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (request?.signal?.aborted) throw new DOMException("上下文检查已取消", "AbortError");
         combined = { ...combined, context: projectNativeContext(combined.context, selected) };
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
+        phase("context-check", "上下文预算检查通过。", "completed");
         const loadMs = performance.now() - loadStarted;
         await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
         const modelStepId = randomUUID();
