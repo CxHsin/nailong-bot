@@ -20,6 +20,12 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Install file tool dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fd-find ripgrep
+          fdfind --version
+          rg --version
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
