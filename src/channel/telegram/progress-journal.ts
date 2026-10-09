@@ -2,9 +2,21 @@ import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { TelegramHostTransport } from "./projection.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 
+let nextJournalDraftId = 1;
+const draftSegments = new Intl.Segmenter("zh", { granularity: "grapheme" });
+function boundedDraft(text: string) {
+  if (text.length <= 3800) return text;
+  let result = "";
+  for (const { segment } of draftSegments.segment(text)) {
+    if (result.length + segment.length > 3800) break;
+    result += segment;
+  }
+  return `${result}…`;
+}
+
 /** Visible commentary only. Never collects Provider thinking events. */
 export async function consumeProgressJournal(handle: RunHandle, options: TelegramHostTransport & {
-  chatId: number; progressIntervalMs?: number; progressTimeoutMs?: number;
+  chatId: number; progressIntervalMs?: number; progressTimeoutMs?: number; draftIntervalMs?: number; draftTimeoutMs?: number;
   recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
 }, finish: (event: HostEvent) => Promise<void>) {
   const entries = new Map<string, { text: string; active: boolean; started: number; updated: number }>();
@@ -12,6 +24,8 @@ export async function consumeProgressJournal(handle: RunHandle, options: Telegra
   const pages: Array<{ id: number; text: string }> = [];
   let control = false; let ended = false; let disabled = false; let busy = false;
   let pending = Promise.resolve(); let lastAttempt = -Infinity; let lastEvent: HostEvent | undefined;
+  const draftId = nextJournalDraftId++;
+  let useDraft = !!options.draft; let publishedDraft = ""; let publishedAt = -Infinity;
   const record = async (fact: Record<string, unknown>) => { if (lastEvent) await options.recordProgress?.(lastEvent, fact); };
   const renderEntry = (entry: { text: string; active: boolean; started: number }) => {
     const seconds = Math.floor((Date.now() - entry.started) / 5000) * 5;
@@ -54,15 +68,37 @@ export async function consumeProgressJournal(handle: RunHandle, options: Telegra
     }
   };
   const schedule = (force = false) => {
-    if (busy || disabled || !force && Date.now() - lastAttempt < (options.progressIntervalMs ?? 1000)) return;
+    const native = useDraft && !ended;
+    const interval = native ? options.draftIntervalMs ?? 250 : options.progressIntervalMs ?? 1000;
+    if (busy || disabled || !force && Date.now() - lastAttempt < interval) return;
     lastAttempt = Date.now(); busy = true;
     pending = new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => { disabled = true; void record({ state: "failed_or_unknown", reason: "timeout" }).catch(() => {}); resolve(); }, options.progressTimeoutMs ?? 3000);
-      void flush().catch(async () => { disabled = true; await record({ state: "failed_or_unknown" }).catch(() => {}); })
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+        if (native) useDraft = false; else disabled = true;
+        void record({ state: native ? "draft_unavailable" : "failed_or_unknown", reason: "timeout" }).catch(() => {}); resolve();
+      }, native ? options.draftTimeoutMs ?? 3000 : options.progressTimeoutMs ?? 3000);
+      const publish = async () => {
+        if (!native) return flush();
+        if (disabled || control || !entries.size) return;
+        const recent = [...entries.values()].sort((a, b) => a.updated - b.updated).slice(-5).map(renderEntry);
+        while (recent.length > 1 && recent.join("\n\n").length > 3800) recent.shift();
+        const text = boundedDraft(recent.join("\n\n"));
+        if (!text || text === publishedDraft && Date.now() - publishedAt < 15000) return;
+        await options.draft!(draftId, text, options.chatId, controller.signal);
+        if (controller.signal.aborted) return;
+        publishedDraft = text; publishedAt = Date.now();
+        await record({ state: "drafted", draftId });
+      };
+      void publish().catch(async () => {
+        if (native) useDraft = false; else disabled = true;
+        await record({ state: native ? "draft_unavailable" : "failed_or_unknown" }).catch(() => {});
+      })
         .finally(() => { clearTimeout(timeout); resolve(); });
     }).finally(() => { busy = false; });
   };
-  const timer = setInterval(() => { if (!ended) schedule(); }, 250); timer.unref();
+  const timer = setInterval(() => { if (!ended) schedule(); }, Math.max(1, Math.min(250, options.draftIntervalMs ?? 250))); timer.unref();
   try {
     for await (const event of handle.events()) {
       lastEvent = event;

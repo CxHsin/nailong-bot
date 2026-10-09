@@ -42,7 +42,7 @@ test("Telegram shows recall progress while embedding is pending and edits the sa
     await log.append({ type: "request_completed", requestId: `old${i}` });
   }
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  const cards = new Map<number, string>(); const finals: string[] = []; const snapshots: string[] = [];
+  const cards = new Map<number, string>(); const finals: string[] = []; const snapshots: string[] = []; const drafts: number[] = [];
   const receive = (id: number, html: string) => {
     cards.set(id, html); snapshots.push(html);
     if (html.includes("正在匹配问题的语义")) {
@@ -50,7 +50,10 @@ test("Telegram shows recall progress while embedding is pending and edits the sa
     }
   };
   const rich = createTelegramRichTransport({ sendRich: async (_chat, text) => { finals.push(text); return 99; },
-    draftRich: async () => {}, draftHtml: async () => {},
+    draftRich: async (id, _chat, text) => {
+      drafts.push(id); snapshots.push(text);
+      if (text.includes("正在匹配问题的语义")) { assert.equal(modelCalls, 0); release(); }
+    }, draftHtml: async () => {},
     sendHtml: async (_chat, html) => { const id = cards.size + 1; receive(id, html); return id; },
     editHtml: async (id, _chat, html) => receive(id, html) });
   const run = host.submit({ actor: { id: "42" }, conversationId: "telegram:private:42", text: "历史问题" });
@@ -61,6 +64,7 @@ test("Telegram shows recall progress while embedding is pending and edits the sa
   assert.equal((await run.done).type, "run_succeeded");
   assert.equal(cards.size, 1);
   assert.ok(snapshots.some((html) => html.includes("正在匹配问题的语义")));
+  assert.ok(drafts.length > 0); assert.equal(new Set(drafts).size, 1);
   const text = cards.get(1)!;
   assert.match(text, /检索完成：40 条候选记忆/);
   assert.match(text, /历史上下文已恢复|筛选完成|上下文已准备好/);

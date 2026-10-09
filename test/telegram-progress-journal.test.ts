@@ -27,8 +27,95 @@ function transport() {
     draftRich: async () => {}, draftHtml: async () => {},
     sendHtml: async (_chat, text) => { const id = visible.size + 1; visible.set(id, text); return id; },
     editHtml: async (id, _chat, text) => { edits.push(id); visible.set(id, text); } });
-  return { rich, visible, edits, finals };
+  const { draft: _draft, ...cardOnly } = rich;
+  return { rich: cardOnly, visible, edits, finals };
 }
+
+test("retained journal uses one native draft for animated preparation text and persists only on finish", async () => {
+  const output = transport(); const drafts: Array<{ id: number; text: string }> = [];
+  const done = event("run_succeeded", { result: { text: "独立答案" } });
+  const run: RunHandle = { runId: "native-preparation", conversationId: "telegram:42", done: Promise.resolve(done), cancel: async () => true,
+    async *events() {
+      yield progress({ type: "text", segmentId: "recall", kind: "status", text: "正在检索相关记忆……", finalized: true, actionState: "started" });
+      await delay(40);
+      assert.equal(output.visible.size, 0, "preparation should use the animated draft, not a persistent message");
+      assert.ok(drafts.some((draft) => draft.text.includes("正在检索相关记忆")));
+      yield progress({ type: "text", segmentId: "scan", kind: "status", text: "正在扫描记忆：32/80 条。", finalized: true, actionState: "started" });
+      await delay(40);
+      assert.ok(drafts.some((draft) => draft.text.includes("正在扫描记忆：32/80")));
+      yield progress({ type: "text", segmentId: "history", kind: "status", text: "正在恢复历史记录：32/160 条已检查。", finalized: true, actionState: "started" });
+      await delay(40);
+      assert.ok(drafts.some((draft) => draft.text.includes("正在恢复历史记录：32/160")));
+      yield done;
+    } };
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5,
+    draft: async (id, text) => { drafts.push({ id, text }); } }).consume(run);
+  assert.ok(drafts.length >= 3);
+  assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
+  assert.equal(output.visible.size, 1);
+  assert.match(output.visible.get(1)!, /已完成/);
+  assert.deepEqual(output.finals, ["独立答案"]);
+  const count = drafts.length; await delay(30); assert.equal(drafts.length, count);
+});
+
+for (const failure of ["rejected", "timeout"] as const) test(`native draft ${failure} falls back to the editable journal and never holds final delivery`, async () => {
+  const output = transport(); let attempts = 0; let signal: AbortSignal | undefined;
+  const started = Date.now();
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 1, draftTimeoutMs: 15, progressIntervalMs: 0,
+    draft: async (_id, _text, _chat, abort) => {
+      attempts++; signal = abort;
+      if (failure === "rejected") throw new Error("unavailable");
+      await new Promise<void>(() => {});
+    } }).consume(handle([
+    progress({ type: "text", segmentId: "recall", kind: "status", text: "正在检索记忆", finalized: true, actionState: "started" }),
+    progress({ type: "text", segmentId: "recall", kind: "status", text: "检索完成：72 条候选记忆。", finalized: true, actionState: "completed" }),
+    event("run_succeeded", { result: { text: "最终答案" } }),
+  ], 30));
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(attempts, 1);
+  if (failure === "timeout") assert.equal(signal?.aborted, true);
+  assert.equal(output.visible.size, 1);
+  assert.match(output.visible.get(1)!, /检索完成：72 条候选记忆/);
+  assert.deepEqual(output.finals, ["最终答案"]);
+});
+
+test("discarded native preview disappears before cancellation and draft IDs change for the next Run", async () => {
+  const output = transport(); const drafts: Array<{ id: number; text: string }> = [];
+  const projection = createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 1,
+    draft: async (id, text) => { drafts.push({ id, text }); } });
+  await projection.consume(handle([
+    progress({ type: "text", segmentId: "history", kind: "status", text: "正在恢复历史", finalized: false }),
+    progress({ type: "text", segmentId: "discard", kind: "progress", text: "撤回预览", finalized: false }),
+    progress({ type: "discard", segmentId: "discard" }),
+    event("run_cancelled"),
+  ], 20));
+  assert.match(drafts.at(-1)!.text, /正在恢复历史/);
+  assert.doesNotMatch(drafts.at(-1)!.text, /撤回预览/);
+  const firstId = drafts.at(-1)!.id;
+  await projection.consume(handle([
+    progress({ type: "text", segmentId: "new", kind: "status", text: "新轮次", finalized: false }),
+    event("run_failed"),
+  ], 20));
+  assert.notEqual(drafts.at(-1)!.id, firstId);
+  assert.match(output.visible.get(2)!, /本轮处理失败/);
+});
+
+test("long native previews fit Telegram limits without splitting graphemes and retain the full terminal journal", async () => {
+  const output = transport(); const drafts: string[] = [];
+  const glyph = "👨‍👩‍👧‍👦"; const original = glyph.repeat(500);
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 1,
+    draft: async (_id, text) => { drafts.push(text); } }).consume(handle([
+    progress({ type: "text", segmentId: "long", kind: "progress", text: original, finalized: false }),
+    progress({ type: "text", segmentId: "latest", kind: "status", text: "正在核对预算", finalized: true }),
+    event("run_succeeded", { result: { text: "完成" } }),
+  ], 20));
+  assert.ok(drafts.length > 0);
+  assert.ok(drafts.every((text) => text.length <= 4096), "native Rich draft must fit too, not just the HTML fallback");
+  assert.ok(drafts.filter((text) => text.includes(glyph)).every((text) => text.replaceAll(glyph, "").replace("…", "") === ""));
+  assert.ok(drafts.some((text) => text.includes("正在核对预算")), "an older long entry must not hide the current state");
+  const content = [...output.visible.values()].join("");
+  assert.ok(content.split(glyph).length - 1 >= 500);
+});
 
 test("folded preview follows updates to existing states while the full journal keeps its order", async () => {
   const t = transport(); const snapshots: string[] = [];
