@@ -21,11 +21,11 @@ One ordered attempt by the Host to process an input and produce a result or term
 _Avoid_: request (except for compatibility with existing runtime events)
 
 **Follow-up**:
-A subsequent user input held until the current work finishes before being processed in the same Conversation. Ordinary user messages received during active work are Follow-ups by default.
+A subsequent user input held until the current work finishes, then processed in its own Run in the same Conversation, in receipt order. Ordinary user messages received during active work are Follow-ups by default.
 _Avoid_: steering input
 
 **Steer**:
-An explicit user input that changes the direction or constraints of active work at an execution boundary. It takes effect after the current batch of tools completes.
+An explicit user input that changes the direction or constraints of an active Run after its current batch of tools completes. Pending Steers are presented together in receipt order at the next execution boundary.
 _Avoid_: follow-up, immediate interruption
 
 **Stop**:
