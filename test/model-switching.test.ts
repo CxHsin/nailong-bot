@@ -149,9 +149,8 @@ test("production Host switches DS → XH Responses → DS with tools, restart hi
   assert.ok(facts.some((event) => event.type === "model_usage" && event.model === "gpt-6.1-sol" && (event.usage as { cacheRead: number }).cacheRead === 80));
   assert.equal(seen[1]!.body.prompt_cache_key, seen[3]!.body.prompt_cache_key);
   assert.match(JSON.stringify(seen[1]!.body), /reasoning.encrypted_content/);
-  const summaryRequest = { id: gpt.runId, log, modelAlias: "gpt" as const };
-  assert.equal(await agent.summarizeProgress({ task: "read", explanations: [], facts: [] }, summaryRequest, new AbortController().signal, () => {}), "GPT answer");
-  assert.equal(seen[5]!.auth, "Bearer xh-key");
+  assert.equal("summarizeProgress" in agent, false, "production progress comes from the execution model's public text units");
+  assert.equal(seen.length, 5);
 });
 
 test("GPT compacts oversized recent turns through Responses and continues with the selected model", async (t) => {

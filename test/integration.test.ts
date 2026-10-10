@@ -7,16 +7,19 @@ import test from "node:test";
 import { createApp } from "../src/application/app.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
 
 test("structured progress continues within the same request", async () => {
   let calls = 0;
+  const plan = discoveredToolPlan();
   const server = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const data = JSON.parse(body);
+    if (plan.continue(data, res)) return;
     const delta = calls++ === 0 ? { content: JSON.stringify({ type: "progress", text: "我先查一下。" }) } :
       calls === 2 ? { tool_calls: [{ index: 0, id: "call_search", type: "function",
-        function: { name: "ls", arguments: '{"path":"."}' } }] } :
+        function: { name: "tool_search", arguments: JSON.stringify(plan.select("ls", { path: "." }).args) } }] } :
         { content: JSON.stringify({ type: "final", text: "查询完成。" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
@@ -35,7 +38,7 @@ test("structured progress continues within the same request", async () => {
     assert.equal(answer, "查询完成。");
     assert.equal(calls, 3);
     const events = await log.read();
-    assert.ok(events.some((event) => event.type === "tool_dispatch" && event.toolName === "ls"));
+    assert.ok(events.some((event) => event.type === "capability_dispatched" && event.toolName === "ls"));
     assert.equal(events.filter((event) => event.type === "text_finalized" &&
       event.contentKind === "final").length, 1);
   } finally {
@@ -94,7 +97,7 @@ test("Telegram entry uses real pi to select MCP search and resumes from the even
     await app.handle({ userId: 42, chatType: "private", text: "搜索新闻", messageId: 1 });
     assert.equal(query, "news");
     assert.match(replies[0] ?? "", /https:\/\/example.com\/news/);
-    assert.deepEqual([...offeredTools].sort(), ["edit", "find", "grep", "ls", "read", "web_fetch", "web_search", "write"]);
+    assert.deepEqual([...offeredTools].sort(), ["edit", "read", "tool_call", "tool_search", "web_search", "write"]);
     await agent.close();
     agent = await createPiAgent(options);
     app = createApp({ ownerId: 42, dataDir: dir, answer: agent.answer, send: async (text) => { replies.push(text); } });

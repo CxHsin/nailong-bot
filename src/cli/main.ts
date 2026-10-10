@@ -6,6 +6,7 @@ import { createPiAgent } from "../agent/pi-agent.js";
 import { modelEnvironment } from "../agent/model-config.js";
 import { createAgentHost } from "../application/agent-host.js";
 import { createCliChannel, parseCliArgs } from "./cli-channel.js";
+import { capabilityEnvironment } from "../agent/capability-config.js";
 
 async function main() {
   const args = parseCliArgs(process.argv.slice(2));
@@ -13,9 +14,8 @@ async function main() {
   const promptFile = resolve(process.env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md");
   const modelConfiguration = modelEnvironment(process.env);
   const log = await createRuntimeEventLog(dataDir);
-  const agent = await createPiAgent({ dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
-  const host = createAgentHost({ log, dataDir, promptFile, agent,
-    progressSummary: process.env.PROGRESS_SUMMARY_OPTIONS ? JSON.parse(process.env.PROGRESS_SUMMARY_OPTIONS) : undefined });
+  const agent = await createPiAgent({ ...await capabilityEnvironment(process.env), dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
+  const host = createAgentHost({ log, dataDir, promptFile, agent });
   await host.recoverInterrupted();
   const cli = createCliChannel({ host, actor: { id: process.env.AGENT_ACTOR_ID?.trim() || "cli", kind: "user" }, stdout: (line) => stdout.write(`${line}\n`), stderr: (line) => stderr.write(`${line}\n`),
     onDelivered: (event) => host.recordDelivery(event, { channel: "cli" }) });

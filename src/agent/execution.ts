@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from "node:crypto";
 import { createAssistantMessageEventStream, isContextOverflow } from "@mariozechner/pi-ai";
-import type { Api, Model, Message, Usage, SimpleStreamOptions } from "@mariozechner/pi-ai";
+import type { Api, Model, Message, Usage, SimpleStreamOptions, Tool } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
 import { createContextProjection } from "../context/context-budget.js";
@@ -14,6 +14,8 @@ import { recordModelUsage } from "./model-usage.js";
 import { projectProviderContext, projectNativeContext } from "../context/provider-aware.js";
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
+import { startObservedProvider } from "./provider-diagnostics.js";
+import { publicTextPhase } from "./text-phase.js";
 
 function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
   return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
@@ -28,7 +30,7 @@ function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptio
   } };
 }
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3" }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3"; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
   const plain = options.outputProtocol !== "json-text-v2" && !request?.onText;
   const protocolVersion = plain ? PLAIN_TEXT_PROTOCOL : OUTPUT_PROTOCOL_VERSION;
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
@@ -79,7 +81,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const identityEvents = request?.conversationId ? await request.log.read() : [];
   const resetIndex = identityEvents.findLastIndex((event) => event.type === "conversation_reset" || event.type === "reset");
   const projectionIdentity = request?.conversationId ? projectProviderContext({ conversationId: request.conversationId,
-    capabilities: { provider: model.provider, model: model.id, promptProfile: createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools,
+    capabilities: { provider: model.provider, model: model.id, promptProfile: createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest,
       reset: resetIndex < 0 ? "initial" : eventIdentity(identityEvents[resetIndex]!, resetIndex), excluded: [...memoryExclusions(identityEvents)].sort() })).digest("hex"),
       reasoningReplay: false, promptCaching: true, images: true, compaction: true, appendConfigurationUpdates: false }, items: [] }) : undefined;
   if (projectionIdentity) session.agent.sessionId = projectionIdentity.cacheKey;
@@ -87,7 +89,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const recalled = memory && request ? await recallMemory(memory, request, String(user?.originalText ?? user?.text ?? "")) : undefined;
   const budgetRatio = request?.contextBudgetBoost ? fedContextRatio(modelInputBudget(model, options.contextBudgetRatio, options.modelBudgetRatios).ratio) : options.contextBudgetRatio;
   const budgetRatios = request?.contextBudgetBoost ? undefined : options.modelBudgetRatios;
-  const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: session.agent.state.tools, protocolVersion })).digest("hex");
+  const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest, protocolVersion })).digest("hex");
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     conversationId: request.conversationId, structured: !plain,
     ratio: budgetRatio, ratios: budgetRatios,
@@ -99,8 +101,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "正在整理历史摘要……", actionState: "started", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
       await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
-      const stream = await providerStream(model, projectNativeContext(context, model), providerStreamOptions({ maxTokens, signal: session.agent.signal,
-        ...(model.reasoning ? { reasoning: "low" as const } : {}) }));
+      const observed = await startObservedProvider(providerStream, model, projectNativeContext(context, model), providerStreamOptions({ maxTokens, signal: session.agent.signal,
+        ...(model.reasoning ? { reasoning: "low" as const } : {}) }), request, callId, "summary");
+      const stream = observed.source;
       let initialUsage: Usage | undefined;
       for await (const event of stream) {
         if (event.type === "start") initialUsage = event.partial.usage;
@@ -110,6 +113,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         }
       }
       const response = await stream.result();
+      await observed.record(response);
       await recordModelUsage(request, callId, "summary", response, initialUsage);
       if (response.stopReason !== "stop") throw new Error("历史摘要生成未完整结束");
       return response.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
@@ -119,6 +123,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   session.agent.streamFn = async (selected, context, streamOptions) => {
     let activePreview: string | undefined;
     try {
+      if (options.visibleTools) context = { ...context, tools: options.visibleTools };
       if (request?.conversationId) context = { ...context, systemPrompt: stableSystemPrompt(systemPrompt, options.dataDir) };
       if (projectionFailure) throw projectionFailure;
       dispatchedThisStep = false;
@@ -141,6 +146,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const selectMs = performance.now() - selectStarted;
         phase("memory-select", snapshot ? "已复用本轮记忆快照。" : `筛选完成，实际选入 ${combined.quotes.length} 段引用；重复或超预算内容未加入。`, "completed");
         const loadStarted = performance.now();
+        phase("context-load", "正在装载上下文与记忆引用……", "started");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (request?.signal?.aborted) throw new DOMException("上下文装载已取消", "AbortError");
         if (request?.conversationId && !snapshot) {
           const currentIndex = combined.context.messages.findLastIndex((message) => message.role === "user");
           const memoryMessage = combined.quotes.length ? combined.context.messages[currentIndex - 1] : undefined;
@@ -156,34 +164,53 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           await request.log.append({ ...storedSnapshot, requestId: request.id });
         }
         if (request && combined.quotes.length) phase("memory-ready", `已加载 ${combined.quotes.length} 段记忆引用。`, "completed");
+        phase("context-load", `上下文已装载，${combined.context.messages.length} 条消息。`, "completed");
+        phase("context-check", "正在核对上下文预算……", "started");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (request?.signal?.aborted) throw new DOMException("上下文检查已取消", "AbortError");
         combined = { ...combined, context: projectNativeContext(combined.context, selected) };
         if (estimateInput(combined.context) > inputBudget) throw new Error("上下文超过预算");
+        phase("context-check", "上下文预算检查通过。", "completed");
         const loadMs = performance.now() - loadStarted;
         await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
+        const textSegments = new Map<number, string>();
+        const settledSegments = new Set<number>();
+        const segmentFor = (index: number) => {
+          let id = textSegments.get(index);
+          if (!id) { id = textSegments.size ? randomUUID() : textSegmentId; textSegments.set(index, id); }
+          return id;
+        };
         activePreview = textSegmentId;
         if (++step > 128) throw new Error("模型超过本轮执行步数上限");
         await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
         request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "上下文已准备好，等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
-        const source = await providerStream(selected, combined.context, providerStreamOptions({ ...streamOptions,
-          maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }));
+        const observed = await startObservedProvider(providerStream, selected, combined.context, providerStreamOptions({ ...streamOptions,
+          maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }), request, modelStepId, "execution");
+        const source = observed.source;
         let producedOutput = false;
         let initialUsage: Usage | undefined;
         let lastPreview = "";
+        let lastPreviewId = "";
         let lastPreviewAt = -Infinity;
         let lastValidatedPrefix = "";
         for await (const event of source) {
           if (event.type === "start") initialUsage = event.partial.usage;
           if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
           if (event.type === "text_delta" && request) {
-            const rawPreview = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+            const part = event.partial.content[event.contentIndex];
+            const previewId = plain ? segmentFor(event.contentIndex) : textSegmentId;
+            if (previewId !== lastPreviewId) { lastPreview = ""; lastPreviewAt = -Infinity; lastPreviewId = previewId; }
+            activePreview = previewId;
+            const rawPreview = plain && part?.type === "text" ? part.text : event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
             let preview: ReturnType<typeof previewStructuredText>;
             let validatedPrefix = false;
             let prefixChanged = false;
-            if (plain) preview = { type: "progress", text: rawPreview };
+            const publicPhase = plain && part?.type === "text" ? publicTextPhase(part) : undefined;
+            if (plain) preview = { type: publicPhase?.phase === "final_answer" ? "final" : "progress", text: rawPreview };
             else try {
               const frames = readOutputFrames(rawPreview);
               const partial = previewStructuredText(frames.rest);
@@ -205,12 +232,25 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
                 protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
               lastPreview = preview.text;
               lastPreviewAt = performance.now();
-              request.onProgress?.({ type: "text", segmentId: textSegmentId, kind: preview.type, text: preview.text, finalized: false });
+              request.onProgress?.({ type: "text", segmentId: previewId, kind: preview.type, text: preview.text, finalized: false, ...publicPhase });
               await request.onText?.(textSegmentId);
+            }
+          }
+          if (plain && event.type === "text_end") {
+            const part = event.partial.content[event.contentIndex];
+            if (part?.type === "text" && publicTextPhase(part).phase === "commentary" && part.text.trim()) {
+              const id = segmentFor(event.contentIndex);
+              const publicPhase = publicTextPhase(part);
+              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+                textSegmentId: id, modelTextIndex: event.contentIndex, contentKind: "progress", text: part.text, protocolVersion, source: "execution", ...publicPhase });
+              request?.onProgress?.({ type: "text", segmentId: id, kind: "progress", text: part.text, finalized: true, formal: true, source: "execution", ...publicPhase });
+              settledSegments.add(event.contentIndex);
+              if (activePreview === id) activePreview = undefined;
             }
           }
         }
         const message = await source.result();
+        await observed.record(message);
         await recordModelUsage(request, modelStepId, "execution", message, initialUsage);
         if (request && recalled?.snapshotId && message.stopReason !== "error" && message.stopReason !== "aborted")
           await request.log.append({ type: "memory_presented", requestId: request.id,
@@ -233,13 +273,21 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const toolCalls = message.content.filter((c) => c.type === "toolCall");
         if (plain) {
           if (!raw.trim() && !toolCalls.length) throw new Error("模型没有提交答复或工具调用");
-          if (raw.trim()) {
-            const kind = toolCalls.length ? "progress" : "final";
-            await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
-              textSegmentId, contentKind: kind, text: raw, protocolVersion, source: "execution" });
-            request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind, text: raw, finalized: true, formal: kind !== "final", source: "execution" });
-            if (kind === "final") finalText = raw;
+          const finalParts: string[] = [];
+          for (const [index, part] of message.content.entries()) {
+            if (part.type !== "text" || !part.text.trim()) continue;
+            const publicPhase = publicTextPhase(part, { hasTools: toolCalls.length > 0 });
+            const kind = publicPhase.phase === "commentary" ? "progress" : "final";
+            const id = segmentFor(index);
+            if (!settledSegments.has(index)) {
+              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+                textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution", ...publicPhase });
+              request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution", ...publicPhase });
+            }
+            if (kind === "final") finalParts.push(part.text);
           }
+          if (finalParts.length) finalText = finalParts.join("\n");
+          else if (!toolCalls.length) await queueFeedback("上一条是公开进展说明，请继续实际操作，或提交最终答复、阻碍或澄清问题。");
           for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
             toolCallId: part.id, toolName: part.name, args: part.arguments });
           const response = createAssistantMessageEventStream();

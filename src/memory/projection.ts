@@ -4,7 +4,7 @@ import type { RuntimeLog, StoredEvent } from "../runtime/runtime-types.js";
 import { cosineOfUnitVectors, type createEmbeddingClient } from "./embedding.js";
 import { graphAt, memoryGraph, type MemoryState, type MemoryInitialization } from "./graph.js";
 import { MEMORY_ALGORITHM, memoryDynamics, type MemoryDynamics } from "./dynamics.js";
-import { rankMemories, recallConfig, type RecallConfig } from "./recall.js";
+import { rankMemories, recallConfig, type RecallConfig, type ContentEvidence } from "./recall.js";
 import { openMemoryCache } from "./cache.js";
 
 export type MemoryCandidate = { node: MemoryNode; score: number; sources: string[]; similarity?: number; state?: MemoryState; initialization?: MemoryInitialization; paths?: string[][] };
@@ -14,6 +14,7 @@ export function literalTerms(text: string): string[] {
     ? Array.from({ length: part.length - 1 }, (_, i) => part.slice(i, i + 2)) : [part]))];
 }
 export type MemoryMode = "akasha" | "dense";
+export type MemorySearchProgress = { stage: "loading" | "embedding" | "scanning" | "matching" | "associations" | "ranking"; checked?: number; total?: number };
 export function createMemoryProjection(options: { log: RuntimeLog; dataDir: string; userId: number; embedding?: ReturnType<typeof createEmbeddingClient>; dynamics?: Partial<MemoryDynamics>; now?: () => number; recall?: Partial<RecallConfig>; mode?: MemoryMode }) {
   const mode = options.mode ?? "akasha";
   const dynamics = memoryDynamics(options.dynamics);
@@ -47,21 +48,47 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
       return (db.prepare("SELECT payload FROM memory_nodes ORDER BY rowid").all() as Array<{ payload: string }>).map((row) => JSON.parse(row.payload) as MemoryNode);
     } finally { db.close(); }
   }
-  async function search(query: string, limit = 20, excludeRequest?: string): Promise<MemoryCandidate[]> {
+  async function search(query: string, limit = 20, excludeRequest?: string, live?: { onProgress?: (progress: MemorySearchProgress) => void; signal?: AbortSignal }): Promise<MemoryCandidate[]> {
     if (!query.trim()) return [];
+    const checkCancelled = () => { if (live?.signal?.aborted) throw new DOMException("记忆检索已取消", "AbortError"); };
+    const report = async (progress: MemorySearchProgress) => {
+      checkCancelled();
+      if (live?.onProgress) {
+        live.onProgress(progress);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        checkCancelled();
+      }
+    };
+    await report({ stage: "loading" });
     const events = await options.log.read();
     const all = (await nodes(events)).filter((n) => n.requestId !== excludeRequest);
     const embedding = options.embedding;
     let queryVector: number[] | undefined;
     if (embedding) {
+      await report({ stage: "embedding" });
       try { queryVector = await embedding.get(query); } catch { queryVector = undefined; }
+      checkCancelled();
       embedding.enqueue(all.flatMap((node) => node.messages.map((message) => ({ text: message.text,
         eligible: async () => memoryNodes(await options.log.read(), options.userId).some((current) => current.id === node.id),
       }))));
     }
     const terms = mode === "dense" ? [] : literalTerms(query);
-    const documents = mode === "dense" ? [] : all.map((n) => new Set(literalTerms(n.messages.map((m) => m.text).join("\n"))));
-    const content = all.map((node, i) => {
+    const documents: Set<string>[] = [];
+    if (mode !== "dense") {
+      await report({ stage: "scanning", checked: 0, total: all.length });
+      let last = performance.now();
+      for (const [i, node] of all.entries()) {
+        checkCancelled();
+        documents.push(new Set(literalTerms(node.messages.map((m) => m.text).join("\n"))));
+        if ((i + 1) % 32 === 0 || i + 1 === all.length || performance.now() - last >= 8) {
+          await report({ stage: "scanning", checked: i + 1, total: all.length }); last = performance.now();
+        }
+      }
+    }
+    await report({ stage: "matching", checked: 0, total: all.length });
+    const content: ContentEvidence[] = []; let last = performance.now();
+    for (const [i, node] of all.entries()) {
+      checkCancelled();
       const matched = terms.filter((term) => documents[i]!.has(term));
       const literal = matched.reduce((sum, term) => sum + Math.log(1 + all.length / (1 + documents.filter((d) => d.has(term)).length)), 0);
       const vectors = node.messages.map((message) => embedding?.cached(message.text)).filter((vector): vector is number[] => !!vector);
@@ -72,11 +99,16 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
       const evidence = direct + normalizedLiteral * (1 - direct);
       const userEvidence = mode !== "dense" && node.messages.some((message) => message.role === "user" && (literalTerms(message.text).some((term) => terms.includes(term)) ||
         queryVector && embedding?.cached(message.text) && cosineOfUnitVectors(queryVector, embedding.cached(message.text)!) >= 0.35));
-      return { node, evidence, similarity, userEvidence, sources: [...(literal ? ["literal"] : []), ...(direct ? ["dense"] : [])] };
-    });
+      content.push({ node, evidence, similarity, userEvidence: !!userEvidence, sources: [...(literal ? ["literal"] : []), ...(direct ? ["dense"] : [])] });
+      if ((i + 1) % 32 === 0 || i + 1 === all.length || performance.now() - last >= 8) {
+        await report({ stage: "matching", checked: i + 1, total: all.length }); last = performance.now();
+      }
+    }
+    if (mode === "dense") await report({ stage: "ranking" });
     if (mode === "dense") return content.filter((item) => item.similarity >= 0.35)
       .sort((left, right) => right.similarity - left.similarity || left.node.id.localeCompare(right.node.id))
       .slice(0, Math.min(72, Math.max(1, limit))).map((item) => ({ node: item.node, score: item.similarity, similarity: item.similarity, sources: ["dense"] }));
+    await report({ stage: "associations" });
     const baseGraph = memoryGraph(events, options.userId, (text) => embedding?.cached(text), dynamics);
     const { db } = openMemoryCache(options.dataDir, "memory");
     try {
@@ -85,6 +117,7 @@ export function createMemoryProjection(options: { log: RuntimeLog; dataDir: stri
         states: [...baseGraph.states.values()], edges: [...baseGraph.edges.values()] }));
     } finally { db.close(); }
     const graph = graphAt(baseGraph, options.now?.() ?? Date.now(), dynamics);
+    await report({ stage: "ranking" });
     return rankMemories(content, graph, dynamics, recallConfig(options.recall)).slice(0, Math.min(72, Math.max(1, limit)))
       .map((item) => ({ ...item, initialization: baseGraph.initializations.find((entry) => entry.nodeId === item.node.id) }));
   }

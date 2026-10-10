@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { createPiAgent } from "../src/agent/pi-agent.js";
+import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
 import { createApp } from "../src/application/app.js";
 import { createBoundedRead } from "../src/agent/archive-read.js";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
@@ -120,13 +121,15 @@ test("production Pi forwards live previews, reads decoded body and restores full
   t.mock.method(Client.prototype, "listTools", async () => ({ tools: ["search", "fetch_content"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }));
   t.mock.method(Client.prototype, "callTool", async () => ({ content: result.content }));
   let calls = 0;
+  const plan = discoveredToolPlan();
   const server = createTestServer(t, async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     const data = JSON.parse(body);
+    if (plan.continue(data, res)) return;
     calls++;
     let delta;
-    if (calls === 1) delta = { tool_calls: [{ index: 0, id: "web", type: "function", function: { name: "web_fetch", arguments: JSON.stringify({ urls: ["https://example.com"] }) } }] };
+    if (calls === 1) { const tool = plan.select("web_fetch", { urls: ["https://example.com"] }); delta = { tool_calls: [{ index: 0, id: "web", type: "function", function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] }; }
     else if (calls === 2) {
       const text = String(data.messages.at(-1).content);
       assert.match(text, /engineering\nin-progress\nproductivity/);

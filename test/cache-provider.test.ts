@@ -114,7 +114,7 @@ test("actual memory prefixes survive new recall and tools, while forgetting remo
     const payload: Payload = JSON.parse(body); seen.push(payload);
     if (payload.messages.at(-1)!.content === "暗号") {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "status", text: "temporary UI status" }), tool_calls: [{ index: 0, id: "stable-call", type: "function", function: { name: "ls", arguments: JSON.stringify({ path: "." }) } }] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "status", text: "temporary UI status" }), tool_calls: [{ index: 0, id: "stable-call", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
     } else final(res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

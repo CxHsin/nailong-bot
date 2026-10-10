@@ -12,10 +12,13 @@ import type { ToolResult } from "../src/runtime/runtime-types.js";
 import { EVALUATION_START, EVALUATION_NOW, evaluationCases, evaluationCorpus, evaluationVector } from "./fixtures/memory-evaluation.js";
 import { DEFAULT_DYNAMICS } from "../src/memory/dynamics.js";
 import { closeFixture } from "./fixtures/cleanup.js";
+import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
+const plans = new WeakMap<ServerResponse, ReturnType<typeof discoveredToolPlan>>();
 
 type Payload = { messages: Array<{ role: string; content?: unknown }>; tools?: unknown[] };
 let toolSequence = 0;
 function answer(res: ServerResponse, text: string, tool?: { name: string; args: unknown }, kind = "final") {
+  if (tool) tool = plans.get(res)?.select(tool.name, tool.args) ?? tool;
   const delta = tool ? { tool_calls: [{ index: 0, id: `memory-call-${++toolSequence}`, type: "function",
     function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] } :
     { content: JSON.stringify({ type: kind, text }) };
@@ -26,10 +29,12 @@ export async function memoryFixture(t: TestContext, respond: (data: Payload, res
   extra: Partial<Parameters<typeof createPiAgent>[0]> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nailong-memory-"));
   const seen: Payload[] = [];
+  const plan = discoveredToolPlan();
   const server = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
-    const data: Payload = JSON.parse(body); seen.push(data); respond(data, res);
+    const data: Payload = JSON.parse(body); seen.push(data); plans.set(res, plan);
+    if (!plan.continue(data, res)) respond(data, res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
@@ -62,7 +67,7 @@ test("Agent searches original Chinese memories across reset and restart", async 
   assert.match(f.sent.at(-1)!, /联机很开心/);
   assert.match(f.sent.at(-1)!, /assistant/);
   assert.match(f.sent.at(-1)!, /user/);
-  assert.ok((await f.log.read()).some((e) => e.type === "tool_dispatch" && e.toolName === "memory_search"));
+  assert.ok((await f.log.read()).some((e) => e.type === "capability_dispatched" && e.toolName === "memory_search"));
 });
 
 test("memory tools omit unseen assistant text and excluded turns, preserve failed user input", async (t) => {
@@ -733,7 +738,7 @@ test("excluded memory cannot return through archived read results including recu
   archivePath = (events.findLast((event) => event.type === "tool_result")!.archive as { path: string }).path;
   await fixture.send("读来源归档");
   events = await fixture.log.read();
-  archivePath = "@" + relative(fixture.dir, (events.findLast((event) => event.type === "tool_result" && event.toolName === "memory_search")!.archive as { rawPath: string }).rawPath);
+  archivePath = "@" + relative(fixture.dir, (events.findLast((event) => event.type === "tool_result" && (event.result as { details?: { sourceToolName?: string } })?.details?.sourceToolName === "memory_search")!.archive as { rawPath: string }).rawPath);
   if (process.platform === "win32") archivePath = archivePath.toUpperCase();
   await fixture.send("读来源归档");
   events = await fixture.log.read();
@@ -816,8 +821,8 @@ test("forgetting invalidates affected summaries and regenerates them only from r
     } else answer(res, "答复");
   }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
   for (let index = 0; index < 5; index++) {
-    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `forget-summary-${index}`, text: `${index === 0 ? "alpha_sensitive" : "other"} ` + "x".repeat(2500) });
-    await fixture.log.append({ type: "answer_generated", requestId: `forget-summary-${index}`, text: "y".repeat(2500) });
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `forget-summary-${index}`, text: `${index === 0 ? "alpha_sensitive" : "other"} ` + "x".repeat(4500) });
+    await fixture.log.append({ type: "answer_generated", requestId: `forget-summary-${index}`, text: "y".repeat(4500) });
     await fixture.log.append({ type: "delivery_succeeded", requestId: `forget-summary-${index}` });
     await fixture.log.append({ type: "request_completed", requestId: `forget-summary-${index}` });
   }

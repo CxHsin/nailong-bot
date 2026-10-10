@@ -7,11 +7,11 @@ export type DeliveryContent = { id: string; text: string; kind: "progress" | "fi
 export type ContentTransport = {
   send: (text: string, chatId: number) => Promise<number>;
   plan?: (content: DeliveryContent) => string[];
-  sendPage?: (text: string, chatId: number) => Promise<number>;
+  sendPage?: (text: string, chatId: number, signal?: AbortSignal) => Promise<number>;
 };
 
 /** One immutable plan and durable attempt per page, with no startup side effects. */
-export async function deliverContent(log: RuntimeLog, runId: string, chatId: number, content: DeliveryContent, transport: ContentTransport) {
+export async function deliverContent(log: RuntimeLog, runId: string, chatId: number, content: DeliveryContent, transport: ContentTransport, signal?: AbortSignal) {
   const facts = await log.read();
   const settled = projectTimeline(facts).find((item) => item.id === content.id && item.runId === runId);
   if (settled && settled.text !== content.text) throw new Error("交付正文与已结算事实不一致");
@@ -34,6 +34,7 @@ export async function deliverContent(log: RuntimeLog, runId: string, chatId: num
   if (plan?.parts !== pages.length) throw new Error("交付计划未提交完整");
   let firstMessageId: number | undefined;
   for (const page of pages) {
+    if (signal?.aborted) return { complete: false, outcome: "unknown" as const };
     const matches = () => log.read().then((events) => events.filter((event) => event.textSegmentId === content.id && event.partIndex === page.partIndex));
     const prior = await matches();
     const success = prior.find((event) => event.type === "telegram_delivery_succeeded");
@@ -43,11 +44,12 @@ export async function deliverContent(log: RuntimeLog, runId: string, chatId: num
       !prior.some((event) => ["telegram_delivery_failed", "telegram_delivery_succeeded"].includes(event.type) && event.attemptId === attempt.attemptId)))
       return { complete: false, outcome: "unknown" as const };
     for (let attempt = attempts.length; attempt < 3; attempt++) {
+      if (signal?.aborted) return { complete: false, outcome: "unknown" as const };
       const attemptId = randomUUID();
       const identity = { requestId: runId, textSegmentId: content.id, partIndex: page.partIndex, attemptId, target: chatId };
       await log.append({ type: "telegram_delivery_attempt", ...identity });
       let messageId: number;
-      try { messageId = await (transport.sendPage ?? transport.send)(String(page.text), chatId); }
+      try { messageId = await (transport.sendPage ?? transport.send)(String(page.text), chatId, signal); }
       catch (error) {
         const failure = error as { error_code?: number; parameters?: { retry_after?: number }; retryAfterMs?: number; name?: string };
         const rejected = error instanceof DeliveryRejected || typeof failure.error_code === "number" && failure.error_code >= 400 && failure.error_code < 500;

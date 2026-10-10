@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { getModel, type Api, type Model } from "@mariozechner/pi-ai";
 
-export type ModelConfig = { alias: string; api: "openai-completions" | "openai-responses"; baseUrl: string;
+export type ModelConfig = { alias: string; api: "openai-completions" | "openai-responses" | "anthropic-messages"; baseUrl: string;
+  toolSearch?: "auto" | "native" | "compat";
   model: string; apiKey: string; contextWindow?: number; maxTokens?: number; reasoning?: boolean; images?: boolean };
 export type ModelConfiguration = { defaultModel: string; models: ModelConfig[] };
 export const validModelAlias = (value: unknown): value is string => typeof value === "string" && /^[a-z][a-z0-9_]*$/.test(value);
@@ -21,7 +22,10 @@ export function modelEnvironment(env: NodeJS.ProcessEnv): ModelConfiguration {
       return value;
     };
     const api = required("API");
-    if (api !== "openai-completions" && api !== "openai-responses") throw new Error(`${prefix}API 只支持 openai-completions 或 openai-responses`);
+    if (api !== "openai-completions" && api !== "openai-responses" && api !== "anthropic-messages") throw new Error(`${prefix}API 只支持 openai-completions、openai-responses 或 anthropic-messages`);
+    const toolSearch = env[`${prefix}TOOL_SEARCH`]?.trim() || "auto";
+    if (!["auto", "native", "compat"].includes(toolSearch)) throw new Error(`${prefix}TOOL_SEARCH 必须为 auto、native 或 compat`);
+    if (toolSearch === "native" && api === "openai-completions") throw new Error("Completions 不支持原生 Tool Search");
     const integer = (field: string) => {
       if (!env[prefix + field]?.trim()) return undefined;
       const value = Number(env[prefix + field]);
@@ -37,7 +41,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv): ModelConfiguration {
     const baseUrl = required("BASE_URL");
     let url: URL; try { url = new URL(baseUrl); } catch { throw new Error(`${prefix}BASE_URL 无效`); }
     if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error(`${prefix}BASE_URL 必须为不含凭据的 HTTP(S) 地址`);
-    const config: ModelConfig = { alias, api, baseUrl, model: required("MODEL"), apiKey: key,
+    const config: ModelConfig = { alias, api, baseUrl, model: required("MODEL"), apiKey: key, toolSearch: toolSearch as ModelConfig["toolSearch"],
       contextWindow: integer("CONTEXT_WINDOW"), maxTokens: integer("MAX_OUTPUT_TOKENS"), reasoning: boolean("REASONING"), images: boolean("IMAGES") };
     configuredModel(config); models.push(config);
   }
@@ -54,8 +58,16 @@ export function configuredModel(config: ModelConfig): Model<Api> {
   return { id: config.model, name: config.alias, api: config.api, provider: `endpoint-${identity}`, baseUrl: config.baseUrl,
     reasoning: config.reasoning ?? false, input: config.images === false ? ["text"] : ["text", "image"], contextWindow, maxTokens,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    compat: config.api === "openai-responses" ? { supportsLongCacheRetention: false } :
+    compat: config.api === "anthropic-messages" ? undefined : config.api === "openai-responses" ? { supportsLongCacheRetention: false } :
       { supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: config.reasoning ?? false, maxTokensField: "max_tokens" } };
+}
+
+export function nativeToolSearch(config?: ModelConfig): boolean {
+  if (!config || config.toolSearch === "compat" || config.api === "openai-completions") return false;
+  if (config.toolSearch === "native") return true; // Operator explicitly verified this model and endpoint.
+  const url = new URL(config.baseUrl);
+  if (config.api === "openai-responses") return url.origin === "https://api.openai.com" && /^gpt-(?:5\.[4-9]|[6-9])(?:[.-]|$)/.test(config.model);
+  return url.origin === "https://api.anthropic.com" && /^claude-(?:opus|sonnet)-(?:4-[56]|[5-9])/.test(config.model);
 }
 
 /** Legacy application/test compatibility only; production entrypoints use modelEnvironment. */

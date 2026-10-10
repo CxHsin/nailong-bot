@@ -3,6 +3,7 @@ import type { Context, Message } from "@mariozechner/pi-ai";
 import { estimateInput } from "../context/input-budget.js";
 import { literalTerms, type MemoryCandidate, type createMemoryProjection } from "../memory/projection.js";
 import type { Request } from "./app-types.js";
+import { toolProvenance } from "../runtime/tool-provenance.js";
 
 export type MemoryBudget = { maxTokens?: number; ratio?: number };
 export function memoryBudget(inputBudget: number, config: MemoryBudget = {}): number {
@@ -14,13 +15,26 @@ export async function recallMemory(memory: ReturnType<typeof createMemoryProject
   const status = (text: string, actionState: "started" | "completed" | "failed") => request.onProgress?.({ type: "text", segmentId: `${request.id}:memory-recall`, kind: "status", text, actionState, finalized: true, formal: false, source: "execution" });
   status("正在检索相关记忆……", "started");
   try {
-    const candidates = await memory.search(query, 72, request.id);
+    const candidates = await memory.search(query, 72, request.id, { signal: request.signal, onProgress: (progress) => {
+      const text = {
+        loading: "正在读取可用记忆……",
+        embedding: "正在匹配问题的语义……",
+        scanning: `正在扫描记忆：${progress.checked}/${progress.total} 条。`,
+        matching: `正在匹配相关记忆：${progress.checked}/${progress.total} 条。`,
+        associations: "正在整理记忆关联……",
+        ranking: "正在排序记忆候选……",
+      }[progress.stage];
+      status(text, "started");
+    } });
+    if (request.signal?.aborted) throw new DOMException("记忆检索已取消", "AbortError");
     const snapshotId = randomUUID();
     await request.log.append({ type: "memory_recalled", requestId: request.id, snapshotId, query, version: "memory-v1", mode: memory.mode, dynamics: memory.dynamics,
       degraded: memory.diagnostics(), candidates: candidates.map((c) => ({ nodeId: c.node.id, score: c.score, sources: c.sources, paths: c.paths, initialization: c.initialization })) });
+    if (request.signal?.aborted) throw new DOMException("记忆检索已取消", "AbortError");
     status(candidates.length ? `检索完成：${candidates.length} 条候选记忆。` : "未找到相关旧记忆，继续处理当前问题。", "completed");
     return { snapshotId, candidates };
   } catch {
+    if (request.signal?.aborted) throw new DOMException("记忆检索已取消", "AbortError");
     status("记忆检索暂不可用，继续使用当前对话。", "failed");
     await request.log.append({ type: "memory_degraded", requestId: request.id, reason: "recall_unavailable" }).catch(() => undefined);
     return { snapshotId: undefined, candidates: [] as MemoryCandidate[] };
@@ -31,7 +45,9 @@ function* composeMemorySteps(context: Context, sourceIds: string[], candidates: 
   const shown: Array<{ nodeId: string; messageId: string; offset: number; end: number; existing: boolean }> = [];
   for (const message of context.messages) {
     const snapshotText = message.role === "user" && typeof message.content === "string" && message.content.startsWith("长期记忆原文引用") ? message.content : undefined;
-    if (!snapshotText && (message.role !== "toolResult" || !["memory_search", "memory_read"].includes(message.toolName) || message.isError)) continue;
+    const source = message.role === "toolResult" ? toolProvenance(message.toolName, message) : undefined;
+    const memoryTool = message.role === "toolResult" && (["memory_search", "memory_read"].includes(message.toolName) || source?.source === "memory");
+    if (!snapshotText && (!memoryTool || message.role !== "toolResult" || message.isError)) continue;
     try {
       const text = snapshotText ? snapshotText.slice(snapshotText.indexOf("\n") + 1) :
         Array.isArray(message.content) ? message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") : "";
@@ -105,13 +121,16 @@ export async function composeMemoryLive(args: Parameters<typeof composeMemorySte
   if (signal?.aborted) throw new DOMException("记忆装载已取消", "AbortError");
   const steps = composeMemorySteps(...args);
   let last = performance.now();
+  let lastChecked = -1;
   let step = steps.next();
   while (!step.done) {
     if (signal?.aborted) throw new DOMException("记忆装载已取消", "AbortError");
-    if (performance.now() - last >= 8 || step.value.checked === step.value.total) {
+    if (performance.now() - last >= 8 || step.value.checked !== lastChecked &&
+      (step.value.checked > 0 && step.value.checked % 16 === 0 || step.value.checked === step.value.total)) {
       onProgress(step.value);
       await new Promise<void>((resolve) => setImmediate(resolve));
       last = performance.now();
+      lastChecked = step.value.checked;
     }
     step = steps.next();
   }

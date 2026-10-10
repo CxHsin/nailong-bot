@@ -1,6 +1,7 @@
 import { eventIdentity, memoryExclusions } from "./memory-facts.js";
 import { archiveSourceEvent } from "./tool-archive.js";
 import type { StoredEvent, ToolResult } from "./runtime-types.js";
+import { toolProvenance } from "./tool-provenance.js";
 
 export function filterMemoryEvents(events: StoredEvent[]): StoredEvent[] {
   const excluded = memoryExclusions(events);
@@ -14,6 +15,8 @@ export function filterMemoryEvents(events: StoredEvent[]): StoredEvent[] {
   });
 }
 export function filterMemoryToolResult(toolName: string, result: ToolResult, excluded: Set<string>): ToolResult {
+  const source = toolProvenance(toolName, result);
+  if (source.source === "memory") toolName = source.name;
   if (!excluded.size || !isMemorySourceTool(toolName)) return result;
   let hidden = false;
   const content = result.content.map((part) => {
@@ -41,7 +44,7 @@ export function filterArchivedMemoryResult(events: StoredEvent[], event: StoredE
     if (visited.has(source)) return true;
     visited.add(source);
     const original = source.result as ToolResult | undefined;
-    if (isMemorySourceTool(String(source.toolName))) return !original ||
+    if (isMemorySourceTool(String(source.toolName)) || original && toolProvenance(String(source.toolName), original).source === "memory") return !original ||
       JSON.stringify(filterMemoryToolResult(String(source.toolName), original, excluded).content) !== JSON.stringify(original.content);
     if (source.toolName !== "read") return false;
     const sourceId = (original?.details as { archiveSourceId?: unknown } | undefined)?.archiveSourceId;

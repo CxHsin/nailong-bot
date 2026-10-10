@@ -18,6 +18,8 @@
 
 每次修改前切换到 `development` 分支，并同步最新 `main`；所有改动先在 `development` 上完成验证、提交和推送，不直接向 `main` 提交或推送。
 
+新 checkout 安装本地分支保护：`npm run hooks:install`；已有 hooks 的接入方式见 [git-hooks.md](docs/agents/git-hooks.md)。
+
 提交标题遵循 Conventional Commits：`<type>(<scope>): <summary>`；scope 取实际模块名，例如 `docs(agents): 规范分支与提交流程`。
 
 提交后向用户说明改动和验证结果，等待用户明确同意合并。获得同意后，读取并使用 [pr 技能](C:/Users/Cx/.codex/skills/pr/SKILL.md) 撰写 PR 描述，创建或更新 `development` → `main` 的 PR，再通过 PR 合并。合并后同步本地 `main` 和 `development`，保留这两个分支。

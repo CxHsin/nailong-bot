@@ -1,7 +1,7 @@
 import type { Actor, HostInput } from "../../host/host.js";
 import type { ContentPart } from "../../host/content-parts.js";
 import { normalizeHostInput } from "../../host/host.js";
-export { createTelegramRichTransport, isRichApiUnavailable } from "./rich-transport.js";
+export { createTelegramRichTransport } from "./rich-transport.js";
 export type { TelegramRichTransportApi } from "./rich-transport.js";
 export { createTelegramHostProjection } from "./projection.js";
 export type { TelegramHostTransport } from "./projection.js";

@@ -24,7 +24,7 @@ test("production Pi progress reaches Telegram and stage results survive final de
     const step = calls++;
     const delta = step === 0 ? {
       content: JSON.stringify({ type: "status", text: "先检查目录，再确认文件是否存在。" }),
-      tool_calls: [{ index: 0, id: "list-files", type: "function", function: { name: "ls", arguments: '{"path":"."}' } }],
+      tool_calls: [{ index: 0, id: "list-files", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }],
     } : { content: JSON.stringify(step === 1 ? { type: "result", text: "目录中有 prompt.md。" } : { type: "final", text: "检查完成。" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(`data: ${JSON.stringify({ id: "ui-test", choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
@@ -64,7 +64,7 @@ test("production Pi progress reaches Telegram and stage results survive final de
   assert.ok((await log.read()).some((event) => event.type === "context_phase_timing" && typeof event.restoreMs === "number" && typeof event.selectMs === "number" && typeof event.loadMs === "number"));
   assert.ok(inputs.every((messages) => !messages.some((message) => JSON.stringify(message.content).includes("正在调用"))));
   const events = await log.read();
-  assert.ok(events.some((event) => event.type === "tool_dispatch" && event.toolName === "ls"));
+  assert.ok(events.some((event) => event.type === "tool_dispatch" && event.toolName === "read"));
   assert.ok(events.some((event) => event.type === "delivery_succeeded"));
   assert.equal(events.some((event) => event.type === "progress" || event.type === "progress_event"), false);
   assert.equal(events.some((event) => event.type === "text_snapshot" && event.provisional), false);

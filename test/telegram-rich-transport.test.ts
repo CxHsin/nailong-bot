@@ -2,179 +2,117 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { Api } from "grammy";
-import { createTelegramRichTransport, isRichApiUnavailable } from "../src/channel/telegram/rich-transport.js";
-import { telegramVisibleLength } from "../src/telegram/telegram-layout.js";
+import { marked } from "marked";
+import { createTelegramRichTransport } from "../src/channel/telegram/rich-transport.js";
 
 const source = "# 标题\n\n**加粗**\n\n| 名称 | 值 |\n| --- | --- |\n| 一 | 二 |";
 
-test("live preview escapes text, clips whole Unicode characters and leaves room for all journal pages", () => {
-  const transport = createTelegramRichTransport({ sendRich: async () => 1, sendHtml: async () => 1,
-    draftRich: async () => {}, draftHtml: async () => {} });
-  const text = "```ts\n" + "const 原始 = '😀';\n".repeat(600) + "```";
-  const pages = transport.plan({ id: "p", text, kind: "progress", preview: ["<最新> & 状态\n继续", "😀".repeat(40)] });
-  assert.ok(pages.length > 1);
-  assert.ok(pages.every((page) => telegramVisibleLength(page) <= 4096));
-  assert.ok(pages[0]!.startsWith(`<blockquote expandable>&lt;最新&gt; &amp; 状态 继续\n${"😀".repeat(30)}…\n\n<pre>`));
-  const journal = [pages[0]!.slice(pages[0]!.indexOf("\n\n") + 2), ...pages.slice(1)].join("");
-  assert.equal(journal.split("const 原始").length - 1, 600);
-  assert.ok(pages.every((page) => (page.match(/<pre>/g) ?? []).length === (page.match(/<\/pre>/g) ?? []).length));
-  assert.deepEqual(transport.plan({ id: "f", text: "答案", kind: "final", preview: ["不应显示"] }), ["答案"]);
-});
-
-test("Rich transport sends original Markdown for drafts and final messages", async () => {
+test("Rich transport sends identical Markdown for drafts, progress and final messages", async () => {
   const calls: Array<{ type: string; text: string }> = [];
   const transport = createTelegramRichTransport({
-    sendRich: async (_chatId, markdown) => { calls.push({ type: "send-rich", text: markdown }); return 7; },
-    draftRich: async (_draftId, _chatId, markdown) => { calls.push({ type: "draft-rich", text: markdown }); },
-    sendHtml: async () => { throw new Error("HTML fallback should not run"); },
-    draftHtml: async () => { throw new Error("HTML fallback should not run"); },
+    sendRich: async (_chat, markdown) => { calls.push({ type: "send", text: markdown }); return 7; },
+    draftRich: async (_id, _chat, markdown) => { calls.push({ type: "draft", text: markdown }); },
   });
-
   await transport.draft(3, source, 42);
+  assert.equal(await transport.sendProgress(source, 42, "execution"), 7);
   assert.equal(await transport.send(source, 42), 7);
-  assert.deepEqual(calls, [
-    { type: "draft-rich", text: source },
-    { type: "send-rich", text: source },
-  ]);
+  assert.deepEqual(calls, [{ type: "draft", text: source }, { type: "send", text: source }, { type: "send", text: source }]);
 });
 
-test("formal progress pages keep folding titles, Unicode and code intact with a full-content fallback", async () => {
-  const sent: string[] = [];
-  const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {}, draftHtml: async () => {},
-    sendHtml: async (_chat, text) => { if (text.includes("expandable")) throw Object.assign(new Error("unsupported blockquote entity"), { error_code: 400 }); sent.push(text); return sent.length; } });
-  const text = "```ts\n" + "const 变量 = '😀';\n".repeat(600) + "```\n\n" + source;
-  const pages = transport.plan({ id: "p", text, kind: "progress", source: "progress-model" });
-  assert.ok(pages.length > 1);
-  assert.ok(pages.every((page) => page.length <= 4096 && page.startsWith("<b>运行摘要</b>\n<blockquote expandable>")));
-  assert.equal(await transport.sendProgress(text, 42, "progress-model"), 1);
-  assert.deepEqual(sent, pages.map((page) => page.replace("<blockquote expandable>", "<blockquote>")));
-  assert.equal(sent.join("").split("😀").length - 1, 600);
-  assert.ok(sent.every((page) => (page.match(/<pre>/g) ?? []).length === (page.match(/<\/pre>/g) ?? []).length));
-});
-
-test("Rich transport falls back once after an unavailable method", async () => {
-  const richCalls: string[] = [];
-  const htmlCalls: Array<{ type: string; text: string }> = [];
-  const unavailable = Object.assign(new Error("Not Found"), { error_code: 404 });
-  const transport = createTelegramRichTransport({
-    sendRich: async () => { richCalls.push("send"); throw unavailable; },
-    draftRich: async () => { richCalls.push("draft"); throw unavailable; },
-    sendHtml: async (_chatId, html) => { htmlCalls.push({ type: "send-html", text: html }); return 9; },
-    draftHtml: async (_draftId, _chatId, html) => { htmlCalls.push({ type: "draft-html", text: html }); },
-  });
-
-  await transport.draft(3, source, 42);
-  assert.equal(await transport.send(source, 42), 9);
-  assert.equal(await transport.send(source, 42), 9);
-  assert.deepEqual(richCalls, ["draft"]);
-  assert.equal(htmlCalls[0]?.type, "draft-html");
-  assert.equal(htmlCalls[1]?.type, "send-html");
-  assert.equal(htmlCalls[2]?.type, "send-html");
-  assert.match(htmlCalls[1]?.text ?? "", /<b>标题<\/b>/);
-  assert.match(htmlCalls[1]?.text ?? "", /<b>1\.<\/b>/);
-  assert.doesNotMatch(htmlCalls[1]?.text ?? "", /\*\*|\| 名称 \|/);
-});
-
-test("Rich final delivery falls back when only the final method is unavailable", async () => {
-  let richCalls = 0;
+for (const code of [400, 404, 429]) test(`Rich failures (${code}) never switch draft or formal output to HTML`, async () => {
+  const error = { error_code: code, description: code === 400 ? "invalid markdown" : "Not Found" };
   const html: string[] = [];
-  const unavailable = Object.assign(new Error("Not Found"), { error_code: 404 });
-  const transport = createTelegramRichTransport({
-    sendRich: async () => { richCalls++; throw unavailable; },
-    draftRich: async () => {},
-    sendHtml: async (_chatId, text) => { html.push(text); return 11; },
-    draftHtml: async () => {},
-  });
-
-  assert.equal(await transport.send(source, 42), 11);
-  assert.equal(await transport.send(source, 42), 11);
-  assert.equal(richCalls, 1);
-  assert.equal(html.length, 2);
+  // Include the removed callbacks to prove even an older caller cannot activate them.
+  const api = {
+    sendRich: async () => { throw error; }, draftRich: async () => { throw error; },
+    sendHtml: async (_chat: number, text: string) => { html.push(text); return 1; },
+    draftHtml: async (_id: number, _chat: number, text: string) => { html.push(text); },
+  };
+  const transport = createTelegramRichTransport(api);
+  await assert.rejects(transport.draft(1, source, 42), (value) => value === error);
+  await assert.rejects(transport.send(source, 42), (value) => value === error);
+  await assert.rejects(transport.sendPage(source, 42), (value) => value === error);
+  assert.deepEqual(html, []);
 });
 
-test("Rich transport does not downgrade content or rate-limit failures", async () => {
-  let richCalls = 0;
-  let htmlCalls = 0;
-  const invalid = Object.assign(new Error("Bad Request: invalid markdown"), { error_code: 400 });
-  const transport = createTelegramRichTransport({
-    sendRich: async () => { richCalls++; throw invalid; },
-    draftRich: async () => { throw invalid; },
-    sendHtml: async () => { htmlCalls++; return 1; },
-    draftHtml: async () => { htmlCalls++; },
-  });
-
-  await assert.rejects(() => transport.send(source, 42), invalid);
-  await assert.rejects(() => transport.send(source, 42), invalid);
-  assert.equal(richCalls, 2);
-  assert.equal(htmlCalls, 0);
-  assert.equal(isRichApiUnavailable(invalid), false);
-  assert.equal(isRichApiUnavailable(Object.assign(new Error("Not Found"), { error_code: 404 })), true);
-});
-
-test("HTML fallback splits long Markdown into safe Telegram-sized messages", async () => {
-  const chunks: string[] = [];
-  const unavailable = Object.assign(new Error("Not Found"), { error_code: 404 });
-  const transport = createTelegramRichTransport({
-    sendRich: async () => { throw unavailable; },
-    draftRich: async () => { throw unavailable; },
-    sendHtml: async (_chatId, html) => { chunks.push(html); return chunks.length; },
-    draftHtml: async () => {},
-  });
-
-  await transport.send("# 标题\n\n" + "内容。".repeat(1500), 42);
-  assert.ok(chunks.length > 1);
-  assert.ok(chunks.every((chunk) => chunk.length <= 4000));
-  assert.ok(chunks.every((chunk) => !chunk.includes("##")));
-});
-
-test("draft cancellation reaches Rich and HTML APIs and cannot start a fallback after abort", async () => {
-  const unavailable = Object.assign(new Error("Not Found"), { error_code: 404 });
-  const controller = new AbortController();
-  const signals: Array<AbortSignal | undefined> = [];
-  const transport = createTelegramRichTransport({
-    sendRich: async () => 1, sendHtml: async () => 1,
-    draftRich: async (_id, _chat, _text, signal) => { signals.push(signal); throw unavailable; },
-    draftHtml: async (_id, _chat, _text, signal) => { signals.push(signal); },
-  });
-  await transport.draft(1, "正文", 42, controller.signal);
-  assert.deepEqual(signals, [controller.signal, controller.signal]);
-  controller.abort();
-  await assert.rejects(transport.draft(1, "正文", 42, controller.signal), { name: "AbortError" });
-  assert.equal(signals.length, 2);
-  const pending = new AbortController();
-  let htmlCalls = 0;
-  const aborted = createTelegramRichTransport({
-    sendRich: async () => 1, sendHtml: async () => 1,
-    draftRich: async () => { pending.abort(); throw unavailable; },
-    draftHtml: async () => { htmlCalls++; },
-  });
-  await assert.rejects(aborted.draft(1, "正文", 42, pending.signal), { name: "AbortError" });
-  assert.equal(htmlCalls, 0);
+test("Rich Markdown pagination retains long fenced code and Unicode without HTML", async () => {
+  const sent: string[] = [];
+  const transport = createTelegramRichTransport({ sendRich: async (_chat, text) => { sent.push(text); return sent.length; }, draftRich: async () => {} });
+  const original = "```ts\n" + "const 家庭 = '👨‍👩‍👧‍👦';\n".repeat(500) + "```\n\n尾部结论";
+  const pages = transport.plan({ id: "long", text: original, kind: "final" });
+  assert.ok(pages.length > 1);
+  assert.ok(pages.every((page) => page.length <= 3500));
+  assert.ok(pages.every((page) => (page.match(/^```/gm) ?? []).length % 2 === 0));
+  await transport.send(original, 42);
+  assert.deepEqual(sent, pages);
+  assert.equal(sent.join("").split("const 家庭").length - 1, 500);
+  assert.equal(sent.join("").split("👨‍👩‍👧‍👦").length - 1, 500);
+  assert.match(sent.at(-1)!, /尾部结论/);
+  assert.doesNotMatch(sent.join(""), /<pre>|<blockquote>|<b>/);
 });
 
 test("native draft cancellation aborts grammY's actual HTTP request", async (t) => {
   let started!: () => void;
   const requestStarted = new Promise<void>((resolve) => { started = resolve; });
-  const server = createServer(async (req, _res) => {
-    for await (const _ of req) { /* drain */ }
-    started(); // Deliberately leave the local HTTP response pending.
-  });
+  const server = createServer(async (req, _res) => { for await (const _ of req) { /* drain */ } started(); });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  });
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const api = new Api("test-token", { apiRoot: `http://127.0.0.1:${address.port}` });
-  const transport = createTelegramRichTransport({
-    sendRich: async () => 1, sendHtml: async () => 1, draftHtml: async () => { throw new Error("no fallback after abort"); },
-    draftRich: async (id, chat, markdown, signal) => {
-      await api.sendRichMessageDraft(chat, id, { markdown }, undefined, signal as Parameters<typeof api.sendRichMessageDraft>[4]);
-    },
-  });
+  const transport = createTelegramRichTransport({ sendRich: async () => 1,
+    draftRich: async (id, chat, markdown, signal) => { await api.sendRichMessageDraft(chat, id, { markdown }, undefined, signal as Parameters<typeof api.sendRichMessageDraft>[4]); } });
   const controller = new AbortController();
   const draft = transport.draft(1, "正文", 42, controller.signal);
-  await requestStarted;
-  controller.abort();
+  await requestStarted; controller.abort();
   await assert.rejects(draft, { name: "AbortError" });
+});
+
+for (const container of ["list", "quote"]) test(`long fenced code remains code on every ${container} Markdown page`, () => {
+  const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {} });
+  const code = "```ts\n" + "const 家庭 = '👨‍👩‍👧‍👦';\n".repeat(500) + "```\n";
+  const source = container === "list" ? "- 步骤\n\n" + code.split("\n").map((line) => "  " + line).join("\n") : code.split("\n").map((line) => "> " + line).join("\n");
+  const pages = transport.plan({ id: container, text: source, kind: "final" });
+  assert.ok(pages.length > 1);
+  let codeText = "";
+  for (const page of pages) {
+    assert.ok(page.length <= 3500);
+    marked.walkTokens(marked.lexer(page), (token) => { if (token.type === "code") codeText += token.text; });
+  }
+  assert.equal(codeText.split("const 家庭").length - 1, 500);
+  assert.equal(codeText.split("👨‍👩‍👧‍👦").length - 1, 500);
+});
+
+test("long bold text remains bold across native Markdown pages", () => {
+  const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {} });
+  const body = "阶段结论。".repeat(1800);
+  const pages = transport.plan({ id: "strong", text: `**${body}**`, kind: "progress" });
+  let boldText = "";
+  for (const page of pages) marked.walkTokens(marked.lexer(page), (token) => { if (token.type === "strong") boldText += token.text; });
+  assert.equal(boldText, body);
+});
+
+test("a large combining grapheme after a preferred newline cannot overflow a Markdown page", () => {
+  const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {} });
+  const grapheme = "x" + "\u0301".repeat(3298);
+  const source = "```txt\n" + "a".repeat(1000) + "\n" + "b".repeat(700) + grapheme + "\n```";
+  const pages = transport.plan({ id: "combining", text: source, kind: "final" });
+  assert.ok(pages.every((page) => page.length <= 3500));
+  assert.ok(pages.some((page) => page.includes(grapheme)));
+  assert.equal(pages.join("").split("b").length - 1, 700);
+});
+
+test("oversized Rich drafts show the latest bounded Markdown page while formal delivery keeps all text", async () => {
+  const drafts: Array<{ id: number; text: string }> = []; const sent: string[] = [];
+  const transport = createTelegramRichTransport({
+    sendRich: async (_chat, text) => { sent.push(text); return sent.length; },
+    draftRich: async (id, _chat, text) => { assert.ok(text.length <= 32768); drafts.push({ id, text }); },
+  });
+  const prefix = "```ts\n" + "const 数据 = '😀';\n".repeat(2500);
+  await transport.draft(2, prefix, 42);
+  await transport.draft(2, prefix + "const 最新 = 42;\n```", 42);
+  assert.deepEqual(drafts.map(({ id }) => id), [2, 2]);
+  assert.match(drafts.at(-1)!.text, /const 最新 = 42;/);
+  assert.equal(marked.lexer(drafts.at(-1)!.text)[0]?.type, "code");
+  await transport.send(prefix + "const 最新 = 42;\n```", 42);
+  assert.equal(sent.join("").split("const 数据").length - 1, 2500);
 });

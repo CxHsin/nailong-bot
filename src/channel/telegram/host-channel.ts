@@ -33,7 +33,7 @@ export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId
       const path = existsSync(sourcePath) ? sourcePath : fileURLToPath(new URL("../../../../assets/nailong-dance.gif", import.meta.url));
       return (await bot.api.sendAnimation(chatId, new InputFile(path), { caption })).message_id;
     }), chatId: ownerId, onDelivered: options.onDelivered,
-    deliver: (event, content) => options.host.deliverContent(event, content, options.transport) });
+    deliver: (event, content, signal) => options.host.deliverContent(event, content, options.transport, signal) });
   const input = registerTelegramInput(bot, { ownerId, botUsername: bot.botInfo.username, download: options.download, reportFailure: options.reportFailure,
     handle: async (update, started) => {
       const image = update.images?.[0];

@@ -22,7 +22,7 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
     const payload = JSON.parse(body); seen.push(payload);
     const last = payload.messages.at(-1);
     const useTool = last.role === "user" && last.content.includes("这数据似乎并不是实时的？");
-    const delta = useTool ? { tool_calls: [{ index: 0, id: "inspect", type: "function", function: { name: "ls", arguments: '{"path":"."}' } }] } :
+    const delta = useTool ? { tool_calls: [{ index: 0, id: "inspect", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] } :
       { content: JSON.stringify({ type: "final", text: "收到" }) };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: useTool ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);

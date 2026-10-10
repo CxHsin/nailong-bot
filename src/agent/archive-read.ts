@@ -5,6 +5,7 @@ import { createReadToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { RuntimeLog, ToolArchive, ToolResult } from "../runtime/runtime-types.js";
 import { webReadPath, webResult, webResultBody, webPageBody } from "../runtime/web-result.js";
+import { toolProvenance } from "../runtime/tool-provenance.js";
 
 const MAX_RESPONSE_BYTES = 7500;
 
@@ -34,7 +35,9 @@ export function createBoundedRead(dataDir: string, log: RuntimeLog) {
       const webCursor = fragment?.match(/^web=(\d+)&sha256=([0-9a-f]{64})&byte=(\d+)$/);
       const page = webCursor ? Number(webCursor[1]) : 0;
       const selectedPage = page > 0 ? webResult(result)?.pages[page - 1] : undefined;
-      const webText = event.toolName === "web_fetch" && (!fragment || webCursor) ?
+      const provenance = toolProvenance(String(event.toolName), result);
+      const webTool = event.toolName === "web_fetch" || provenance.source === "tinyfish" && provenance.name === "web_fetch";
+      const webText = webTool && (!fragment || webCursor) ?
         (page === 0 ? webResultBody(result) : selectedPage ? webPageBody(selectedPage) : undefined) : undefined;
       if (webCursor && (webText === undefined || webCursor[2] !== archive.sha256)) throw new Error("网页归档续读位置已失效");
       if (webText === "") {

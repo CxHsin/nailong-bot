@@ -26,6 +26,7 @@ test("incremental replay equals full replay, survives restart and invalidates re
   await log.append({ type: "tool_dispatch", requestId: "r29", toolCallId: "old-call", toolName: "read", args: { path: "file" } });
   await log.append({ type: "tool_result", requestId: "r29", toolCallId: "old-call", toolName: "read", result, archive });
   await log.append({ type: "message", role: "user", requestId: "current", text: "now" });
+  await log.append({ type: "skill_loaded", requestId: "current", mode: "explicit", name: "lesson", source: "personal", root: "old-root", digest: "old-digest", body: "OLD IMMUTABLE SKILL INSTRUCTIONS" });
   let recoveries = 0;
   const countedLog = { ...log, recoverArchive: async (...args: Parameters<typeof log.recoverArchive>) => { recoveries++; return log.recoverArchive(...args); } };
   let cache = createReplayCache(dir, "c/model/prompt");
@@ -36,6 +37,8 @@ test("incremental replay equals full replay, survives restart and invalidates re
     return actual;
   };
   const initial = await compare("current");
+  assert.match(JSON.stringify(initial.units), /OLD IMMUTABLE SKILL INSTRUCTIONS/);
+  await log.append({ type: "tool_discovered", requestId: "current", query: "read", tools: [] });
   await log.append({ type: "protocol_feedback", requestId: "current", text: "old feedback" });
   await log.append({ type: "context_input_snapshot", requestId: "current", messages: [{ role: "user", content: "date", timestamp: 0 }] });
   const recoveredBefore = recoveries;
@@ -58,6 +61,7 @@ test("incremental replay equals full replay, survives restart and invalidates re
   await compare("current");
   await log.append({ type: "message", role: "user", requestId: "new-question", text: "next question" });
   const historical = await compare("new-question");
+  assert.match(JSON.stringify(historical.units), /OLD IMMUTABLE SKILL INSTRUCTIONS/);
   const restoredResult = historical.units.flatMap((unit) => unit.messages).find((message) => message.role === "toolResult" && message.toolCallId === "new-call");
   assert.ok(restoredResult?.role === "toolResult");
   assert.deepEqual(restoredResult.content, result.content);

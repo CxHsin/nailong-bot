@@ -119,3 +119,5 @@ export function previewTelegramText(text: string): string[] {
   }
   return planTelegramText(text);
 }
+
+export { planTelegramMarkdown } from "./telegram-markdown.js";
