@@ -1,10 +1,10 @@
-const prefix = "<details><summary>运行状态</summary>\n\n";
 const suffix = "\n\n</details>";
 const capacity = 3500;
 const graphemes = new Intl.Segmenter("zh", { granularity: "grapheme" });
 
-/** Rich Markdown's native details extension; every page stays closed and collapsed. */
-export function planStatusDetails(text: string): string[] {
+/** Complete native details pages; live snapshots open, persisted messages collapse. */
+export function planStatusDetails(text: string, open = false): string[] {
+  const prefix = `<details${open ? " open" : ""}><summary>运行状态</summary>\n\n`;
   const pages: string[] = []; let body = "";
   const flush = () => { if (body) pages.push(prefix + body + suffix); body = ""; };
   const append = (unit: string) => {

@@ -6,7 +6,7 @@ import { planStatusDetails } from "./status-details.js";
 
 let nextDraftId = 1;
 
-/** Stream public text units; runtime labels share native collapsed details in drafts and settlement. */
+/** Stream public text units; runtime details open during updates and collapse when saved. */
 export async function consumeNativeProgress(handle: RunHandle, options: TelegramHostTransport & {
   chatId: number; draftIntervalMs?: number; draftTimeoutMs?: number; progressTimeoutMs?: number;
   recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
@@ -19,12 +19,12 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
   let modelText = false; let lastEvent: HostEvent | undefined;
   let progressDisabled = false;
   const record = async (fact: Record<string, unknown>) => { if (lastEvent) await options.recordProgress?.(lastEvent, fact); };
-  const statePages = () => planStatusDetails([...states.values()].map((state) => {
+  const statePages = (open = false) => planStatusDetails([...states.values()].map((state) => {
     const seconds = Math.floor((Date.now() - state.started) / 5000) * 5;
     return state.text + (state.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : "");
-  }).join("\n\n"));
+  }).join("\n\n"), open);
   const renderStates = () => {
-    const pages = statePages(); const text = pages.join("\n\n");
+    const pages = statePages(true); const text = pages.join("\n\n");
     return text.length <= 32768 ? text : pages.at(-1) ?? "";
   };
   const setView = (id: string, text: string) => {

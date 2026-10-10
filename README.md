@@ -170,7 +170,7 @@ Telegram 入口可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDIN
 
 Telegram 流式展示用 `npm run telegram:accept` 预览固定测试内容；实机发送、构建身份和人工视觉检查见 [展示验收](docs/telegram-acceptance.md)。默认预览不会发送消息。
 
-准备与工具状态在草稿和保存消息中使用 Rich Markdown 原生 `details`，默认收起为“运行状态”，点击展开查看。模型公开结论与最终答案保持独立流式正文。
+准备与工具状态使用 Rich Markdown 原生 `details`：“运行状态”草稿更新时默认展开，保存为正式消息后默认收起，可点击展开查看。模型公开结论与最终答案保持独立流式正文。
 
 Akasha 配置、初始化与故障重建见 [操作与诊断](docs/memory-operations.md)；其中自然语言遗忘和部分送达行为属于兼容流程，当前入口边界以本页功能地图为准。dense 对照、错误关联及复现命令见 [对照验收](docs/memory-evaluation.md)。
 

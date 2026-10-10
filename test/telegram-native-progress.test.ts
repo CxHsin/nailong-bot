@@ -30,7 +30,7 @@ function handle(events: HostEvent[], wait = 20): RunHandle {
 const text = (id: string, value: string, finalized = false, kind: "progress" | "final" = "progress") =>
   event("progress", { type: "text", segmentId: id, kind, text: value, finalized, formal: finalized && kind !== "final", source: "execution" });
 
-test("runtime preparation is collapsed in the same streaming draft and formal message", async () => {
+test("runtime preparation stays open across draft updates and is collapsed only when saved", async () => {
   const output = transport();
   await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
     event("progress", { type: "text", segmentId: "memory", kind: "status", text: "正在检索记忆", finalized: true, actionState: "started" }),
@@ -43,23 +43,24 @@ test("runtime preparation is collapsed in the same streaming draft and formal me
   assert.ok(drafts.length >= 2);
   assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
   for (const draft of drafts) {
-    assert.match(draft.text, /^<details><summary>运行状态<\/summary>/);
-    assert.match(draft.text, /<\/details>$/); assert.doesNotMatch(draft.text, /<details\s+open/);
+    assert.match(draft.text, /^<details open><summary>运行状态<\/summary>/);
+    assert.match(draft.text, /<\/details>$/);
   }
-  assert.equal(output.sent[0], drafts.at(-1)!.text);
+  assert.equal(output.sent[0], drafts.at(-1)!.text.replace("<details open>", "<details>"));
+  assert.doesNotMatch(output.sent[0]!, /<details\s+open/);
   assert.deepEqual(output.sent.slice(1), ["**模型发现**：资料已齐全。", "最终答案"]);
 });
 
-test("long runtime labels paginate into closed details without interpreting markup or losing Unicode", () => {
+for (const open of [false, true]) test(`long runtime labels paginate into complete ${open ? "open" : "collapsed"} details without losing Unicode`, () => {
   const source = "<details open>**状态** & [链接](https://example.com) 👨‍👩‍👧‍👦\n".repeat(180);
-  const pages = planStatusDetails(source);
+  const pages = planStatusDetails(source, open);
   assert.ok(pages.length > 1);
   for (const page of pages) {
     assert.ok(page.length <= 3500);
-    assert.match(page, /^<details><summary>运行状态<\/summary>\n\n/);
+    assert.ok(page.startsWith(`<details${open ? " open" : ""}><summary>运行状态</summary>\n\n`));
     assert.match(page, /\n\n<\/details>$/);
-    assert.equal(page.split("<details>").length, 2);
-    assert.doesNotMatch(page, /<details open>|\*\*状态\*\*|\[链接\]/);
+    assert.equal(page.split(open ? "<details open>" : "<details>").length, 2);
+    assert.doesNotMatch(page, /\*\*状态\*\*|\[链接\]/);
   }
   const restored = pages.map((page) => page.slice(page.indexOf("\n\n") + 2, -"\n\n</details>".length))
     .join("").replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
@@ -74,7 +75,8 @@ test("oversized status drafts stay within Rich limits and settlement preserves e
     text("final", "最终答案", true, "final"), event("run_succeeded"),
   ]));
   const draft = output.drafts.find((value) => value.text.includes("状态尾部标记"))!;
-  assert.equal(draft.text, pages.at(-1)); assert.ok(draft.text.length <= 32768);
+  assert.match(draft.text, /^<details open>/); assert.ok(draft.text.length <= 32768);
+  assert.ok(draft.text.includes("状态尾部标记"));
   assert.deepEqual(output.sent.slice(0, -1), pages); assert.equal(output.sent.at(-1), "最终答案");
 });
 
