@@ -29,7 +29,7 @@ An explicit user input that changes the direction or constraints of an active Ru
 _Avoid_: follow-up, immediate interruption
 
 **Stop**:
-A user action that stops active work and cancels pending user inputs in the same Conversation. Completed actions and their effects remain facts rather than being rolled back.
+A user action that stops active work and cancels pending user inputs accepted before it in the same Conversation, including queued commands. Later inputs wait for the stopped work to exit; completed actions and their effects are not rolled back.
 _Avoid_: reset, undo
 
 **Content Part**:
