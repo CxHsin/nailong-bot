@@ -19,8 +19,8 @@
 | 统一输入与运行 | 两个入口都用 Host API；输入携带 Actor、conversationId 和文字／图片 Content Parts，返回有序 RunHandle 事件；同一 Host 实例内模型任务串行执行，只读缓存查询独立处理 | [`host.ts`](src/host/host.ts)、[`content-parts.ts`](src/host/content-parts.ts) | [`host.test.ts`](test/host.test.ts) |
 | 会话隔离与跨 Channel 续聊 | 历史、提示词设置、摘要 checkpoint 和记忆按 conversationId 隔离；共用数据目录时，CLI 指定 Telegram 的 conversationId 可继续同一会话 | [`agent-host.ts`](src/application/agent-host.ts)、[`conversation-log.ts`](src/runtime/conversation-log.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | 共享控制命令 | Telegram／CLI 支持 `/help`、`/kvcache`、`/reset`、`/prompt`、`/forget`、`/memory log`；修改命令进入串行队列，/kvcache 即时读取快照，均不调用模型；Telegram 启动时同步账号专属命令菜单 | [`agent-host.ts`](src/application/agent-host.ts)、[`host-channel.ts`](src/channel/telegram/host-channel.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
-| Telegram 排版与交付 | 可见说明与工具状态在独立折叠消息中编辑更新并保留；最终正文另发，失败时发送可见错误回复；安全 HTML 支持折叠降级与长文分页 | [`projection.ts`](src/channel/telegram/projection.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`ui-projection.test.ts`](test/ui-projection.test.ts) |
-| 实时进展 | 模型自然说明与真实工具状态共存；Telegram 约每秒合并编辑，等待耗时每五秒更新，结束停止刷新；交付失败或超时不阻断最终答复 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`progress-journal.ts`](src/channel/telegram/progress-journal.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
+| Telegram 排版与交付 | 可见说明、工具状态和最终正文通过原生 Rich Markdown 草稿持续更新，结算后以相同格式保留；长文分段交付，解析失败保留上一份有效预览 | [`projection.ts`](src/channel/telegram/projection.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`ui-projection.test.ts`](test/ui-projection.test.ts) |
+| 实时进展 | 模型自然说明与真实工具状态共存；Telegram 约每 250ms 合并原生草稿快照，等待耗时每五秒更新，结束停止刷新；交付失败或超时不阻断最终答复 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`native-progress.ts`](src/channel/telegram/native-progress.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
 | CLI 输出 | 默认显示运行时间线；`--json`／`--ndjson` 输出逐行 JSON 事件，带 type、seq、runId 和 conversationId；入口错误写 stderr | [`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
 | 文件与网页工具 | pi 的 read、write、edit、ls、find、grep；配置 TinyFish 后增加 web_search、web_fetch | [`pi-agent.ts`](src/agent/pi-agent.ts)、[`tinyfish.ts`](src/agent/tinyfish.ts) | [`local-files.test.ts`](test/local-files.test.ts)、[`tinyfish.test.ts`](test/tinyfish.test.ts) |
 | 运行日志与归档 | SQLite 追加记录输入、模型步骤、工具事实和运行结果；旧 JSONL 幂等导入；大工具结果完整归档，可分段读取 | [`sqlite-runtime-log.ts`](src/runtime/sqlite-runtime-log.ts)、[`tool-archive.ts`](src/runtime/tool-archive.ts)、[`archive-read.ts`](src/agent/archive-read.ts) | [`sqlite-runtime-log.test.ts`](test/sqlite-runtime-log.test.ts)、[`runtime-log.test.ts`](test/runtime-log.test.ts) |
@@ -112,7 +112,7 @@ system 提示词与工具定义保持稳定，当前日期及自动记忆引文�
 
 `createPiAgent` 支持 contextBudgetRatio／modelBudgetRatios 参数；Telegram 入口读取 `.env.example` 中的 `PROJECTION_BUDGET_RATIOS`，CLI 入口目前使用默认预算。
 
-生产执行器接收普通 Markdown：同一步中伴随工具调用的文字结算为进展，无工具调用的完整文字结算为最终回答。Telegram 将可见说明与工具状态放在独立折叠消息中，执行时编辑更新，结束后保留；长内容分页，最终答案另发。消息编辑约每秒合并一次，等待耗时每五秒变化。工具状态不展示参数或返回原文；进展发送失败不阻断最终答复。JSON 协议仅用于兼容旧入口。详见 [运行进展与迁移](docs/runtime-progress.md)。
+生产执行器接收普通 Markdown。原生阶段字段直接归一化；普通 Provider 的增量文字先记录为未定阶段，同一步中伴随工具调用的文字结算为进展，无工具调用的正常结束文字结算为最终回答。公开阶段与判断来源同时进入 Host 事件和结算事实。Telegram 用原生 Rich Markdown 草稿持续更新每个公开段，结算后以相同格式保存；长内容分页，超出草稿容量时展示最新有界页面，最终答案完整保存。草稿约每 250ms 合并快照，等待耗时每五秒变化。工具状态不展示参数或返回原文；进展发送失败不阻断最终答复。JSON 协议仅用于兼容旧入口。详见 [运行进展与迁移](docs/runtime-progress.md)。
 
 旧 json-text-v2 兼容入口仍保留受限协议恢复和原始记录；新生产路径不要求 JSON 文字外壳。
 
@@ -154,7 +154,7 @@ Telegram 入口可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDIN
 | --- | --- |
 | `src/main.ts`、`src/cli/main.ts` | Telegram／CLI 配置、依赖装配、启动与关闭 |
 | `src/host/` | Actor／ContentPart 输入契约、RunHandle、串行队列、cancel／reset API、结果复用与恢复视图 |
-| `src/channel/telegram/`、`src/cli/` | Channel 输入归一化和输出投影；Telegram Rich Markdown／HTML transport |
+| `src/channel/telegram/`、`src/cli/` | Channel 输入归一化和输出投影；Telegram 原生 Rich Markdown transport |
 | `src/agent/` | pi 会话、结构化执行协议、工具事实记录、访问策略与 TinyFish |
 | `src/context/` | 会话历史重放、预算、checkpoint、工具结果视图及部分接入的 Provider-aware 投影 |
 | `src/memory/` | Akasha 原话索引、embedding、缓存、关联图、动力学与召回 |

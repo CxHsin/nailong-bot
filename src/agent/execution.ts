@@ -15,7 +15,7 @@ import { projectProviderContext, projectNativeContext } from "../context/provide
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
 import { startObservedProvider } from "./provider-diagnostics.js";
-import { textPhase } from "./text-phase.js";
+import { publicTextPhase } from "./text-phase.js";
 
 function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
   return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
@@ -209,7 +209,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             let preview: ReturnType<typeof previewStructuredText>;
             let validatedPrefix = false;
             let prefixChanged = false;
-            if (plain) preview = { type: part?.type === "text" && textPhase(part) === "final_answer" ? "final" : "progress", text: rawPreview };
+            const publicPhase = plain && part?.type === "text" ? publicTextPhase(part) : undefined;
+            if (plain) preview = { type: publicPhase?.phase === "final_answer" ? "final" : "progress", text: rawPreview };
             else try {
               const frames = readOutputFrames(rawPreview);
               const partial = previewStructuredText(frames.rest);
@@ -231,17 +232,18 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
                 protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
               lastPreview = preview.text;
               lastPreviewAt = performance.now();
-              request.onProgress?.({ type: "text", segmentId: previewId, kind: preview.type, text: preview.text, finalized: false });
+              request.onProgress?.({ type: "text", segmentId: previewId, kind: preview.type, text: preview.text, finalized: false, ...publicPhase });
               await request.onText?.(textSegmentId);
             }
           }
           if (plain && event.type === "text_end") {
             const part = event.partial.content[event.contentIndex];
-            if (part?.type === "text" && textPhase(part) === "commentary" && part.text.trim()) {
+            if (part?.type === "text" && publicTextPhase(part).phase === "commentary" && part.text.trim()) {
               const id = segmentFor(event.contentIndex);
+              const publicPhase = publicTextPhase(part);
               await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
-                textSegmentId: id, modelTextIndex: event.contentIndex, contentKind: "progress", text: part.text, protocolVersion, source: "execution" });
-              request?.onProgress?.({ type: "text", segmentId: id, kind: "progress", text: part.text, finalized: true, formal: true, source: "execution" });
+                textSegmentId: id, modelTextIndex: event.contentIndex, contentKind: "progress", text: part.text, protocolVersion, source: "execution", ...publicPhase });
+              request?.onProgress?.({ type: "text", segmentId: id, kind: "progress", text: part.text, finalized: true, formal: true, source: "execution", ...publicPhase });
               settledSegments.add(event.contentIndex);
               if (activePreview === id) activePreview = undefined;
             }
@@ -274,13 +276,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           const finalParts: string[] = [];
           for (const [index, part] of message.content.entries()) {
             if (part.type !== "text" || !part.text.trim()) continue;
-            const phase = textPhase(part);
-            const kind = phase === "commentary" || toolCalls.length ? "progress" : "final";
+            const publicPhase = publicTextPhase(part, { hasTools: toolCalls.length > 0 });
+            const kind = publicPhase.phase === "commentary" ? "progress" : "final";
             const id = segmentFor(index);
             if (!settledSegments.has(index)) {
               await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
-                textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution" });
-              request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution" });
+                textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution", ...publicPhase });
+              request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution", ...publicPhase });
             }
             if (kind === "final") finalParts.push(part.text);
           }

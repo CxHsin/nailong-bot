@@ -14,6 +14,7 @@ import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { DeliveryRejected } from "../src/application/app-types.js";
 import { getModel } from "@mariozechner/pi-ai";
 import { replayEvents } from "../src/context/projection.js";
+import type { RunProgress } from "../src/runtime/progress.js";
 
 test("ordinary assistant progress is delivered separately, replayed once and excluded from Akasha", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "runtime-progress-"));
@@ -22,7 +23,7 @@ test("ordinary assistant progress is delivered separately, replayed once and exc
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     inputs.push(body);
-    const delta = calls++ === 0 ? { content: "先检查目录，以确认文件是否存在。", tool_calls: [{ index: 0, id: "list", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] } : { content: "目录中有 prompt.md，检查完成。" };
+    const delta = calls++ === 0 ? { reasoning_content: "INTERNAL_REASONING", content: "先检查目录，以确认文件是否存在。", tool_calls: [{ index: 0, id: "list", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] } : { content: "目录中有 prompt.md，检查完成。" };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -37,12 +38,21 @@ test("ordinary assistant progress is delivered separately, replayed once and exc
   const projection = createTelegramHostProjection({ chatId: 42, draftIntervalMs: 5,
     draft: async (_id, text) => { drafts.push(text); }, send: async (text) => { sent.push(text); return sent.length; },
     onDelivered: (event, id) => host.recordDelivery(event, { channel: "telegram", telegramMessageId: id }) });
-  await projection.consume(host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:42", text: "检查目录" }));
+  const run = host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:42", text: "检查目录" });
+  const progress: RunProgress[] = [];
+  await projection.consume({ ...run, events: async function* () { for await (const event of run.events()) { if (event.progress) progress.push(event.progress); yield event; } } });
   assert.equal(calls, 2);
   assert.deepEqual(sent, ["先检查目录，以确认文件是否存在。", "目录中有 prompt.md，检查完成。"]);
   assert.ok(drafts.some((text) => text.includes("先检查目录")));
   assert.equal(inputs[1]!.split("先检查目录，以确认文件是否存在。").length - 1, 1);
   const events = await log.read();
+  const settled = events.filter((event) => event.type === "text_finalized");
+  assert.deepEqual(settled.map(({ phase, phaseSource }) => ({ phase, phaseSource })), [
+    { phase: "commentary", phaseSource: "tool-boundary" }, { phase: "final_answer", phaseSource: "terminal-boundary" },
+  ]);
+  assert.ok(progress.some((event) => event.type === "text" && !event.finalized && event.phase === "unresolved"));
+  assert.deepEqual(progress.flatMap((event) => event.type === "text" && event.kind !== "status" && event.finalized ? [{ phase: event.phase, phaseSource: event.phaseSource }] : []), settled.map(({ phase, phaseSource }) => ({ phase, phaseSource })));
+  assert.doesNotMatch(sent.join("") + drafts.join(""), /INTERNAL_REASONING/);
   assert.equal(events.some((event) => event.type === "protocol_feedback" || event.type === "protocol_validated"), false);
   assert.deepEqual(memoryNodes(events, 42)[0]?.messages.filter((message) => message.role === "assistant").map((message) => message.text), ["目录中有 prompt.md，检查完成。"]);
   await projection.consume(host.submit({ actor: { id: "owner" }, conversationId: "telegram:private:42", text: "接着回答" }));

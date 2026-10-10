@@ -69,8 +69,6 @@ for (const toolSearch of ["native", "compat"] as const) for (const splitResponse
   const transport = createTelegramRichTransport({
     sendRich: async (_chat, value) => { sent.push(value); if (value.includes("**已确认资料日期**")) releaseFinding(); return sent.length; },
     draftRich: async (_id, _chat, value) => { drafts.push(value); if (value === "最终结") releaseDelta(); },
-    sendHtml: async () => { throw new Error("Unexpected HTML persistence"); }, draftHtml: async () => {},
-    editHtml: async () => { throw new Error("Unexpected HTML card"); },
   });
   const run = host.submit({ actor: { id: "42" }, conversationId: "telegram:private:42", text: "核对资料" });
   await createTelegramHostProjection({ ...transport, chatId: 42, draftIntervalMs: 5,
@@ -82,6 +80,9 @@ for (const toolSearch of ["native", "compat"] as const) for (const splitResponse
   assert.ok(sent.includes("**已确认资料日期**，接下来核对结论。"));
   assert.equal(sent.at(-1), "最终结论。"); assert.ok(drafts.includes("最终结"));
   const facts = await log.read();
+  assert.deepEqual(facts.filter((fact) => fact.type === "text_finalized").map(({ phase, phaseSource }) => ({ phase, phaseSource })), [
+    { phase: "commentary", phaseSource: "native" }, { phase: "final_answer", phaseSource: "native" },
+  ]);
   assert.equal(facts.filter((fact) => fact.type === "text_finalized" && fact.contentKind === "progress").length, 1);
   assert.equal(facts.some((fact) => fact.purpose === "progress"), false);
   assert.deepEqual(memoryNodes(facts, 42)[0]?.messages.filter((message) => message.role === "assistant").map((message) => message.text), ["最终结论。"]);

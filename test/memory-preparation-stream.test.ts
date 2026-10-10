@@ -42,28 +42,19 @@ test("Telegram streams preparation while embedding is pending and persists the s
     await log.append({ type: "request_completed", requestId: `old${i}` });
   }
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  const cards = new Map<number, string>(); const finals: string[] = []; const snapshots: string[] = []; const drafts: number[] = [];
-  const receive = (id: number, html: string) => {
-    cards.set(id, html); snapshots.push(html);
-    if (html.includes("正在匹配问题的语义")) {
-      assert.equal(modelCalls, 0); release();
-    }
-  };
+  const finals: string[] = []; const snapshots: string[] = []; const drafts: number[] = [];
   const rich = createTelegramRichTransport({ sendRich: async (_chat, text) => { finals.push(text); return 99; },
     draftRich: async (id, _chat, text) => {
       drafts.push(id); snapshots.push(text);
       if (text.includes("正在匹配问题的语义")) { assert.equal(modelCalls, 0); release(); }
-    }, draftHtml: async () => {},
-    sendHtml: async (_chat, html) => { const id = cards.size + 1; receive(id, html); return id; },
-    editHtml: async (id, _chat, html) => receive(id, html) });
+    } });
   const run = host.submit({ actor: { id: "42" }, conversationId: "telegram:private:42", text: "历史问题" });
   const statuses: RunProgress[] = [];
-  await createTelegramHostProjection({ ...rich, chatId: 42, progressIntervalMs: 0 }).consume({ ...run, events: async function* () {
+  await createTelegramHostProjection({ ...rich, chatId: 42 }).consume({ ...run, events: async function* () {
     for await (const event of run.events()) { if (event.progress) statuses.push(event.progress); yield event; }
   } });
   assert.equal((await run.done).type, "run_succeeded");
-  assert.equal(cards.size, 0);
-  assert.ok(snapshots.some((html) => html.includes("正在匹配问题的语义")));
+  assert.ok(snapshots.some((text) => text.includes("正在匹配问题的语义")));
   assert.ok(drafts.length > 0);
   const text = finals[0]!;
   assert.match(text, /检索完成：40 条候选记忆/);

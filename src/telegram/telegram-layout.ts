@@ -120,44 +120,4 @@ export function previewTelegramText(text: string): string[] {
   return planTelegramText(text);
 }
 
-/** Immutable Markdown pages that each fit one ordinary Telegram fallback message. */
-export function planTelegramMarkdown(text: string): string[] {
-  const pages: string[] = []; let current = "";
-  const fits = (value: string) => value.length <= 3500 && planTelegramText(value).length <= 1;
-  const append = (value: string) => {
-    if (current && !fits(current + value)) { pages.push(current); current = ""; }
-    current += value;
-  };
-  const split = (source: string, wrap: (part: string) => string = (part) => part) => {
-    const emit = (part: string) => {
-      if (fits(wrap(part))) { append(wrap(part)); return; }
-      const units = [...graphemes.segment(part)].map((item) => item.segment);
-      if (units.length < 2) throw new Error("Markdown 单元超过 Telegram 消息容量");
-      const middle = Math.ceil(units.length / 2);
-      emit(units.slice(0, middle).join("")); emit(units.slice(middle).join(""));
-    };
-    let part = "";
-    for (const { segment } of graphemes.segment(source)) {
-      // Pathological single graphemes cannot fit; retain their code points across pages.
-      const units = segment.length > 3000 ? Array.from(segment) : [segment];
-      for (const unit of units) {
-        if (part && part.length + unit.length > 2500) {
-          const newline = part.lastIndexOf("\n");
-          if (newline >= part.length / 2) { emit(part.slice(0, newline + 1)); part = part.slice(newline + 1); }
-          else { emit(part); part = ""; }
-        }
-        part += unit;
-      }
-    }
-    if (part) emit(part);
-  };
-  for (const token of marked.lexer(text, { gfm: true, breaks: true })) {
-    if (fits(token.raw)) append(token.raw);
-    else if (token.type === "code") {
-      const fence = "`".repeat(Math.max(3, ...(String(token.text).match(/`+/g) ?? []).map((run: string) => run.length + 1)));
-      split(token.text, (part) => `${fence}${token.lang ?? ""}\n${part}\n${fence}\n`);
-    } else split(token.raw);
-  }
-  if (current.trim()) pages.push(current);
-  return pages;
-}
+export { planTelegramMarkdown } from "./telegram-markdown.js";

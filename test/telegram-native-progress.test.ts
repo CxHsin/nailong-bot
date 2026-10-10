@@ -19,9 +19,7 @@ function transport() {
   const sent: string[] = []; const drafts: Array<{ id: number; text: string }> = [];
   const rich = createTelegramRichTransport({ sendRich: async (_chat, text) => { sent.push(text); return sent.length; },
     draftRich: async (id, _chat, text) => { drafts.push({ id, text }); },
-    sendHtml: async () => { throw new Error("HTML card must not run"); },
-    draftHtml: async () => { throw new Error("HTML draft unnecessary"); },
-    editHtml: async () => { throw new Error("card editing must not run"); } });
+  });
   return { rich, sent, drafts };
 }
 function handle(events: HostEvent[], wait = 20): RunHandle {
@@ -97,13 +95,14 @@ test("discarded auxiliary drafts never persist while settled auxiliary findings 
   const count = output.drafts.length; await delay(20); assert.equal(output.drafts.length, count);
 });
 
-test("partial invalid Markdown uses an ephemeral draft fallback and resumes native Markdown", async () => {
+test("partial invalid Markdown keeps the last native preview and accepts a later complete snapshot", async () => {
   const calls: string[] = [];
-  const rich = createTelegramRichTransport({ sendRich: async () => 1, sendHtml: async () => 1,
-    draftRich: async (_id, _chat, value) => { calls.push(value); if (value === "**结论") throw { error_code: 400, description: "invalid markdown" }; },
-    draftHtml: async (_id, _chat, value) => { calls.push(`fallback:${value}`); } });
-  await rich.draft(1, "**结论", 42); await rich.draft(1, "**结论**", 42);
-  assert.equal(calls[0], "**结论"); assert.ok(calls[1]!.startsWith("fallback:")); assert.equal(calls[2], "**结论**");
+  const rich = createTelegramRichTransport({ sendRich: async () => 1,
+    draftRich: async (_id, _chat, value) => { calls.push(value); if (value === "**结论") throw { error_code: 400, description: "invalid markdown" }; } });
+  await rich.draft(1, "前文", 42);
+  await assert.rejects(rich.draft(1, "**结论", 42));
+  await rich.draft(1, "**结论**", 42);
+  assert.deepEqual(calls, ["前文", "**结论", "**结论**"]);
   assert.deepEqual(rich.plan({ id: "finding", text: "**结论**", kind: "progress" }), ["**结论**"]);
 });
 
@@ -118,21 +117,21 @@ test("a hanging settled finding freezes later progress sends and cannot hold the
   assert.equal(attempts, 1); assert.equal(aborted?.aborted, true); assert.equal(output.sent.at(-1), "最终答案");
 });
 
-test("fallback retries only the rejected Markdown page and preserves full fenced Unicode content", async (t) => {
+test("Rich delivery retries only the rejected Markdown page and preserves full fenced Unicode content", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "native-fallback-pages-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const log = await createRuntimeEventLog(dir);
   const source = "```ts\n" + "const 家庭 = '👨‍👩‍👧‍👦';\n".repeat(500) + "```\n\n尾部结论";
   await log.append({ type: "text_finalized", requestId: "native", textSegmentId: "finding", contentKind: "progress", text: source, protocolVersion: "plain-text-v3" });
-  const html: string[] = []; let rejected = false;
-  const rich = createTelegramRichTransport({ sendRich: async () => { throw { error_code: 404 }; }, draftRich: async () => {}, draftHtml: async () => {},
-    sendHtml: async (_chat, value) => { if (html.length === 1 && !rejected) { rejected = true; throw { error_code: 429 }; } html.push(value); return html.length; } });
+  const markdown: string[] = []; let rejected = false;
+  const rich = createTelegramRichTransport({ draftRich: async () => {},
+    sendRich: async (_chat, value) => { if (markdown.length === 1 && !rejected) { rejected = true; throw { error_code: 429 }; } markdown.push(value); return markdown.length; } });
   const planned = rich.plan({ id: "finding", text: source, kind: "progress" });
   assert.ok(planned.length > 1);
   const result = await deliverContent(log, "native", 42, { id: "finding", text: source, kind: "progress" }, rich);
-  assert.equal(result.complete, true); assert.equal(html.length, planned.length);
-  assert.equal(html.join("").split("const 家庭").length - 1, 500);
-  assert.equal(html.join("").split("👨‍👩‍👧‍👦").length - 1, 500);
-  assert.match(html.at(-1)!, /尾部结论/);
+  assert.equal(result.complete, true); assert.deepEqual(markdown, planned);
+  assert.equal(markdown.join("").split("const 家庭").length - 1, 500);
+  assert.equal(markdown.join("").split("👨‍👩‍👧‍👦").length - 1, 500);
+  assert.match(markdown.at(-1)!, /尾部结论/);
   const facts = await log.read();
   assert.equal(facts.filter((fact) => fact.type === "telegram_delivery_succeeded").length, planned.length);
   assert.equal(facts.filter((fact) => fact.type === "telegram_delivery_attempt" && fact.partIndex === 0).length, 1);
@@ -144,7 +143,7 @@ test("a late progress page cannot dispatch later pages after its cancellation de
   await log.append({ type: "text_finalized", requestId: "native", textSegmentId: "finding", contentKind: "progress", text: source, protocolVersion: "plain-text-v3" });
   let release!: () => void; let started!: () => void; let calls = 0;
   const ready = new Promise<void>((resolve) => { started = resolve; }); const wait = new Promise<void>((resolve) => { release = resolve; });
-  const rich = createTelegramRichTransport({ sendRich: async () => { calls++; started(); await wait; return 1; }, draftRich: async () => {}, draftHtml: async () => {}, sendHtml: async () => 1 });
+  const rich = createTelegramRichTransport({ sendRich: async () => { calls++; started(); await wait; return 1; }, draftRich: async () => {} });
   const controller = new AbortController();
   const delivery = deliverContent(log, "native", 42, { id: "finding", text: source, kind: "progress" }, rich, controller.signal);
   await ready; controller.abort(); release();
