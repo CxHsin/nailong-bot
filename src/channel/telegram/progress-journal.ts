@@ -40,9 +40,7 @@ export async function consumeProgressJournal(handle: RunHandle, options: Telegra
   const flush = async () => {
     if (disabled || control || !entries.size) return;
     const text = render();
-    const preview = [...entries.values()].filter((entry) => entry.text.trim())
-      .sort((a, b) => b.updated - a.updated).slice(0, 2).map(renderEntry);
-    const planned = options.plan!({ id: `${handle.runId}:journal`, text, kind: "progress", source: "execution", preview });
+    const planned = options.plan!({ id: `${handle.runId}:journal`, text, kind: "progress", source: "execution" });
     for (let index = 0; index < planned.length; index++) {
       if (disabled) return;
       const html = planned[index]!;

@@ -117,7 +117,7 @@ test("long native previews fit Telegram limits without splitting graphemes and r
   assert.ok(content.split(glyph).length - 1 >= 500);
 });
 
-test("folded preview follows updates to existing states while the full journal keeps its order", async () => {
+test("folded journal updates states in order without a duplicated two-line preview", async () => {
   const t = transport(); const snapshots: string[] = [];
   await createTelegramHostProjection({ ...t.rich, chatId: 42, progressIntervalMs: 0,
     editPage: async (id, text, chat) => { snapshots.push(text); await t.rich.editPage!(id, text, chat); },
@@ -127,8 +127,8 @@ test("folded preview follows updates to existing states while the full journal k
     progress({ type: "text", segmentId: "memory", kind: "status", text: "检索完成：66 条候选记忆", finalized: true }),
     event("run_succeeded", { result: { text: "答案" } }),
   ], 10));
-  assert.ok(snapshots.some((html) => html.startsWith("<blockquote expandable>检索完成：66 条候选记忆\n历史上下文已恢复\n\n")));
-  assert.match(t.visible.get(1)!, /^<blockquote expandable>已完成\n检索完成：66 条候选记忆\n\n检索完成：66 条候选记忆\n\n历史上下文已恢复\n\n已完成<\/blockquote>$/);
+  assert.ok(snapshots.includes("<blockquote expandable>检索完成：66 条候选记忆\n\n历史上下文已恢复</blockquote>"));
+  assert.equal(t.visible.get(1), "<blockquote expandable>检索完成：66 条候选记忆\n\n历史上下文已恢复\n\n已完成</blockquote>");
 });
 
 test("retained production journal edits one folded message, replaces tool states and separates final", async () => {
@@ -163,14 +163,14 @@ test("long journal preserves all pages and withdraws discarded previews", async 
   ], 5));
   assert.ok(t.visible.size > 1);
   const pages = [...t.visible.values()];
-  assert.match(pages[0]!, /^<blockquote expandable>已完成\n独特内容/);
-  const combined = [pages[0]!.slice(pages[0]!.indexOf("\n\n") + 2), ...pages.slice(1)].join("");
+  assert.match(pages[0]!, /^<blockquote expandable>独特内容/);
+  const combined = pages.join("");
   assert.equal(combined.split("独特内容。").length - 1, 1800);
   assert.doesNotMatch(combined, /未采用预览/);
   assert.deepEqual(t.finals, ["完成"]);
 });
 
-test("discarded states disappear from the live preview as well as the full journal", async () => {
+test("discarded states disappear from the live journal and the retained full journal", async () => {
   const t = transport(); const snapshots: string[] = [];
   await createTelegramHostProjection({ ...t.rich, chatId: 42, progressIntervalMs: 0,
     editPage: async (id, text, chat) => { snapshots.push(text); await t.rich.editPage!(id, text, chat); },
@@ -180,8 +180,8 @@ test("discarded states disappear from the live preview as well as the full journ
     progress({ type: "discard", segmentId: "preview" }),
     event("run_cancelled"),
   ], 10));
-  assert.ok(snapshots.some((html) => html === "<blockquote expandable>历史已恢复\n\n历史已恢复</blockquote>"));
-  assert.match(t.visible.get(1)!, /^<blockquote expandable>已取消\n历史已恢复\n\n/);
+  assert.ok(snapshots.includes("<blockquote expandable>历史已恢复</blockquote>"));
+  assert.equal(t.visible.get(1), "<blockquote expandable>历史已恢复\n\n已取消</blockquote>");
   assert.doesNotMatch(t.visible.get(1)!, /撤回的摘要/);
 });
 
