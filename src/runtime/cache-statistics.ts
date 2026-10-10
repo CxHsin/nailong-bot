@@ -116,7 +116,6 @@ export function cacheReportText(report: CacheReport): string {
     const firstCall = !first ? "未知（旧记录缺少调用开始事实）" : first.pending ? "待结算" : !first.measured ? "数据缺失" :
       `**${first.hitRate === null ? "不可用" : `${(first.hitRate * 100).toFixed(2)}%`}**；Hit ${first.hit.toLocaleString("en-US")} / Miss ${first.miss.toLocaleString("en-US")} token`;
     const row = `**${heading}**\n${line(run.execution)}\n首个执行调用：${firstCall}` +
-      (run.auxiliary.calls ? `\n摘要/辅助调用（单独统计）：\n${line(run.auxiliary)}` : "") +
       (flavor ? `\n🦖 “${flavor.quote}”` : "");
     // Native Rich Markdown treats a bare newline as paragraph whitespace.
     // Keep each metric on its own line with standard Markdown hard breaks.

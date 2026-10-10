@@ -184,6 +184,7 @@ test("unknown, zero and cancelled usage remain distinct and calls do not count t
   assert.equal(report.auxiliary.hitRate, 0.5);
   const text = cacheReportText(report);
   assert.match(text, /已取消/);
+  assert.doesNotMatch(text, /摘要\/辅助调用/);
   assert.match(text, /数据缺失 2/);
   assert.match(text, /命中率：\*\*不可用\*\*/);
 });
@@ -284,5 +285,5 @@ test("cache report exposes each Run's first execution call even when later tool 
   const text = cacheReportText(report);
   assert.match(text, /首个执行调用：\*\*0\.00%\*\*/);
   assert.match(text, /首个执行调用：待结算/);
-  assert.match(text, /摘要\/辅助调用.*20.*80/s);
+  assert.doesNotMatch(text, /摘要\/辅助调用/);
 });
