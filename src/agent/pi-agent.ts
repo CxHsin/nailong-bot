@@ -192,26 +192,35 @@ export async function createPiAgent(options: {
         const message: UserMessage = { role: "user", content: [{ type: "text", text }, ...images], timestamp: Date.now() };
         pendingSteers.set(message, steer); session.agent.steer(message);
       });
-      session.agent.subscribe(async (event) => {
+      let steeringWrites = Promise.resolve();
+      // SDK subscribers run independently; serialize facts before replaying them.
+      session.agent.subscribe((event) => {
         if (event.type === "message_end" && event.message.role === "user") {
           const steer = pendingSteers.get(event.message);
           if (!steer) return;
           pendingSteers.delete(event.message);
-          if (!await steer.consume()) return;
-          execution.invalidateFinal();
-          session.agent.clearFollowUpQueue();
-          await request?.log.append({ type: "protocol_feedback_superseded", requestId: request.id, reason: "user_steer", contextPolicy: "exclude" });
-          const text = steer.input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
-          const images = steer.input.parts.flatMap((part) => part.type === "image" && part.data ? [{ type: "image" as const, mimeType: part.mimeType, data: part.data }] : []);
-          await request?.log.append({ type: "message", role: "user", text, originalText: text, requestId: request.id, inputId: steer.id,
-            chatId: userId, messageId: steer.input.metadata?.messageId, inputKind: "steer", ...(images.length ? { images } : {}) });
-          if (request) {
-            const selected = await explicitSkills(steer.input.metadata?.skillSnapshot as SkillSnapshot ?? skills, text, { ...request, inputId: steer.id });
-            reader.registerSkills(selected);
-          }
-          appliedSteers.push(steer);
+          steeringWrites = steeringWrites.then(async () => {
+            if (!await steer.consume()) return;
+            execution.invalidateFinal();
+            session.agent.clearFollowUpQueue();
+            await request?.log.append({ type: "protocol_feedback_superseded", requestId: request.id, reason: "user_steer", contextPolicy: "exclude" });
+            const text = steer.input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
+            const images = steer.input.parts.flatMap((part) => part.type === "image" && part.data ? [{ type: "image" as const, mimeType: part.mimeType, data: part.data }] : []);
+            await request?.log.append({ type: "message", role: "user", text, originalText: text, requestId: request.id, inputId: steer.id,
+              chatId: userId, messageId: steer.input.metadata?.messageId, inputKind: "steer", ...(images.length ? { images } : {}) });
+            if (request) {
+              const selected = await explicitSkills(steer.input.metadata?.skillSnapshot as SkillSnapshot ?? skills, text, { ...request, inputId: steer.id });
+              reader.registerSkills(selected);
+            }
+            appliedSteers.push(steer);
+          });
         }
       });
+      const executionStream = session.agent.streamFn;
+      session.agent.streamFn = async (...args) => {
+        await steeringWrites;
+        return executionStream(...args);
+      };
       if (request) request.onModelInput = async () => {
         // The response confirms one payload containing the entire batch. Claim
         // every input synchronously before any durable write can interleave Stop.
@@ -234,6 +243,7 @@ export async function createPiAgent(options: {
         return execution.finalText()!;
       } finally {
         closeSteering?.();
+        await steeringWrites;
         for (const steer of appliedSteers) await request?.log.append({ type: "steer_unapplied", inputId: steer.id, requestId: request.id, contextPolicy: "exclude" });
         request?.signal?.removeEventListener("abort", abort); session.dispose();
       }
