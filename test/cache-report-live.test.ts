@@ -12,6 +12,26 @@ import { initializeTelegramHostChannel } from "../src/channel/telegram/host-chan
 import { createCliChannel } from "../src/cli/cli-channel.js";
 import { createServer } from "node:http";
 import { createPiAgent } from "../src/agent/pi-agent.js";
+import { marked } from "marked";
+import { createTelegramRichTransport } from "../src/channel/telegram/rich-transport.js";
+
+test("Telegram cache report preserves separate metric lines under standard Markdown rendering", async () => {
+  const report = cacheStatistics([
+    { type: "request_started", requestId: "report", conversationId: "c", at: "2026-10-10T00:00:00Z" },
+    { type: "model_step_started", requestId: "report", modelStepId: "step", purpose: "execution", at: "2026-10-10T00:00:00Z" },
+    { type: "model_usage", requestId: "report", callId: "step", purpose: "execution", usageAvailable: true,
+      usage: { input: 10, cacheRead: 90, cacheWrite: 0 }, at: "2026-10-10T00:00:01Z" },
+    { type: "run_succeeded", runId: "report", at: "2026-10-10T00:00:01Z" },
+  ], "c");
+  const sent: string[] = [];
+  const transport = createTelegramRichTransport({ sendRich: async (_chat, markdown) => { sent.push(markdown); return 1; }, draftRich: async () => {} });
+  await transport.send(cacheReportText(report), 42);
+  const rendered = String(marked.parse(sent.join("\n\n"), { breaks: false }));
+  assert.match(rendered, /<br>\s*♻️ 命中/);
+  assert.match(rendered, /<br>\s*🆕 未命中/);
+  assert.match(rendered, /<br>\s*合计输入/);
+  assert.match(rendered, /<br>\s*首个执行调用/);
+});
 
 // This guards against a hung test; completion before releasing the model is the
 // behavioral assertion, not a response-time SLA for filesystem work under load.
