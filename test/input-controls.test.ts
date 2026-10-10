@@ -12,6 +12,7 @@ import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { initializeTelegramHostChannel } from "../src/channel/telegram/host-channel.js";
 import { createCliChannel } from "../src/cli/cli-channel.js";
 import { createTestServer } from "./fixtures/http-server.js";
+import { sendResponsesText } from "./fixtures/responses-text.js";
 import { memoryNodes } from "../src/runtime/memory-facts.js";
 import { DeliveryRejected } from "../src/application/app-types.js";
 
@@ -209,17 +210,7 @@ test("Steer supersedes stale protocol feedback without a spurious extra request"
   const started = barrier(); const finish = barrier(); t.after(finish.release);
   const f = await fixture(t, async (_wire, count, res) => {
     if (count === 1) { started.release(); await finish.reached; }
-    const item = { type: "message", id: `phase-${count}`, role: "assistant", status: "completed",
-      phase: count === 1 ? "commentary" : "final_answer",
-      content: [{ type: "output_text", text: count === 1 ? "accepted progress" : "valid-steered-answer", annotations: [] }] };
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end([{ type: "response.created", response: { id: "response", status: "in_progress" } },
-      { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
-      { type: "response.content_part.added", output_index: 0, item_id: item.id, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
-      { type: "response.output_text.delta", output_index: 0, item_id: item.id, content_index: 0, delta: item.content[0]!.text },
-      { type: "response.output_item.done", output_index: 0, item },
-      { type: "response.completed", response: { id: "response", status: "completed", usage: { input_tokens: 50, output_tokens: 10 } } },
-    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+    sendResponsesText(res, `phase-${count}`, count === 1 ? "commentary" : "final_answer", count === 1 ? "accepted progress" : "valid-steered-answer");
   }, { responses: true });
   await f.send("commentary-task"); await started.reached;
   await f.send("/steer changed-instruction"); await f.waitForReply("引导已接收");

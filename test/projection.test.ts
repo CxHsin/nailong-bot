@@ -1,4 +1,5 @@
 import { createTestServer } from "./fixtures/http-server.js";
+import { sendResponsesText } from "./fixtures/responses-text.js";
 import assert from "node:assert/strict";
 import type { ServerResponse } from "node:http";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -30,18 +31,6 @@ function reply(res: ServerResponse, content: string, call?: { id: string; name: 
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta,
     finish_reason: call ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
-}
-function nativeText(res: ServerResponse, id: string, phase: "commentary" | "final_answer", text: string) {
-  const item = { type: "message", id, role: "assistant", status: "completed", phase,
-    content: [{ type: "output_text", text, annotations: [] }] };
-  res.writeHead(200, { "content-type": "text/event-stream" });
-  res.end([{ type: "response.created", response: { id: "response", status: "in_progress" } },
-    { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
-    { type: "response.content_part.added", output_index: 0, item_id: id, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
-    { type: "response.output_text.delta", output_index: 0, item_id: id, content_index: 0, delta: text },
-    { type: "response.output_item.done", output_index: 0, item },
-    { type: "response.completed", response: { id: "response", status: "completed", usage: { input_tokens: 50, output_tokens: 10 } } },
-  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
 }
 async function fixture(t: TestContext, respond: (data: Payload, res: ServerResponse) => void,
   options: Partial<PiAgentOptions> | ((baseUrl: string) => Partial<PiAgentOptions>) = {}) {
@@ -85,7 +74,7 @@ test("real Responses commentary continues in the current Run while transient fee
   let calls = 0;
   const f = await fixture(t, (_data, res) => {
     const count = ++calls;
-    nativeText(res, `phase-${count}`, count === 1 ? "commentary" : "final_answer", count === 1 ? "已确认日期，继续核查。" : "finished");
+    sendResponsesText(res, `phase-${count}`, count === 1 ? "commentary" : "final_answer", count === 1 ? "已确认日期，继续核查。" : "finished");
   }, (baseUrl) => ({ modelConfiguration: { defaultModel: "phase", models: [{ alias: "phase", api: "openai-responses",
     model: "phase-test", apiKey: "test", baseUrl, toolSearch: "compat" }] } }));
   await f.send("first user");
@@ -103,7 +92,7 @@ test("distinct native commentary without tools stops after twelve steps without 
   let calls = 0;
   const f = await fixture(t, (_data, res) => {
     const count = ++calls;
-    nativeText(res, `commentary-${count}`, "commentary", `已核对第 ${count} 项资料，继续检查。`);
+    sendResponsesText(res, `commentary-${count}`, "commentary", `已核对第 ${count} 项资料，继续检查。`);
   }, (baseUrl) => ({ modelConfiguration: { defaultModel: "phase", models: [{ alias: "phase", api: "openai-responses",
     model: "phase-test", apiKey: "test", baseUrl, toolSearch: "compat" }] } }));
   await f.send("核查资料并执行实际操作");
