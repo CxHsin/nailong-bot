@@ -8,7 +8,9 @@ The personal Agent uses one continuing Conversation. The three-prior-turn policy
 
 An input budget applies throughout execution. Reaching a threshold triggers batch compaction of an explicitly covered prefix, retaining a summary and recent originals with enough headroom for further turns. A validated projection snapshot and compaction boundary support restart recovery; missing or invalid derived state is rebuilt from the original facts. Small tool results may remain complete, while large results use a recorded bounded view; explicit reads append recovered details. Reset, forgetting and Provider replay requirements still govern correctness.
 
-These directions were confirmed during the 2026-10-10 design discussion. Summary content, Akasha coordination, budget values and compaction failure handling remain open. This proposal does not yet supersede ADR-0003 or change runtime behavior; the complete design and implementation acceptance are pending. Supporting evidence: [long-conversation research](../research/long-conversation-prompt-cache-2026-10-10.md).
+Compaction must retain effective user constraints, unfinished work, key decisions, continuation state and evidence references, alongside recent originals. Details of completed topics may leave active context and remain recoverable from the log or Akasha. Akasha continues automatic question-related retrieval, appending relevant original fragments not already fully represented in active context; explicit search and read remain available. Lossy summary coverage must not block recovery of the originals it covers. Exact and partial original coverage therefore need to remain distinct from summary coverage.
+
+These directions were confirmed during the 2026-10-10 design discussion. Budget values, initial transition from the existing policy and compaction failure handling remain open. This proposal does not yet supersede ADR-0003 or change runtime behavior; the complete design and implementation acceptance are pending. Supporting evidence: [long-conversation research](../research/long-conversation-prompt-cache-2026-10-10.md).
 
 ## Consequences
 
