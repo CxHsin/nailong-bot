@@ -24,10 +24,10 @@ function final(res: ServerResponse, text = "completed") {
   res.writeHead(200, { "content-type": "text/event-stream" });
   res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
 }
-type Wire = { messages: Array<{ role: string; content: unknown }> };
+type Wire = { messages: Array<{ role: string; content: unknown }>; input?: unknown };
 const picture = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" };
 async function fixture(t: TestContext, respond: (wire: Wire, count: number, res: ServerResponse) => Promise<void> | void,
-  options: { dir?: string; protocol?: "json-text-v2"; contextWindow?: number; compaction?: { trigger: number; target: number }; skills?: string[]; remote?: (item: string) => Promise<string>; send?: (text: string) => Promise<void>; nativeStream?: boolean } = {}) {
+  options: { dir?: string; responses?: boolean; contextWindow?: number; compaction?: { trigger: number; target: number }; skills?: string[]; remote?: (item: string) => Promise<string>; send?: (text: string) => Promise<void>; nativeStream?: boolean } = {}) {
   const dir = options.dir ?? await mkdtemp(join(tmpdir(), "input-controls-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "helpful");
   for (const skill of options.skills ?? []) {
@@ -54,7 +54,8 @@ async function fixture(t: TestContext, respond: (wire: Wire, count: number, res:
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", memoryBootstrap: false,
-    outputProtocol: options.protocol,
+    ...(options.responses ? { modelConfiguration: { defaultModel: "phase", models: [{ alias: "phase", api: "openai-responses" as const,
+      model: "phase-test", apiKey: "test", baseUrl: `http://127.0.0.1:${address.port}`, toolSearch: "compat" as const }] } } : {}),
     contextWindow: options.contextWindow, compaction: options.compaction,
     skillSources: options.skills?.length ? [{ name: "personal", path: join(dir, "skills") }] : [],
     mcpServers: options.remote ? [{ name: "remote", url: `http://127.0.0.1:${address.port}/mcp` }] : [],
@@ -207,15 +208,29 @@ test("replayed Stop input after restart cannot cancel a new active Run", { timeo
 test("Steer supersedes stale protocol feedback without a spurious extra request", { timeout: 12000 }, async (t) => {
   const started = barrier(); const finish = barrier(); t.after(finish.release);
   const f = await fixture(t, async (_wire, count, res) => {
-    if (count === 1) { started.release(); await finish.reached; final(res, "invalid structured output"); }
-    else final(res, JSON.stringify({ type: "final", text: "valid-steered-answer" }));
-  }, { protocol: "json-text-v2" });
-  await f.send("structured-task"); await started.reached;
+    if (count === 1) { started.release(); await finish.reached; }
+    const item = { type: "message", id: `phase-${count}`, role: "assistant", status: "completed",
+      phase: count === 1 ? "commentary" : "final_answer",
+      content: [{ type: "output_text", text: count === 1 ? "accepted progress" : "valid-steered-answer", annotations: [] }] };
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end([{ type: "response.created", response: { id: "response", status: "in_progress" } },
+      { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+      { type: "response.content_part.added", output_index: 0, item_id: item.id, content_index: 0, part: { type: "output_text", text: "", annotations: [] } },
+      { type: "response.output_text.delta", output_index: 0, item_id: item.id, content_index: 0, delta: item.content[0]!.text },
+      { type: "response.output_item.done", output_index: 0, item },
+      { type: "response.completed", response: { id: "response", status: "completed", usage: { input_tokens: 50, output_tokens: 10 } } },
+    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+  }, { responses: true });
+  await f.send("commentary-task"); await started.reached;
   await f.send("/steer changed-instruction"); await f.waitForReply("引导已接收");
   finish.release(); await f.channel.finish();
   assert.equal(f.wire.length, 2);
   assert.match(JSON.stringify(f.wire[1]), /changed-instruction/);
-  assert.doesNotMatch(JSON.stringify(f.wire[1]!.messages.filter((message) => message.role !== "system")), /运行层协议反馈|invalid structured output/);
+  assert.doesNotMatch(JSON.stringify(f.wire[1]!.input), /运行层协议反馈/);
+  assert.match(JSON.stringify(f.wire[1]!.input), /accepted progress/);
+  const facts = await f.log.read();
+  assert.ok(facts.some((event) => event.type === "protocol_feedback" && event.source === "runtime"));
+  assert.ok(facts.some((event) => event.type === "protocol_feedback_superseded"));
   assert.ok(f.replies.includes("valid-steered-answer"));
 });
 
@@ -350,6 +365,7 @@ test("Stop during a tool batch cancels waiting steering and repeated Stop cancel
   await f.send("/steer cancelled-steering"); await f.send("/model ds"); await f.send("/reset");
   await f.waitForReply("引导已接收");
   await f.send("/stop"); await f.waitForReply("正在停止");
+  await f.waitForReply("已取消 3 条");
   const diagnostics = f.cli.send("/kvcache"); await diagnostics;
   await f.send("/steer cancelled-during-stop"); await f.send("/stop");
   await f.send("/steer fresh-during-stop");

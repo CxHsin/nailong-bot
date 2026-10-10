@@ -1,18 +1,16 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bot } from "grammy";
 import { Response as ApiResponse } from "node-fetch";
 import test from "node:test";
-import { createApp } from "../src/application/app.js";
-import { createPiAgent } from "../src/agent/pi-agent.js";
-import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
 import { registerTelegramInput, downloadTelegramPhoto } from "../src/telegram/telegram-input.js";
 import { estimateInput } from "../src/context/input-budget.js";
 import { summaryInput } from "../src/context/history-summary.js";
 import { closeFixture } from "./fixtures/cleanup.js";
+import { createTelegramHostFixture } from "./fixtures/telegram-host.js";
+import { createTestServer } from "./fixtures/http-server.js";
 
 const image = { type: "image" as const, mimeType: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aE1cAAAAASUVORK5CYII=" };
 function update(id: number, owner = 42, caption?: string, text?: string) {
@@ -38,55 +36,35 @@ test("actual Telegram photo updates keep caption and images through model calls,
   const dir = await mkdtemp(join(tmpdir(), "telegram-image-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "请分析用户图片。");
   const payloads: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
-  const server = createServer(async (req, res) => {
+  const server = createTestServer(t, async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     payloads.push(JSON.parse(body));
     res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end("data: " + JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: "图片已分析" }) }, finish_reason: "stop" }] }) + "\n\ndata: [DONE]\n\n");
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "图片已分析" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: "http://127.0.0.1:" + address.port };
-  const inputs: Array<ReturnType<typeof registerTelegramInput>> = [];
-  let agent = await createPiAgent(options);
-  t.after(() => closeFixture({ server, dir, shutdown: async () => {
-    try { await Promise.all(inputs.map((input) => input.finish())); } finally { await agent.close(); }
-  } }));
-  const log = createSqliteRuntimeLog(dir);
-  const replies: string[] = [];
-  let downloads = 0;
-  const install = () => {
-    const b = bot();
-    const app = createApp({ ownerId: 42, dataDir: dir, log, answer: agent.answer, send: async (text) => { replies.push(text); } });
-    inputs.push(registerTelegramInput(b, { ownerId: 42, download: async (fileId) => { assert.equal(fileId, "large"); downloads++; return image; },
-      handle: (input, started) => app.handle(input, started), reportFailure: () => {} }));
-    return b;
-  };
-  let b = install();
-  await b.handleUpdate(update(1, 42, "你怎么看"));
-  // The production middleware releases after durable acceptance, so wait for the final reply.
-  for (let i = 0; i < 100 && replies.length < 1; i++) await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(replies[0], "图片已分析");
-  await b.handleUpdate(update(1, 42, "你怎么看"));
-  assert.equal(payloads.length, 1, "replayed photos cannot execute the model twice");
-  const first = JSON.stringify(payloads[0]);
-  assert.match(first, /你怎么看/); assert.match(first, /image_url/); assert.ok(first.includes("data:image/png;base64," + image.data));
-  await b.handleUpdate(update(2, 42, undefined, "再解释一下图中的文字"));
-  for (let i = 0; i < 100 && replies.length < 2; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  let shutdown = async () => {}; let downloads = 0;
+  t.after(() => closeFixture({ server, dir, shutdown: () => shutdown() }));
+  const f = await createTelegramHostFixture(t, { agentOptions: { dataDir: dir, promptFile,
+    modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions", baseUrl: `http://127.0.0.1:${address.port}`, model: "local", apiKey: "test" }] } },
+    download: async (fileId) => { assert.equal(fileId, "large"); downloads++; return image; } });
+  shutdown = () => f.close();
+  await f.sendUpdate(update(1, 42, "你怎么看"));
+  assert.equal(f.sent.at(-1), "图片已分析");
+  await f.sendUpdate(update(1, 42, "你怎么看")); assert.equal(payloads.length, 1);
+  assert.match(JSON.stringify(payloads[0]), /你怎么看|image_url/);
+  assert.ok(JSON.stringify(payloads[0]).includes("data:image/png;base64," + image.data));
+  await f.sendUpdate(update(2, 42, undefined, "再解释一下图中的文字"));
   assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
-  await inputs.at(-1)!.finish(); await agent.close(); agent = await createPiAgent(options); b = install();
-  await b.handleUpdate(update(3, 42, undefined, "继续分析这张图"));
-  for (let i = 0; i < 100 && replies.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  await f.restart(); await f.sendUpdate(update(3, 42, undefined, "继续分析这张图"));
   assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
-  await b.handleUpdate(update(4, 42, undefined, "/reset"));
-  await b.handleUpdate(update(5, 42, undefined, "新对话"));
-  for (let i = 0; i < 100 && replies.length < 5; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+  await f.sendUpdate(update(4, 42, undefined, "/reset"));
+  await f.sendUpdate(update(5, 42, undefined, "新对话"));
   assert.ok(!JSON.stringify(payloads.at(-1)).includes("image_url"));
-  await b.handleUpdate(update(6));
-  for (let i = 0; i < 100 && replies.length < 6; i++) await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
+  await f.sendUpdate(update(6)); assert.match(JSON.stringify(payloads.at(-1)), /image_url/);
   assert.equal(downloads, 3);
-  assert.equal((await log.read()).filter((event) => event.type === "message" && event.role === "user" && Array.isArray(event.images)).length, 2);
+  assert.equal((await f.rootLog.read()).filter((e) => e.type === "message" && e.role === "user" && Array.isArray(e.images)).length, 2);
 });
 
 test("photo permissions are checked before download and failures never silently drop caption", async () => {

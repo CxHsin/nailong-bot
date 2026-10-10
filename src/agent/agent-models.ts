@@ -5,7 +5,7 @@ import { modelInputBudget } from "../context/input-budget.js";
 
 export type ModelOptions = {
   modelConfiguration?: ModelConfiguration;
-  /** Legacy application/test compatibility. Production uses modelConfiguration. */
+  /** Existing programmatic model shorthand; production startup uses modelConfiguration. */
   deepseekKey?: string;
   modelBaseUrl?: string;
   contextWindow?: number;

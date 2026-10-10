@@ -8,7 +8,7 @@
 
 ## 功能地图 Feature Map
 
-这份地图按当前入口的接入状态组织。**入口已接入**表示启动命令会使用该能力；**模块已实现，待完整接入**表示有独立 API 和测试，但当前 Telegram／CLI 入口仍有集成边界；**兼容实现**表示保留在原应用流程中，不代表当前入口具备相同行为。Telegram 和 CLI 都通过 `createAgentHost` 装配命令、会话日志与送达后学习。
+这份地图按当前入口的接入状态组织。**入口已接入**表示启动命令会使用该能力；**模块已实现，待完整接入**表示有独立 API 和测试，但当前 Telegram／CLI 入口仍有集成边界。Telegram 和 CLI 都通过 `createAgentHost` 装配命令、会话日志与送达后学习。
 
 ### 入口已接入
 
@@ -38,23 +38,15 @@
 
 | 功能 | 已有模块能力 | 当前接入边界 | 相关验证 |
 | --- | --- | --- | --- |
-| 取消 | Host 提供独立 cancel API，`/reset` 已作为排队控制命令接入 | 当前入口没有用户取消命令或终端取消映射；运行中取消还需要执行器响应 AbortSignal | [`host.test.ts`](test/host.test.ts)、[`agent-host.test.ts`](test/agent-host.test.ts) |
 | 通用 Delivery pipeline | 独立模块可推导跨 Channel Run 与 Delivery 状态 | Telegram 生产正文已接入逐页尝试、成功／失败／未知和有界重试；通用模块未替换全部 Channel。通用重新交付命令已移出本轮范围 | [`delivery-pipeline.ts`](src/runtime/delivery-pipeline.ts)、[`content-delivery.ts`](src/runtime/content-delivery.ts) |
 | 结果复用与恢复 | Host 的 redeliver 按 resultId 读取已成功结果，不调用执行器；recoverRuns 从日志推导运行状态 | Telegram／CLI 启动均核对活动运行，只记录中断，不自动执行或补发。用户重新交付命令已移出本轮范围 | [`recovery.ts`](src/host/recovery.ts)、[`startup-recovery.ts`](src/runtime/startup-recovery.ts) |
 | Provider-aware Context Projection | 原始事实恢复与压缩后，按配置的原生协议筛选图片和推理元数据；保留工具关联、跨模型文本和缓存身份 | Chat Completions／Responses 已接入，端点变化隔离缓存和专属推理；通用 ContextItem 编码层仍为独立模块，本轮不整体替换现有事件投影 | [`provider-aware.ts`](src/context/provider-aware.ts)、[`model-switching.test.ts`](test/model-switching.test.ts) |
 
 Host／Channel 集成规格见 [#60](https://github.com/CxHsin/nailong-bot/issues/60)；Akasha 记忆规格见 [#49](https://github.com/CxHsin/nailong-bot/issues/49)。表中测试覆盖模块和相应装配路径，真实 Telegram 客户端与 Provider 的使用效果仍需凭据验收。
 
-### 兼容实现
+### 旧数据兼容
 
-| 功能 | 保留的行为 | 所在位置 |
-| --- | --- | --- |
-| 原 Telegram 应用流程 | 按聊天／消息 ID 去重，命令进入串行队列，支持 `/reset` 和 `/prompt` 查看／设置／恢复 | [`src/application/app.ts`](src/application/app.ts)、[`commands.ts`](src/application/commands.ts) |
-| 原 Telegram 文字投影与恢复 | 模型快照流式草稿、阶段成果和最终正文分段；持久化投递计划；明确拒绝重试，未知送达不自动重发，重启核对已确认内容 | [`src/telegram/telegram-projection.ts`](src/telegram/telegram-projection.ts)、[`telegram-delivery.ts`](src/telegram/telegram-delivery.ts) |
-| 自然语言遗忘意图 | 原应用支持明确回复“忘掉这件事”和模糊话题候选确认；当前 Host 仅路由斜杠控制命令，应使用 `/forget` | [`app.ts`](src/application/app.ts)、[`memory-commands.ts`](src/application/memory-commands.ts) |
-| 配置与旧事件兼容 | 接受 TELEGRAM_* 环境变量并提示迁移；旧日志保留原记录，读取时做 additive upcast | [`src/channel/telegram/index.ts`](src/channel/telegram/index.ts)、[`event-envelope.ts`](src/host/event-envelope.ts) |
-
-原应用和文字投影仍有回归测试，当前 `src/main.ts` 使用新的 Host Channel 路径；共享命令和 Telegram 消息 ID 去重已迁入，旧流程的流式成果展示、完整投递恢复与自然语言遗忘仍有接入边界。
+旧 JSONL／SQLite 导入、身份映射、归档及交付/记忆事实解释继续保留；旧 `TELEGRAM_*` 环境变量仍接受并提示迁移。重复的 createApp、旧 Telegram 输出栈和实时 JSON v2 writer 已退役。历史结构化消息编码仍支持旧数据，当前模型输出使用普通 Markdown。退役依据与验证对应见 [整体重构兼容验收](docs/refactor-compatibility.md)。
 
 ## 启动与使用
 
@@ -113,7 +105,7 @@ Runtime Event Log 是持久运行事实源。模型步骤、工具结果、运�
 | 记忆与向量索引 | `data/memory.sqlite`、`data/embeddings.sqlite` | 当前 Akasha 记忆的派生缓存，可由原始事实和 embedding 服务重建 |
 | 历史摘要 | `data/checkpoints/` | 经来源校验的有损投影缓存；已接受摘要另存于 Runtime Event Log，可由持久事实恢复 |
 
-Host 在同一 Conversation 中维护连续、有界的 Active Context。普通 Run 追加新内容，超过旧三轮边界也不滑动淘汰；首次升级从最后有效活动范围及已结算答复迁移一次，不自动载入全部旧历史。重启恢复同一起点、冻结摘要和工具视图，派生快照损坏从原始事实重建。有效快照避免重复读取未变工具归档；完整日志读取及哈希仍有成本。旧 createApp 兼容入口保留原近期范围，生产 Telegram／CLI Host 使用连续策略。设计见 [ADR-0004](docs/adr/0004-continuous-active-context.md)。
+Host 在同一 Conversation 中维护连续、有界的 Active Context。普通 Run 追加新内容，超过旧三轮边界也不滑动淘汰；首次升级从最后有效活动范围及已结算答复迁移一次，不自动载入全部旧历史。重启恢复同一起点、冻结摘要和工具视图，派生快照损坏从原始事实重建。有效快照避免重复读取未变工具归档；完整日志读取及哈希仍有成本。旧数据的近期范围仍用于历史解释与诊断，生产 Telegram／CLI Host 使用连续策略。设计见 [ADR-0004](docs/adr/0004-continuous-active-context.md)。
 
 工具结果首次进入模型时固定实际可见内容及来源校验；小结果可全文，大结果保持精简视图，转历史和重启不展开。完整归档保留，通过显式 read 追加必要细节。Provider 专属 continuation、图片资格、reset、forget 和事实纠正优先于前缀稳定。日期、记忆引文和显式 Skill 加载按轮次追加，不用新内容替换已发送前缀。
 
@@ -125,7 +117,7 @@ Host 在同一 Conversation 中维护连续、有界的 Active Context。普通 
 
 生产执行器接收普通 Markdown。原生阶段字段直接归一化；普通 Provider 的增量文字先记录为未定阶段，同一步中伴随工具调用的文字结算为进展，无工具调用的正常结束文字结算为最终回答。公开阶段与判断来源同时进入 Host 事件和结算事实。Telegram 每轮只用一个原生 Rich Markdown 草稿，将准备、工具状态和模型公开结论累积在同一进展区；结束后保存一条进展消息，最终答案单独发送。长内容分页，超出草稿容量时展示最新有界页面，结算内容完整保存。草稿约每 250ms 合并快照，等待耗时每五秒变化。工具状态不展示参数或返回原文；进展发送失败不阻断最终答复。JSON 协议仅用于兼容旧入口。详见 [运行进展与迁移](docs/runtime-progress.md)。
 
-旧 json-text-v2 兼容入口仍保留受限协议恢复和原始记录；新生产路径不要求 JSON 文字外壳。
+旧 json-text-v2 原始记录和历史编码继续保留；实时解析、外壳恢复与重试分支已退役，生产路径不要求 JSON 文字外壳。
 
 文字对象与追加帧拒绝重复字段（包括转义后同名字段）。协议纠错反馈只进入当前 Run 的模型输入，不进入可复用历史摘要；旧投影策略的摘要缓存会重新生成，原始记录保留。多行预览和最终正文采用同一空白规范化规则。Telegram 草稿请求最多等待 3 秒，超时取消并停用本轮草稿更新，正式回复仍继续发送。见 [#80](https://github.com/CxHsin/nailong-bot/issues/80)。
 
@@ -153,7 +145,7 @@ Telegram 回复目标 User 或已送达 Assistant 消息发送 `/forget`，或�
 
 Telegram 入口可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY`，使用独立的 OpenAI 兼容 embeddings 服务；地址填写到 `/v1` 等基础路径，不包含 `/embeddings`。`EMBEDDING_TIMEOUT_MS` 默认 3000，超时或服务错误降级为本地字面查询，后台逐步补齐向量。向量缓存位于 `data/embeddings.sqlite`，按服务、模型和预处理版本隔离；不完整配置时不启用语义召回，普通聊天与字面记忆仍可用。密钥不写入运行日志。
 
-`akasha-v1` 只强化自动融合排名前八个且确实展示原话的节点，不以工具补查的第九名补位。当前 Host 在最终正文送达确认后追加 `request_completed` 并提交学习；兼容流程也支持阶段成果完整送达后的结算。学习先追加 `memory_learned` 事实，再重放图状态；补提交不会重复学习。纯查询不扣资源，排序分数不是概率，学习增量使用有界单调映射。节点强度、边权的指数时间常数分别为 7 天、14 天，短期资源按 30 分钟时间常数恢复，不是半衰期；原话不会因自然衰减删除。
+`akasha-v1` 只强化自动融合排名前八个且确实展示原话的节点，不以工具补查的第九名补位。当前 Host 在最终正文送达确认后追加 `request_completed` 并提交学习；旧记录的阶段成果交付资格仍按历史事实解释。学习先追加 `memory_learned` 事实，再重放图状态；补提交不会重复学习。纯查询不扣资源，排序分数不是概率，学习增量使用有界单调映射。节点强度、边权的指数时间常数分别为 7 天、14 天，短期资源按 30 分钟时间常数恢复，不是半衰期；原话不会因自然衰减删除。
 
 局部微图取种子原始时间前后 30 分钟的已存在节点（最多 256），最多 16 个内容/新颖度种子，每节点最多 8 条归一化强边，重启率 0.3，扩散 8 轮。远场另沿每个种子的全图一跳发现背景，不受局部时间窗口限制；多路径可累计，来源标为 `local`/`far` 并附节点路径。内容与图证据饱和到非负区间后统一融合，再加新颖度/长期状态、角色与路径修正和反 hub 惩罚；固定图信号下内容增强单调，不保证任意查询改变后排名不变。关联仅是背景，不是世界因果证明；直接找回保留资源低时的非零通道。
 
@@ -166,12 +158,12 @@ Telegram 入口可选配置 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDIN
 | `src/main.ts`、`src/cli/main.ts` | Telegram／CLI 配置、依赖装配、启动与关闭 |
 | `src/host/` | Actor／ContentPart 输入契约、RunHandle、串行队列、cancel／reset API、结果复用与恢复视图 |
 | `src/channel/telegram/`、`src/cli/` | Channel 输入归一化和输出投影；Telegram 原生 Rich Markdown transport |
-| `src/agent/` | pi 会话、结构化执行协议、工具事实记录、访问策略与 TinyFish |
-| `src/context/` | 会话历史重放、预算、checkpoint、工具结果视图及部分接入的 Provider-aware 投影 |
+| `src/agent/` | Pi SDK 装配、模型/认证、每轮能力冻结、执行生命周期、Provider 历史编码、工具事实与访问策略 |
+| `src/context/` | 在线历史协调、增量缓存、预算、checkpoint、工具结果视图和 Provider-aware 投影 |
 | `src/memory/` | Akasha 原话索引、embedding、缓存、关联图、动力学与召回 |
-| `src/runtime/` | SQLite／JSONL 日志、会话筛选、缓存统计、回复引用、归档、增量读取，以及 Progress／Delivery facts 模块 |
-| `src/application/`、`src/telegram/` | 生产 Agent Host 装配、共享命令、记忆编排、去重、Telegram 输入／排版及原应用兼容投影与恢复 |
-| `test/` | Host、Context、Channel 模块测试及兼容流程回归测试 |
+| `src/runtime/` | SQLite／JSONL 日志、生产事实类型、纯历史解释、会话筛选、缓存统计、回复引用、归档和 Progress／Delivery facts |
+| `src/application/`、`src/telegram/` | 生产 Agent Host 装配、共享命令、独立历史记忆编排、Telegram 输入和 Markdown 排版 |
+| `test/` | 真实 Channel／Host／Agent 验收、纯算法和旧数据兼容回归 |
 
 ## 验证
 
@@ -183,7 +175,7 @@ Telegram 流式展示用 `npm run telegram:accept` 预览固定测试内容；�
 
 准备、工具状态和模型公开结论统一进入 Rich Markdown 原生 `details`：“运行进展”在同一草稿持续更新，运行中默认展开，结束保存后默认收起，可点击展开查看。最终答案在折叠区外流式输出并单独保存；进展超过单条容量时才分页。
 
-Akasha 配置、初始化与故障重建见 [操作与诊断](docs/memory-operations.md)；其中自然语言遗忘和部分送达行为属于兼容流程，当前入口边界以本页功能地图为准。dense 对照、错误关联及复现命令见 [对照验收](docs/memory-evaluation.md)。
+Akasha 配置、初始化与故障重建见 [操作与诊断](docs/memory-operations.md)；当前遗忘使用显式斜杠命令，已确认页面可以定位目标轮次；交付完整性与 Run 终态分别记录。dense 对照、错误关联及复现命令见 [对照验收](docs/memory-evaluation.md)。
 
 配置真实凭据后，分别检查 Telegram 文字／图片、Markdown 正文与草稿、CLI chat／send、图片输入、JSON 输出、文件／网页工具，以及同一 conversationId 的跨 Channel 续聊、共享命令和长期记忆。`/kvcache` 应在任务运行中及时返回，显示最近五组运行详情、待结算／缺失提示；Telegram 明确回复报表后，模型应能解释该查询快照。新 Runtime 已接入统一进展消息、独立最终答案和启动只记录中断；真实客户端验收状态见 [验收记录](docs/runtime-progress-acceptance.md)，自动测试不能替代客户端验证。
 

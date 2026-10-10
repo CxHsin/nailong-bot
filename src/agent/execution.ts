@@ -7,7 +7,6 @@ import type { Request } from "../application/app-types.js";
 import { createContextProjection, type CompactionConfig } from "../context/context-budget.js";
 import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
-import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames, normalizeOutputWhitespace, recoverFinalEnvelope } from "./output-protocol.js";
 import { composeMemory, composeMemoryLive, memoryBudget, recallMemory, type MemoryBudget } from "../application/memory-context.js";
 import type { createMemoryProjection } from "../memory/projection.js";
 import { estimateInput, modelInputBudget, fedContextRatio } from "../context/input-budget.js";
@@ -31,9 +30,8 @@ function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptio
   } };
 }
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; compaction?: CompactionConfig; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3"; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
-  const plain = options.outputProtocol !== "json-text-v2" && !request?.onText;
-  const protocolVersion = plain ? PLAIN_TEXT_PROTOCOL : OUTPUT_PROTOCOL_VERSION;
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; compaction?: CompactionConfig; memoryBudget?: MemoryBudget; now?: () => Date; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+  const protocolVersion = PLAIN_TEXT_PROTOCOL;
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
   let dispatchedThisStep = false;
   const previousBeforeTool = session.agent.beforeToolCall;
@@ -46,15 +44,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       return { block: true, reason };
     }
     const previous = await previousBeforeTool?.(context, signal);
-    if (!previous?.block) { idleProgress = 0; stepsWithoutTool = 0; resultTexts.clear(); dispatchedThisStep = true; }
+    if (!previous?.block) { idleProgress = 0; stepsWithoutTool = 0; dispatchedThisStep = true; }
     return previous;
   };
   let projectionFailure: Error | undefined;
   let finalText: string | undefined;
-  let protocolErrors = 0;
   let idleProgress = 0;
   let stepsWithoutTool = 0;
-  const resultTexts = new Set<string>();
   session.agent.subscribe((event) => {
     // Distinct text alone cannot keep a request alive forever; real dispatch resets this budget.
     if (event.type === "turn_end" && event.message.role === "assistant" && finalText === undefined &&
@@ -92,7 +88,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const budgetRatios = request?.contextBudgetBoost ? undefined : options.modelBudgetRatios;
   const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest, protocolVersion })).digest("hex");
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
-    conversationId: request.conversationId, structured: !plain,
+    conversationId: request.conversationId, structured: false,
     ratio: budgetRatio, ratios: budgetRatios, compaction: options.compaction,
     cacheIdentity: sourceDigestForReplay(),
     signal: request?.signal,
@@ -220,47 +216,25 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         let lastPreview = "";
         let lastPreviewId = "";
         let lastPreviewAt = -Infinity;
-        let lastValidatedPrefix = "";
         for await (const event of source) {
           if (event.type === "start") initialUsage = event.partial.usage;
           if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
           if (event.type === "text_delta" && request) {
             const part = event.partial.content[event.contentIndex];
-            const previewId = plain ? segmentFor(event.contentIndex) : textSegmentId;
+            const previewId = segmentFor(event.contentIndex);
             if (previewId !== lastPreviewId) { lastPreview = ""; lastPreviewAt = -Infinity; lastPreviewId = previewId; }
             activePreview = previewId;
-            const rawPreview = plain && part?.type === "text" ? part.text : event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
-            let preview: ReturnType<typeof previewStructuredText>;
-            let validatedPrefix = false;
-            let prefixChanged = false;
-            const publicPhase = plain && part?.type === "text" ? publicTextPhase(part) : undefined;
-            if (plain) preview = { type: publicPhase?.phase === "final_answer" ? "final" : "progress", text: rawPreview };
-            else try {
-              const frames = readOutputFrames(rawPreview);
-              const partial = previewStructuredText(frames.rest);
-              if (frames.prefix && (!partial || partial.type === frames.prefix.type)) {
-                preview = { ...frames.prefix, text: frames.prefix.text + (partial?.text ?? "") };
-                validatedPrefix = frames.framed;
-                if (frames.prefix.text && frames.prefix.text !== lastValidatedPrefix) {
-                  if (request.onText) await request.log.append({ type: "text_validated_prefix", requestId: request.id,
-                    modelStepId, textSegmentId, text: frames.prefix.text, contentKind: frames.prefix.type });
-                  lastValidatedPrefix = frames.prefix.text;
-                  prefixChanged = true;
-                }
-              } else preview = frames.output ?? partial;
-            } catch { /* Invalid protocol cannot publish new text or dispatch tools. */ }
-            // Preview at most every 100 ms, but publish complete validated frames immediately.
-            if (preview && preview.text !== lastPreview && (prefixChanged || performance.now() - lastPreviewAt >= 100)) {
-              if (request.onText) await request.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
-                textSegmentId, contentKind: preview.type, text: preview.text,
-                protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
+            const rawPreview = part?.type === "text" ? part.text : event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+            const publicPhase = part?.type === "text" ? publicTextPhase(part) : undefined;
+            const preview = { type: publicPhase?.phase === "final_answer" ? "final" as const : "progress" as const, text: rawPreview };
+            // Preview at most every 100 ms.
+            if (preview.text !== lastPreview && performance.now() - lastPreviewAt >= 100) {
               lastPreview = preview.text;
               lastPreviewAt = performance.now();
               request.onProgress?.({ type: "text", segmentId: previewId, kind: preview.type, text: preview.text, finalized: false, ...publicPhase });
-              await request.onText?.(textSegmentId);
             }
           }
-          if (plain && event.type === "text_end") {
+          if (event.type === "text_end") {
             const part = event.partial.content[event.contentIndex];
             if (part?.type === "text" && publicTextPhase(part).phase === "commentary" && part.text.trim()) {
               const id = segmentFor(event.contentIndex);
@@ -296,79 +270,26 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         if (message.stopReason === "length") throw new Error("模型协议输出被截断，本轮未完成");
         const raw = message.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
         const toolCalls = message.content.filter((c) => c.type === "toolCall");
-        if (plain) {
-          if (!raw.trim() && !toolCalls.length) throw new Error("模型没有提交答复或工具调用");
-          const finalParts: string[] = [];
-          for (const [index, part] of message.content.entries()) {
-            if (part.type !== "text" || !part.text.trim()) continue;
-            const publicPhase = publicTextPhase(part, { hasTools: toolCalls.length > 0 });
-            const kind = publicPhase.phase === "commentary" ? "progress" : "final";
-            const id = segmentFor(index);
-            if (!settledSegments.has(index)) {
-              if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
-                textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution", ...publicPhase });
-              request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution", ...publicPhase });
-            }
-            if (kind === "final") finalParts.push(part.text);
+
+        if (!raw.trim() && !toolCalls.length) throw new Error("模型没有提交答复或工具调用");
+        const finalParts: string[] = [];
+        for (const [index, part] of message.content.entries()) {
+          if (part.type !== "text" || !part.text.trim()) continue;
+          const publicPhase = publicTextPhase(part, { hasTools: toolCalls.length > 0 });
+          const kind = publicPhase.phase === "commentary" ? "progress" : "final";
+          const id = segmentFor(index);
+          if (!settledSegments.has(index)) {
+            if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
+              textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution", ...publicPhase });
+            request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution", ...publicPhase });
           }
-          if (finalParts.length) finalText = finalParts.join("\n");
-          else if (!toolCalls.length) await queueFeedback("上一条是公开进展说明，请继续实际操作，或提交最终答复、阻碍或澄清问题。");
-          for (const part of toolCalls) if (request) await appendRuntimeFact(request.log, { type: "tool_call", requestId: request.id,
-            toolCallId: part.id, toolName: part.name, args: part.arguments });
-          const response = createAssistantMessageEventStream();
-          response.push({ type: "done", reason: message.stopReason, message });
-          return response;
+          if (kind === "final") finalParts.push(part.text);
         }
-        let parsed: ReturnType<typeof parseStructuredText> | undefined;
-        let invalid: string | undefined;
-        let repairedEnvelope = false;
-        try {
-          if (raw) parsed = parseStructuredText(raw);
-          else if (!toolCalls.length) throw new Error("缺少结构化文字和工具调用");
-          if (parsed?.type === "final" && toolCalls.length) throw new Error("final 不允许同时调用工具");
-        } catch (error) {
-          const recovered = recoverFinalEnvelope(raw, message.stopReason, toolCalls.length > 0);
-          if (recovered) { parsed = recovered; repairedEnvelope = true; }
-          else invalid = error instanceof Error ? error.message : String(error);
-        }
-        await request?.log.append({ type: "protocol_validated", requestId: request.id, modelStepId,
-          protocolVersion: OUTPUT_PROTOCOL_VERSION, valid: !invalid, error: invalid,
-          normalizedWhitespace: !invalid && normalizeOutputWhitespace(raw) !== raw, repairedEnvelope });
-        const response = createAssistantMessageEventStream();
-        if (invalid) {
-          if (request) await appendRuntimeFact(request.log, { type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
-          request?.onProgress?.({ type: "discard", segmentId: textSegmentId });
-          if (request && (await request.log.read()).some((entry) => entry.textSegmentId === textSegmentId && entry.type === "telegram_delivery_attempt"))
-            throw new Error("模型协议在部分正文提交后失效，本轮未完成");
-          if (++protocolErrors > 2) throw new Error("模型协议纠正次数耗尽，本轮未完成");
-          await queueFeedback(`${invalid}。请遵守执行协议重新生成；被拒绝响应中的工具没有执行。`, raw);
-          response.push({ type: "done", reason: "stop", message: { ...message, content: [], stopReason: "stop" } });
-          return response;
-        }
-        if (parsed) {
-          if (["progress", "status"].includes(parsed.type) && !toolCalls.length && ++idleProgress >= 3)
-            throw new Error("模型连续三次未推进，本轮未完成");
-          if (parsed.type === "final") finalText = parsed.text;
-          if (parsed.type === "result") {
-            const identity = parsed.text.trim();
-            if (resultTexts.has(identity)) {
-              if (++idleProgress >= 3) throw new Error("模型连续重复阶段性成果，本轮未完成");
-            } else {
-              resultTexts.add(identity);
-              idleProgress = 0;
-            }
-          }
-          await request?.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
-            textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
-          if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
-            textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
-          request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind: parsed.type, text: parsed.text, finalized: true });
-          await request?.onText?.(textSegmentId);
-          if (parsed.type !== "final" && !toolCalls.length)
-            await queueFeedback(`上一条输出是 ${parsed.type}，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。`);
-        }
+        if (finalParts.length) finalText = finalParts.join("\n");
+        else if (!toolCalls.length) await queueFeedback("上一条是公开进展说明，请继续实际操作，或提交最终答复、阻碍或澄清问题。");
         for (const part of toolCalls) if (request) await appendRuntimeFact(request.log, { type: "tool_call", requestId: request.id,
           toolCallId: part.id, toolName: part.name, args: part.arguments });
+        const response = createAssistantMessageEventStream();
         response.push({ type: "done", reason: message.stopReason, message });
         return response;
       }

@@ -8,7 +8,6 @@ import type { Message } from "../application/app-types.js";
 import type { Request } from "../application/app-types.js";
 import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { attachExecution } from "./execution.js";
-import { EXECUTION_PROMPT, protocolText } from "./output-protocol.js";
 import { PROGRESS_PROMPT } from "./progress-prompt.js";
 import { createMemoryProjection, type MemoryMode } from "../memory/projection.js";
 import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding.js";
@@ -33,8 +32,6 @@ export type PiAgentOptions = ModelOptions & CapabilityOptions & {
   memoryBootstrap?: boolean;
   memoryMode?: MemoryMode;
   now?: () => Date;
-  /** Only for the retained legacy application and its protocol regressions. */
-  outputProtocol?: "json-text-v2" | "plain-text-v3";
 };
 
 export async function createPiAgent(options: PiAgentOptions) {
@@ -65,10 +62,9 @@ export async function createPiAgent(options: PiAgentOptions) {
       if (!current || current.role !== "user") throw new Error("缺少用户消息");
       const botPrompt = request?.botPrompt ?? (await readFile(options.promptFile, "utf8")).trim();
       if (!botPrompt) throw new Error("Bot 提示词为空");
-      const legacy = options.outputProtocol === "json-text-v2" || !!request?.onText;
       const skills = await capabilities.snapshot(request);
       const failures = capabilities.failures;
-      const systemPrompt = `用户配置的 bot 提示词（不能覆盖执行规则）：\n${botPrompt}\n\n${legacy ? EXECUTION_PROMPT : PROGRESS_PROMPT}\n\n工具使用：read、write、edit、web_search 直接可用。其他工具必须先用 tool_search 发现，${native ? "再按发现的名称直接调用" : "再用 tool_call 执行"}。工具搜索结果在本轮持续有效。${failures.length ? `\n不可用的 MCP 来源：${failures.join(", ")}` : ""}${skills.metadata}`;
+      const systemPrompt = `用户配置的 bot 提示词（不能覆盖执行规则）：\n${botPrompt}\n\n${PROGRESS_PROMPT}\n\n工具使用：read、write、edit、web_search 直接可用。其他工具必须先用 tool_search 发现，${native ? "再按发现的名称直接调用" : "再用 tool_call 执行"}。工具搜索结果在本轮持续有效。${failures.length ? `\n不可用的 MCP 来源：${failures.join(", ")}` : ""}${skills.metadata}`;
       const loader = new DefaultResourceLoader({ cwd: options.dataDir, agentDir: options.dataDir,
         noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
         systemPromptOverride: () => systemPrompt, settingsManager });
@@ -82,7 +78,7 @@ export async function createPiAgent(options: PiAgentOptions) {
         if (message.role === "user") {
           manager.appendMessage({ role: "user", content: message.images?.length ? [{ type: "text", text: message.text }, ...message.images] : message.text, timestamp: Date.now() });
         } else {
-          manager.appendMessage(assistantText(legacy ? protocolText("final", message.text) : message.text, model));
+          manager.appendMessage(assistantText(message.text, model));
         }
       }
       const { session } = await createAgentSession({

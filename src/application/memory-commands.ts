@@ -7,7 +7,7 @@ import { appendRuntimeFact, appendRuntimeFacts } from "../runtime/facts.js";
 
 export type MemoryCommandOptions = { dataDir: string; purgeEmbeddingCache?: () => void };
 
-export async function handleMemoryCommand(log: RuntimeLog, options: MemoryCommandOptions, input: CommandInput, text: string, onStarted?: () => void): Promise<string | undefined> {
+export async function handleMemoryCommand(log: RuntimeLog, options: MemoryCommandOptions, input: CommandInput, text: string): Promise<string | undefined> {
   if (input.hasAttachments) return undefined;
   const raw = /^\/memory\s+log\s+(\S+)(?:\s+(\d+))?$/.exec(text);
   if (raw) {
@@ -15,7 +15,6 @@ export async function handleMemoryCommand(log: RuntimeLog, options: MemoryComman
     const originals = memoryNodes(events.filter((event) => event.type !== "memory_excluded"), input.ownerId);
     await appendRuntimeFact(log, { type: "input_received", chatId: input.ownerId, messageId: input.messageId, intent: text,
       replyToMessageId: input.replyToMessageId, diagnosticInspection: true });
-    onStarted?.();
     const node = originals.find((item) => item.id === raw[1]);
     if (!node) return "没有找到该原始轮次。";
     const offset = Number(raw[2] ?? 0);
@@ -26,12 +25,12 @@ export async function handleMemoryCommand(log: RuntimeLog, options: MemoryComman
   }
   if (!/^\/forget(?:\s|$)/.test(text)) return undefined;
   const targetText = text.replace(/^\/forget\s*/, "").trim();
-  return forgetMemory(log, options, input, text, { targetText, replyIntent: !targetText }, onStarted);
+  return forgetMemory(log, options, input, text, { targetText, replyIntent: !targetText });
 }
 
 /** A memory operation consumes explicit target intent; Channels/adapters decide how it was requested. */
-export async function forgetMemory(log: RuntimeLog, options: MemoryCommandOptions, input: CommandInput, text: string,
-  targetIntent: { targetText: string; replyIntent: boolean }, onStarted?: () => void): Promise<string> {
+async function forgetMemory(log: RuntimeLog, options: MemoryCommandOptions, input: CommandInput, text: string,
+  targetIntent: { targetText: string; replyIntent: boolean }): Promise<string> {
   const events = await log.read();
   const originals = memoryNodes(events.filter((event) => event.type !== "memory_excluded"), input.ownerId);
   const receipt = { type: "input_received" as const, chatId: input.ownerId, messageId: input.messageId, intent: text,
@@ -41,7 +40,7 @@ export async function forgetMemory(log: RuntimeLog, options: MemoryCommandOption
   const replied = input.replyToMessageId === undefined ? [] : memoryNodesForReply(events, input.ownerId, input.replyToMessageId);
   const target = explicit ?? (replyIntent && replied.length === 1 ? replied[0] : undefined);
   if (!target) {
-    await appendRuntimeFact(log, receipt); onStarted?.();
+    await appendRuntimeFact(log, receipt);
     const candidates = originals.filter((node) => !memoryExclusions(events).has(node.id) &&
       (!targetText || node.messages.some((message) => message.text.includes(targetText)))).slice(-5);
     return `请确定要遗忘的旧轮次；回复目标消息发送 /forget，或使用 /forget 节点引用。当前没有执行排除。\n${candidates.map((node) => `${node.id}：${Array.from(node.messages[0]!.text).slice(0, 60).join("")}`).join("\n")}`;
@@ -49,7 +48,6 @@ export async function forgetMemory(log: RuntimeLog, options: MemoryCommandOption
   const batch = memoryExclusions(events).has(target.id) ? [receipt] : [receipt, { type: "memory_excluded" as const, nodeId: target.id, userId: input.ownerId,
     messageId: input.messageId, replyToMessageId: input.replyToMessageId, intent: text }];
   await appendRuntimeFacts(log, batch);
-  onStarted?.();
   try {
     options.purgeEmbeddingCache?.();
     await Promise.all([invalidateMemoryIndex(options.dataDir), createCheckpointStore(options.dataDir, "structured-text-v1", input.conversationId).invalidate()]);

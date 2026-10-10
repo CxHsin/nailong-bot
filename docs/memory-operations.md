@@ -13,7 +13,7 @@
 | `EMBEDDING_TIMEOUT_MS` | 3000，正整数 | 前台一次查询的整体远程等待上限；不是聊天总耗时保证 |
 | `EMBEDDING_MAX_INPUT_CHARS` | 6000，正整数 | 长原话按 Unicode code point 连续切片后聚合，不改变节点或原始来源 |
 | `MEMORY_MAX_TOKENS` | 4096，整数 0–4096 | 自动记忆引文及元数据总上限；还受输入预算 10% 约束，0 禁止额外注入 |
-| `MEMORY_DYNAMICS` | `{}`，JSON 对象 | 覆盖下表动力学参数；Agent 召回及 App 学习使用同一配置 |
+| `MEMORY_DYNAMICS` | `{}`，JSON 对象 | 覆盖下表动力学参数；Agent 召回及 Host 送达后学习使用同一配置 |
 | `MEMORY_RECALL` | `{}`，JSON 对象 | 覆盖下表扩散边界；非法参数启动检查失败 |
 | `PROJECTION_BUDGET_RATIOS` | 模型输入比率默认 0.86 | 例如 `{"deepseek/deepseek-flash":0.86}`；比率在 0 与 1 之间 |
 
@@ -29,7 +29,7 @@
 
 前台最多等待一次查询向量；缺失消息向量由后台补齐，不同步索引所有旧历史。HTTP 每批最多 16 个分片，后台单 worker，有界批量及 100 毫秒至 30 秒退避重试；后台长消息的每个 HTTP 批次分别受超时限制。服务恢复后继续补齐；缺少必要历史向量时初始化等待，但普通聊天、字面查询和可用图仍工作。初始化失败会记录降级，不冒充完成。
 
-Telegram 持续显示前台准备阶段：读取记忆、等待语义匹配、扫描与相关性匹配的已检查条数、关联整理、排序、历史恢复、引用筛选、上下文装载及预算检查。扫描与匹配每 32 条或约 8 毫秒报告实际进度并让出事件循环；引用筛选每 16 条或约 8 毫秒报告已检查和已选入数量。进度合并刷新，快速完成的阶段可能被合并。没有可测总量的服务等待只显示当前阶段与等待时间，避免虚构百分比。取消检索不会发布完成或降级提示；这些状态不成为模型答复或记忆内容，召回评分、选择与近期三轮回放范围保持不变。
+Telegram 持续显示前台准备阶段：读取记忆、等待语义匹配、扫描与相关性匹配的已检查条数、关联整理、排序、历史恢复、引用筛选、上下文装载及预算检查。扫描与匹配每 32 条或约 8 毫秒报告实际进度并让出事件循环；引用筛选每 16 条或约 8 毫秒报告已检查和已选入数量。进度合并刷新，快速完成的阶段可能被合并。没有可测总量的服务等待只显示当前阶段与等待时间，避免虚构百分比。取消检索不会发布完成或降级提示；这些状态不成为模型答复或记忆内容。在线范围遵循 [连续 Active Context](adr/0004-continuous-active-context.md)，历史初始化独立选择当时的原始因果前缀。
 
 处理中优先使用 Telegram 原生 `sendRichMessageDraft`，不可用时由已有 transport 回退到 `sendMessageDraft`。同一 Run 保持相同非零 `draft_id`，让客户端动画显示文字变化；下一 Run 使用新 ID。每约 250 毫秒合并最新状态，未变化时每 15 秒刷新临时草稿。草稿只展示最近五项，终态保存完整可折叠进度卡片并独立交付答复。草稿失败或超时时回退到原有卡片编辑。实际动画由 Telegram 客户端决定，服务端不逐字调用 API，也不为动画拖延真实执行或最终答复。接口依据：[sendMessageDraft](https://core.telegram.org/bots/api#sendmessagedraft)、[sendRichMessageDraft](https://core.telegram.org/bots/api#sendrichmessagedraft)。
 
@@ -37,15 +37,15 @@ Telegram 持续显示前台准备阶段：读取记忆、等待语义匹配、�
 
 ## 派生缓存恢复
 
-派生文件只有 `data/memory.sqlite`、`data/embeddings.sqlite` 和 `data/memory-initialization/memory.sqlite`。索引核对用户、来源前缀摘要、消费位置及原话指纹；图每次从原始初始化、学习和排除事实重放。打开时检查派生数据库版本、表形状及 SQLite 完整性；缺失、损坏或不兼容时仅重建这些缓存，不改写原始事件或原始归档。权限/磁盘故障不被当成可随意删除的损坏。
+记忆相关派生文件为 `data/memory.sqlite`、`data/embeddings.sqlite` 和 `data/memory-initialization/memory.sqlite`；当前事实源为 `data/runtime-v2.sqlite`，旧源文件与归档继续保留。索引核对用户、来源前缀摘要、消费位置及原话指纹；图每次从原始初始化、学习和排除事实重放。打开时检查派生数据库版本、表形状及 SQLite 完整性；缺失、损坏或不兼容时仅重建这些缓存，不改写原始事件或原始归档。权限/磁盘故障不被当成可随意删除的损坏。
 
-通常无需手工重建。若维护者确实需要清空派生状态：先人工正常停止 Bot，确认所有请求与后台 worker 已结束，备份事实源，确认当前目录和 `data` 目录；只删除上述固定缓存及对应 `-wal` / `-shm` 文件。不要删除整个 `data`，不要删除 `runtime.sqlite`、`runtime.sqlite-wal`、`runtime.sqlite-shm`、`events.jsonl` 或 `tool-results`。正常启动后的查询/初始化会重建索引和向量；语义补齐完成之前允许字面降级。
+通常无需手工重建。若维护者确实需要清空派生状态：先人工正常停止 Bot，确认所有请求与后台 worker 已结束，备份事实源，确认当前目录和 `data` 目录；只删除上述固定缓存及对应 `-wal` / `-shm` 文件。不要删除整个 `data`，不要删除 `runtime-v2.sqlite` 及其 `-wal` / `-shm`、`runtime.sqlite`、`runtime.sqlite-wal`、`runtime.sqlite-shm`、`events.jsonl` 或 `tool-results`。正常启动后的查询/初始化会重建索引和向量；语义补齐完成之前允许字面降级。
 
 原始日志本身损坏不属于派生缓存恢复，不能用空库替换；应从可信备份恢复事实源。普通 `write`/`edit` 工具不得修改运行库、记忆库、向量库、检查点或归档，包括路径别名。
 
 ## 遗忘与诊断
 
-回复目标 User 或已确认送达的 Assistant 页面发送 `/forget`，或使用 `/forget 节点引用`；“忘掉这件事”这种明确回复意图也支持。部分 Assistant 页面送达时仍可定位对应 User 轮次，但不把未送达 Assistant 全文纳入记忆。模糊话题只列候选；“忘记密码怎么办？”按普通问题交给 Agent，不执行排除。
+回复目标 User 或已确认送达的 Assistant 页面发送 `/forget`，或使用 `/forget 节点引用`。当前 Host 将自然语言句子作为模型输入；遗忘控制使用斜杠命令。部分 Assistant 页面送达时仍可定位对应 User 轮次，但不把未送达 Assistant 全文纳入记忆。`/forget 模糊话题` 只列候选，等待明确选择。
 
 排除原话、关联、后续上下文和来源工具回放，并使覆盖它的摘要失效。归档读取记录稳定来源身份，递归读取、原始 JSON、Windows 大小写和删除路径别名后的重启都不能自动复活来源。原始日志和归档仍保留；`/memory log 节点引用 [字符位置]` 是不调用模型的明确诊断，不恢复节点、不强化。同话题新消息可独立形成新节点；`/reset` 和缓存重建不会撤销排除。
 

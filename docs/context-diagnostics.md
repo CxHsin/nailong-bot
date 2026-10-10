@@ -30,7 +30,7 @@ Telegram Bot 启动时固定 `runtime_identity`，每个新 Run 都记录同一�
 
 ## 上下文范围
 
-排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0004](adr/0004-continuous-active-context.md) 的连续活动上下文政策（[ADR-0003](adr/0003-recent-turn-context.md) 保留旧兼容入口政策），再运行：
+排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0004](adr/0004-continuous-active-context.md) 的连续活动上下文政策（[ADR-0003](adr/0003-recent-turn-context.md) 记录历史近期范围，旧执行器已退役），再运行：
 
 ```powershell
 npm run context:diagnose -- --conversation-id "telegram:private:你的ID"

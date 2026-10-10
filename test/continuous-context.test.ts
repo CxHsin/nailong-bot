@@ -18,11 +18,11 @@ test("a Conversation appends beyond three prior turns and restores its prefix af
     let body = ""; for await (const chunk of req) body += chunk;
     inputs.push(JSON.parse(body));
     res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: `settled-answer-${inputs.length}` }) }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: `settled-answer-${inputs.length}` }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false };
+  const options = { dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false };
   let agent = await createPiAgent(options);
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);
@@ -57,11 +57,11 @@ test("initial migration without a snapshot reconstructs the previous active scop
     let body = ""; for await (const chunk of req) body += chunk;
     inputs.push(JSON.parse(body));
     res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: "migrated-answer" }) }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "migrated-answer" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false };
+  const options = { dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false };
   let agent = await createPiAgent(options);
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);

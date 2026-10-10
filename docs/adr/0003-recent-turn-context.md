@@ -4,7 +4,7 @@ status: superseded
 
 # Restore three recent turns for the personal Agent
 
-Superseded for production Host by [ADR-0004](0004-continuous-active-context.md). The retained legacy createApp adapter still uses this recent-turn range; the text below records the previous production policy.
+Superseded for production Host by [ADR-0004](0004-continuous-active-context.md). The legacy createApp adapter was retired in #149 after auditing callers and migrating useful regression coverage. Recent-range interpretation remains for historical data, initialization and offline comparisons; the text below records the previous production policy, not a current execution entry.
 
 Context Projection selects the latest three prior user turns and the current turn from the Conversation's runtime event log before recovering tool archives. A turn includes the original user input, replayable settled assistant text and paired tool calls/results. Historical tool results are recovered in full; the current Run retains its existing bounded live tool views. UI-only activity, delivery receipts and unfinished drafts remain outside model context.
 

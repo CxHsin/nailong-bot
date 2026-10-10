@@ -17,12 +17,12 @@
 | Akasha 准备、学习与历史初始化 | 消除历史初始化对另一 Projection 的调用，复用事实解释，保留历史因果范围、召回和学习算法。 |
 | Runtime Log、SQLite、事实解释与归档 | 加强生产事实类型，保留原始旧记录、事件顺序/身份、批量原子性和旧数据解释；不迁移生产数据。 |
 | Telegram、CLI 与启动入口 | 收窄依赖，保留各入口真实配置、输出、图片和交付差异；已合理的展示/transport 算法不重写。 |
-| 旧 createApp、旧执行/输出路径 | 退役候选；先核对调用和独有行为、迁移有生产价值的覆盖，不能按 legacy 名称批量删除。 |
+| 旧 createApp、旧执行/输出路径 | 已核对生产、诊断、迁移与测试调用；迁移有效覆盖后退役执行器，保留旧数据解释，详见下表。 |
 | 诊断、迁移与验收 CLI | 保留只读、脱敏、临时派生文件和旧数据对照保证；仍使用的事实/协议解释不能随旧执行器删除。 |
 | 脚本、hooks、CI、资产与依赖 | 保持原状；已有分支保护、构建身份与清理规则，无本轮结构修改依据。 |
 | 测试、README、领域文档与研究 | 迁移有效回归与修正文档；保留历史 ADR/研究证据，用户未跟踪材料不加入提交。 |
 
-生产 Telegram/CLI 均使用 `createAgentHost`，`createApp` 只有测试调用。旧接口的自然语言遗忘、旧协议与完整旧交付流程不是本轮接入生产的新功能。旧执行器退役与旧数据解释必须分别判断。
+生产 Telegram/CLI 均使用 `createAgentHost`；退役前 `createApp` 只有测试调用。其自然语言遗忘、实时旧协议和完整旧交付恢复未接入生产。旧执行器退役与旧数据解释分别判断。
 
 ## 不得统一的入口差异
 
@@ -49,12 +49,43 @@
 | 持续上下文、冻结视图、压缩/遗忘、增量与完整恢复 | `continuous-acceptance`、`stable-tool-views`、`replay-cache`、`compaction-failures`、预算与记忆测试。 |
 | 交付与学习、辅助进展排除、历史初始化因果 | `agent-host`、`active-memory`、`memory-dynamics`、进展相关测试；保留各自事实源。 |
 | 旧记录、reset 身份、SQLite 事务、导入与归档 | `runtime-migration`、`sqlite-runtime-log`、`runtime-log`、`agent-host`、诊断相关测试。 |
-| 图片、文件工具、长工具结果与归档恢复 | 现有部分测试依赖 createApp，删除前迁移有价值断言到当前入口。 |
-| 当前 Host 的阶段结果与缓存报表回复 | `ui-projection`、`reply-context` 部分测试显式启用 JSON v2，不能仅凭标题当作生产 plain v3 覆盖；须逐项核对。 |
+| 图片、文件工具、长工具结果与归档恢复 | `telegram-images`、`local-files`、`runtime-log`、`web-result` 迁移到当前 Telegram/Host/Agent；必要原始数据与编码检查独立保留。 |
+| 当前 Host 的公开进展与缓存报表回复 | `ui-projection`、`reply-context` 使用当前 plain/native Provider；旧阶段结果资格作为原始历史事实检查保留。 |
 | CLI 输出和图片、跨 Channel 续聊 | `cli-channel`、`command-channels`、`cross-channel` 与真实子进程；保留模块 API，不增加用户命令。 |
 
-`output-protocol` 仍被当前 Context Projection 的旧文本解释引用；通用 Delivery reducer 被 Host 恢复引用；旧目录中的 Telegram 图片输入仍在生产使用。删除旧路径时不能连带删除这些当前依赖。历史记忆初始化调用 Context Projection 是实际交叉，拆开时须保留其独立的历史范围和因果规则，不能换成当前持续范围。
+`output-protocol` 保留历史消息所需的 `protocolText` 编码；通用 Delivery reducer 被 Host 恢复引用；旧目录中的 Telegram 图片输入仍在生产使用。历史记忆初始化已独立选择历史范围与因果前缀，不调用在线 Context Projection。
 
 ## 最终交付记录
 
 后续任务在各自 Issue 记录变更、实际检查及测试条数。本轮最终验收在此补充结构收益、退役/保留证据和完整验证结果；未测量性能、远端缓存、客户端视觉或真实服务费用，不作相应保证。
+
+## 已完成的职责改善
+
+| 改动 | 原有牵连 | 当前边界 |
+| --- | --- | --- |
+| 生产事实类型（#145） | 开放记录允许必要身份或载荷遗漏，读取处重复解释归属与结算 | 复用现有事实联合类型与校验；Host、模型、工具、Context 和交付写入受类型约束，共享纯事实读取。旧记录原文与 schema 不变。 |
+| 共享命令（#146） | Host 为公共命令构造 Telegram Update，共享流程承担 Channel 数据形状 | CommandInput 显式提供 owner、Conversation、消息与 reply 身份；命令返回正文，Host 协调控制。AgentExecution 和 Channel 契约只提供实际所需能力。 |
+| Agent 生命周期（#147） | Pi 装配同时处理模型选择、连接、能力冻结和 Steer 执行协调 | agent-models 管理模型与认证；run-capabilities 管理连接和每轮冻结；run-session 管理执行与清理。Pi 保留 SDK 装配与记忆生命周期，已有目录和工具实现复用。 |
+| 历史重建（#148） | 历史记忆初始化调用在线 Context Projection，间接依赖在线迁移与增量状态 | 两个调用方独立选择原始因果范围，共用 history-scope/history-facts 的纯解释和 history-codec 的 Provider 编码。在线调用方拥有 seed、边界和成功后提交；历史调用方拥有预算与学习协调。 |
+
+预算、checkpoint、原始/部分/摘要覆盖、召回与学习算法已有明确职责，本轮保持原状；拆除跨 Projection 调用不改变其政策。历史工具消息使用当时冻结的 bounded view，summaryMessages 仍保留完整材料。重建维持原每 32 条让出及实际归档等待点，未增加逐事实异步等待。
+
+### 独立记录的原有缺陷
+
+[#151](https://github.com/CxHsin/nailong-bot/issues/151) 在新建测试 SQLite 上复现：历史初始化处理没有活动起点的旧 Conversation 轮次时，会把模拟因果前缀的活动起点写入真实日志，随后真实前缀校验失败。原实现和提取后的实现表现一致。修复尚未获得维护者确认，本轮保留原行为；这不是已验证成立的恢复保证，也不代表检查过生产数据。
+
+## 退役与保留依据（#149）
+
+调用核对覆盖 `src/`、`scripts/`、诊断/迁移入口及 `test/`。测试剩余调用不是单独的退役或保留依据；逐例迁移结果记录在 #149。
+
+| 路径/接口 | 调用与独有语义 | 决定与证明 |
+| --- | --- | --- |
+| `application/app.ts`、`legacy-commands.ts` | 仅旧测试使用的重复排队、鉴权、命令、执行与恢复；自然语言遗忘和旧 reset 专属行为 | 退役。当前入口验证去重、prompt/reset、图片、工具和失败；自然语言句子按生产模型输入处理，遗忘使用 `/forget`。 |
+| `telegram-delivery/projection/output/legacy/types/events/format/layout` | 旧执行器及旧 UI 测试依赖；HTML growing output、完整旧交付重启核对 | 退役。当前 Rich transport/原生草稿、Unicode/代码块分页、已知拒绝/未知结果与有界交付继续验证。重启只提示中断，不增加旧自动补发。 |
+| `projectRequestState`、`projectFinalAnswer` | 旧执行器、旧 delivery 和内部测试使用 | 退役。`projectDeliveredChat` 仍由 AgentHost 使用，独立保留；旧交付完整性由 `delivery-facts` 等原始事实解释。 |
+| `Request.onText`、`PiAgentOptions.outputProtocol`、实时 JSON v2 parser/repair/preview/writer/prompt | 无当前生产、诊断或迁移 live caller；旧实时 envelope 纠正及阶段结果循环 | 退役。当前 plain/native 进展、final、工具、断流、取消、Steer 和持续无工具上限继续验证；历史结构化 `protocolText` 编码保留。 |
+| 共享命令的 `onStarted` 回调 | 只由旧 adapter 使用；真实 Channel 自己确认输入接受 | 随 adapter 退役，公共命令返回正文。当前存储失败验证 Provider/工具不执行、事实边界与重启重试，不把旧接受回调时序接入生产。 |
+| 原始 JSONL/SQLite 导入、upcast、身份/归属、归档、旧 delivery/result/learning 解释 | 实际数据、当前恢复/记忆、诊断及迁移消费者 | 保留原政策。旧夹具保留原身份和缺失归属；历史学习重试显式调用提交算法，fixture.restart 不补执行学习或交付。 |
+| `telegram-input.ts`、`telegram-markdown.ts`、`app-types.ts` 的 Update/Message/Request/DeliveryRejected | 当前 Channel、Agent、Host 和 Rich transport 实际使用 | 保留。目录或名字与旧执行器相近不能作为删除依据。 |
+
+真实 Telegram 验收夹具取得目录所有权后装配当前 Channel/Host/Agent/runtime-v2，调用本地 Provider，暴露明确的 rootLog/scopedLog；默认关闭后台历史初始化，重启只使用当前恢复逻辑。模型输出、实际 wire、持久终态与 delivery 分别断言。纯历史编码/资格、事务和算法检查保留在必要的低层入口。

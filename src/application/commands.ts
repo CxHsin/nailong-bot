@@ -25,7 +25,7 @@ export function agentCommand(text: string) {
   return AGENT_COMMANDS.find((item) => item.command === name);
 }
 
-export async function handlePromptCommand(log: RuntimeLog, options: { promptFile?: string }, input: CommandInput, text: string, onStarted?: () => void): Promise<string | undefined> {
+export async function handlePromptCommand(log: RuntimeLog, options: { promptFile?: string }, input: CommandInput, text: string): Promise<string | undefined> {
   if (input.hasAttachments || !/^\/prompt(?:\s|$)/.test(text)) return undefined;
   const receipt = { type: "input_received" as const, chatId: input.ownerId, messageId: input.messageId };
   const changesPrompt = text === "/prompt reset" || text.startsWith("/prompt set ");
@@ -34,7 +34,6 @@ export async function handlePromptCommand(log: RuntimeLog, options: { promptFile
     ? [receipt, { type: "bot_prompt_config" as const, chatId: input.ownerId, version: randomUUID(), text: prompt }]
     : [receipt];
   await appendRuntimeFacts(log, events);
-  onStarted?.();
   if (text === "/prompt") {
     const configured = (await log.read()).findLast((event) => event.type === "bot_prompt_config" && event.chatId === input.ownerId);
     const current = typeof configured?.text === "string" ? configured.text :
