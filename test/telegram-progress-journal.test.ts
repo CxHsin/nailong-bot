@@ -101,7 +101,7 @@ test("hanging tools update elapsed draft time and stop publishing after completi
   const count = output.drafts.length; await delay(30); assert.equal(output.drafts.length, count);
 });
 
-test("Host preserves stage Markdown separately and excludes progress receipts from replay", async (t) => {
+test("Host journals stage Markdown without changing raw facts and excludes progress receipts from replay", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "native-journal-")); t.after(() => rm(dir, { recursive: true, force: true }));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "自然回答");
   const log = createRuntimeLog(dir); const output = transport();
@@ -115,9 +115,11 @@ test("Host preserves stage Markdown separately and excludes progress receipts fr
     recordProgress: (event, fact) => host.recordProgress(event, fact),
     deliver: (event, content, signal) => host.deliverContent(event, content, output.rich, signal),
   }).consume(run);
-  assert.deepEqual(output.sent, ["**阶段成果**", "独立答案"]);
+  assert.deepEqual(output.sent, ["<details><summary>运行进展</summary>\n\n**阶段成果**\n\n</details>", "独立答案"]);
   const facts = await log.read();
   const receipts = facts.filter((fact) => fact.type === "telegram_progress_delivery");
   assert.ok(receipts.length > 0 && receipts.every((fact) => fact.contextPolicy === "exclude"));
+  assert.ok(receipts.some((fact) => fact.source === "journal" && fact.state === "sent" && Array.isArray(fact.segmentIds) && fact.segmentIds.includes("stage")));
+  assert.equal(facts.find((fact) => fact.type === "text_finalized" && fact.textSegmentId === "stage")?.text, "**阶段成果**");
   assert.doesNotMatch(JSON.stringify(projectDeliveredChat(facts)), /telegram_progress_delivery|messageId/);
 });

@@ -65,10 +65,18 @@ for (const toolSearch of ["native", "compat"] as const) for (const splitResponse
   ] } });
   t.after(() => { releaseFinding(); releaseDelta(); return closeFixture({ server, dir, shutdown: () => agent.close() }); });
   const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  const sent: string[] = []; const drafts: string[] = [];
+  const sent: string[] = []; const drafts: string[] = []; const draftIds: number[] = [];
   const transport = createTelegramRichTransport({
-    sendRich: async (_chat, value) => { sent.push(value); if (value.includes("**已确认资料日期**")) releaseFinding(); return sent.length; },
-    draftRich: async (_id, _chat, value) => { drafts.push(value); if (value === "最终结") releaseDelta(); },
+    sendRich: async (_chat, value) => { sent.push(value); return sent.length; },
+    draftRich: async (id, _chat, value) => {
+      drafts.push(value); draftIds.push(id);
+      if (value.includes("**已确认资料日期**")) {
+        assert.equal(sent.length, 0, "finding must remain in the Run draft until terminal");
+        releaseFinding();
+      }
+      // Compat streams may not expose the item's final phase until settlement.
+      if (value.includes("最终结")) releaseDelta();
+    },
   });
   const run = host.submit({ actor: { id: "42" }, conversationId: "telegram:private:42", text: "核对资料" });
   await createTelegramHostProjection({ ...transport, chatId: 42, draftIntervalMs: 5,
@@ -77,8 +85,14 @@ for (const toolSearch of ["native", "compat"] as const) for (const splitResponse
   }).consume(run);
   assert.equal(calls, splitResponse ? 2 : 1);
   assert.equal((await run.done).result?.finalText, "最终结论。");
-  assert.ok(sent.includes("**已确认资料日期**，接下来核对结论。"));
-  assert.equal(sent.at(-1), "最终结论。"); assert.ok(drafts.includes("最终结"));
+  assert.equal(new Set(draftIds).size, 1);
+  assert.equal(sent.length, 2);
+  assert.match(sent[0]!, /^<details><summary>运行进展<\/summary>/);
+  assert.match(sent[0]!, /\*\*已确认资料日期\*\*，接下来核对结论。/);
+  assert.doesNotMatch(sent[0]!, /最终结论/);
+  assert.equal(sent.at(-1), "最终结论。");
+  assert.ok(drafts.some((value) => value.includes("最终结")));
+  assert.ok(drafts.some((value) => value.endsWith("</details>\n\n最终结论。")));
   const facts = await log.read();
   assert.deepEqual(facts.filter((fact) => fact.type === "text_finalized").map(({ phase, phaseSource }) => ({ phase, phaseSource })), [
     { phase: "commentary", phaseSource: "native" }, { phase: "final_answer", phaseSource: "native" },
@@ -87,6 +101,7 @@ for (const toolSearch of ["native", "compat"] as const) for (const splitResponse
   assert.equal(facts.some((fact) => fact.purpose === "progress"), false);
   assert.deepEqual(memoryNodes(facts, 42)[0]?.messages.filter((message) => message.role === "assistant").map((message) => message.text), ["最终结论。"]);
   const restarted = createAgentHost({ dataDir: dir, promptFile, log: await createRuntimeEventLog(dir), agent });
+  sent.length = 0;
   const continued = restarted.submit({ actor: { id: "42" }, conversationId: "telegram:private:42", text: "继续核对" });
   await createTelegramHostProjection({ ...transport, chatId: 42, draftIntervalMs: 5,
     deliver: (event, content, signal) => restarted.deliverContent(event, content, transport, signal),

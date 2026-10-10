@@ -2,34 +2,48 @@ import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { TelegramHostTransport } from "./projection.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { DeliveryContent } from "../../runtime/content-delivery.js";
-import { planStatusDetails } from "./status-details.js";
+import { planProgressDetails, statusMarkdown } from "./status-details.js";
 
 let nextDraftId = 1;
 
-/** Stream public text units; runtime details open during updates and collapse when saved. */
+/** One Run draft accumulates public progress; the terminal saves one journal and a separate final answer. */
 export async function consumeNativeProgress(handle: RunHandle, options: TelegramHostTransport & {
   chatId: number; draftIntervalMs?: number; draftTimeoutMs?: number; progressTimeoutMs?: number;
   recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
   deliver?: (event: HostEvent, content: DeliveryContent, signal?: AbortSignal) => Promise<{ complete: boolean; messageId?: number }>;
 }, finish: (event: HostEvent) => Promise<void>) {
-  const states = new Map<string, { text: string; active: boolean; started: number }>();
-  let view = ""; let latest = ""; let draftId = nextDraftId++;
+  const journal = new Map<string, { text: string; status: boolean; active: boolean; started: number; settled: boolean }>();
+  const finals = new Map<string, string>();
+  let latest = ""; const draftId = nextDraftId++;
   let published = ""; let publishedAt = -Infinity; let lastAttempt = -Infinity; let retryAt = 0;
   let pending = Promise.resolve(); let busy = false; let ended = false; let control = false;
-  let modelText = false; let lastEvent: HostEvent | undefined;
+  let lastEvent: HostEvent | undefined;
   let progressDisabled = false;
+  let journalPlanFailed = false;
   const record = async (fact: Record<string, unknown>) => { if (lastEvent) await options.recordProgress?.(lastEvent, fact); };
-  const statePages = (open = false) => planStatusDetails([...states.values()].map((state) => {
-    const seconds = Math.floor((Date.now() - state.started) / 5000) * 5;
-    return state.text + (state.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : "");
-  }).join("\n\n"), open);
-  const renderStates = () => {
-    const pages = statePages(true); const text = pages.join("\n\n");
-    return text.length <= 32768 ? text : pages.at(-1) ?? "";
+  const journalPages = (open = false, settledOnly = false) => {
+    try {
+      const pages = planProgressDetails([...journal.values()].filter((unit) => !settledOnly || unit.settled).map((state) => {
+        const seconds = Math.floor((Date.now() - state.started) / 5000) * 5;
+        const text = state.text + (state.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : "");
+        return state.status ? statusMarkdown(text) : text;
+      }).join("\n\n"), open);
+      journalPlanFailed = false;
+      return pages;
+    } catch {
+      // Presentation failures must not stop consuming the Run or its final answer.
+      if (!journalPlanFailed) void record({ state: "failed_or_unknown", source: "journal", reason: "planning" }).catch(() => {});
+      journalPlanFailed = true;
+      return [];
+    }
   };
-  const setView = (id: string, text: string) => {
-    if (view !== id) { view = id; draftId = nextDraftId++; published = ""; publishedAt = -Infinity; }
-    latest = text;
+  const render = () => {
+    const pages = journalPages(true); const progress = pages.join("\n\n");
+    const final = [...finals.values()].join("\n\n");
+    const joined = [progress, final].filter(Boolean).join("\n\n");
+    if (joined.length <= 32768) return joined;
+    const tail = [pages.at(-1), final].filter(Boolean).join("\n\n");
+    return final ? tail.length <= 32768 ? tail : final : pages.at(-1) ?? "";
   };
   const publish = (force = false) => {
     if (!options.draft || control || busy || !latest || Date.now() < retryAt || !force && Date.now() - lastAttempt < (options.draftIntervalMs ?? 250)) return;
@@ -69,24 +83,24 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
       await record({ state: "failed_or_unknown", source: "progress" }).catch(() => {});
     } finally { clearTimeout(timeout); }
   };
-  const persistStates = async () => {
-    if (!states.size || control) return;
-    if (progressDisabled) { states.clear(); return; }
-    for (const state of states.values()) state.active = false;
-    const pages = statePages();
-    await record({ state: "sending", source: "status" });
+  const persistJournal = async () => {
+    if (!journal.size || control || progressDisabled) return;
+    for (const unit of journal.values()) unit.active = false;
+    const pages = journalPages(false, true);
+    const segmentIds = [...journal].filter(([, unit]) => !unit.status && unit.settled).map(([id]) => id);
+    if (!pages.length) return;
+    await record({ state: "sending", source: "journal", segmentIds });
     await persistProgress(async (signal) => {
       for (const page of pages) {
         if (signal.aborted) return;
         const messageId = await (options.sendPage ?? options.send)(page, options.chatId, signal);
-        if (!signal.aborted) await record({ state: "sent", source: "status", messageId });
+        if (!signal.aborted) await record({ state: "sent", source: "journal", segmentIds, messageId });
       }
     });
-    states.clear();
   };
   const timer = setInterval(() => {
     if (ended) return;
-    if (!modelText && states.size) setView("status", renderStates());
+    latest = render();
     publish();
   }, options.draftIntervalMs ?? 250); timer.unref();
   try {
@@ -98,36 +112,27 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
       const progress = event.progress;
       if (event.type === "progress" && progress && !control) {
         if (progress.type === "discard") {
-          if (view === progress.segmentId) { await pending; latest = ""; modelText = false; }
+          await pending; journal.delete(progress.segmentId); finals.delete(progress.segmentId);
         } else if (progress.type === "tool" || progress.kind === "status") {
           const id = progress.type === "tool" ? `tool:${progress.callId ?? progress.name}` : progress.segmentId;
           const active = progress.type === "tool" ? progress.state === "started" : progress.actionState === "started";
           const text = progress.type === "tool" ? `${{ started: "正在执行", completed: "已完成", failed: "执行失败", blocked: "执行被阻止" }[progress.state]}：${toolDisplayName(progress.name)}` : progress.text;
-          if (active) for (const state of states.values()) state.active = false;
-          const prior = states.get(id);
-          states.set(id, { text, active, started: prior?.active && active ? prior.started : Date.now() });
-          if (!modelText) { setView("status", renderStates()); publish(); }
+          if (active) for (const unit of journal.values()) unit.active = false;
+          const prior = journal.get(id);
+          journal.set(id, { text, status: true, active, settled: true, started: prior?.active && active ? prior.started : Date.now() });
         } else {
-          if (!modelText) { await flushDraft(); await persistStates(); }
-          modelText = true; setView(progress.segmentId, progress.text); publish();
-          if (progress.finalized) {
-            await flushDraft();
-            if (progress.kind !== "final" && progress.formal) {
-              await persistProgress(async (signal) => {
-                if (options.deliver) {
-                  const result = await options.deliver(event, { id: progress.segmentId, text: progress.text, kind: "progress", source: progress.source }, signal);
-                  if (!result.complete) progressDisabled = true;
-                }
-                else await options.send(progress.text, options.chatId);
-              });
-              modelText = false; latest = "";
-            }
+          if (progress.kind === "final") {
+            journal.delete(progress.segmentId); finals.set(progress.segmentId, progress.text);
+          } else {
+            finals.delete(progress.segmentId);
+            journal.set(progress.segmentId, { text: progress.text, status: false, active: false, started: Date.now(), settled: progress.finalized && progress.formal === true });
           }
         }
+        latest = render(); publish();
       }
       if (["run_succeeded", "run_failed", "run_cancelled"].includes(event.type)) {
         ended = true; clearInterval(timer);
-        await flushDraft(); await persistStates(); await finish(event);
+        await flushDraft(); await persistJournal(); await finish(event);
       }
     }
     return await handle.done;

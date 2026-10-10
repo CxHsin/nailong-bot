@@ -1,17 +1,17 @@
 import { marked, type Token, type Tokens } from "marked";
 
-const CAPACITY = 3500;
 const graphemes = new Intl.Segmenter("zh", { granularity: "grapheme" });
 type Wrap = (text: string) => string;
 
 /** Paginate native Markdown while reopening the block and inline containers on each page. */
-export function planTelegramMarkdown(text: string): string[] {
-  if (text.length <= CAPACITY) return text.trim() ? [text] : [];
-  const fits = (text: string) => text.length <= CAPACITY;
+export function planTelegramMarkdown(text: string, capacity = 3500): string[] {
+  if (text.length <= capacity) return text.trim() ? [text] : [];
+  const fits = (text: string) => text.length <= capacity;
   const identity: Wrap = (text) => text;
   const splitRaw = (source: string, wrap: Wrap): string[] => {
     const parts: string[] = []; let current = "";
-    for (const { segment } of graphemes.segment(source)) {
+    const segments = source.split(/(&#\d+;)/g).flatMap((part) => /^&#\d+;$/.test(part) ? [part] : Array.from(graphemes.segment(part), (item) => item.segment));
+    for (const segment of segments) {
       const units = fits(wrap(segment)) ? [segment] : Array.from(segment);
       for (const unit of units) {
         if (!fits(wrap(unit))) throw new Error("Markdown 单元超过 Telegram 消息容量");

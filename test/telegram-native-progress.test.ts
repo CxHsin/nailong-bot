@@ -10,7 +10,7 @@ import { deliverContent } from "../src/runtime/content-delivery.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planStatusDetails } from "../src/channel/telegram/status-details.js";
+import { planProgressDetails, planStatusDetails } from "../src/channel/telegram/status-details.js";
 
 function event(type: HostEvent["type"], progress?: RunProgress): HostEvent {
   return { type, schemaVersion: 1, runId: "native", conversationId: "telegram:42", sequence: 1, at: new Date().toISOString(),
@@ -30,6 +30,33 @@ function handle(events: HostEvent[], wait = 20): RunHandle {
 const text = (id: string, value: string, finalized = false, kind: "progress" | "final" = "progress") =>
   event("progress", { type: "text", segmentId: id, kind, text: value, finalized, formal: finalized && kind !== "final", source: "execution" });
 
+test("one Run accumulates statuses, tools and multiple model findings in one progress message", async () => {
+  const output = transport(); let sendsDuringRun = -1;
+  const events = [
+    event("progress", { type: "text", segmentId: "prep", kind: "status", text: "上下文准备完成", finalized: true }),
+    text("first", "**第一项发现**", true),
+    event("progress", { type: "tool", name: "read", callId: "r", state: "started" }),
+    event("progress", { type: "tool", name: "read", callId: "r", state: "completed" }),
+    text("second", "第二项发现：继续核对来源。", true),
+    text("final", "最终答", false, "final"), text("final", "最终答案", true, "final"), event("run_succeeded"),
+  ];
+  const run = handle(events);
+  const source = run.events;
+  run.events = async function* () { for await (const value of source()) { if (value.type === "run_succeeded") sendsDuringRun = output.sent.length; yield value; } };
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(run);
+  assert.equal(sendsDuringRun, 0);
+  assert.equal(new Set(output.drafts.map((draft) => draft.id)).size, 1);
+  assert.equal(output.sent.length, 2);
+  assert.match(output.sent[0]!, /^<details><summary>运行进展<\/summary>/);
+  assert.match(output.sent[0]!, /上下文准备完成/);
+  assert.match(output.sent[0]!, /\*\*第一项发现\*\*/);
+  assert.match(output.sent[0]!, /已完成：/);
+  assert.match(output.sent[0]!, /第二项发现/);
+  assert.doesNotMatch(output.sent[0]!, /最终答/);
+  assert.equal(output.sent[1], "最终答案");
+  assert.ok(output.drafts.some((draft) => draft.text.includes("第二项发现") && draft.text.includes("**第一项发现**")));
+});
+
 test("runtime preparation stays open across draft updates and is collapsed only when saved", async () => {
   const output = transport();
   await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
@@ -43,28 +70,32 @@ test("runtime preparation stays open across draft updates and is collapsed only 
   assert.ok(drafts.length >= 2);
   assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
   for (const draft of drafts) {
-    assert.match(draft.text, /^<details open><summary>运行状态<\/summary>/);
-    assert.match(draft.text, /<\/details>$/);
+    assert.match(draft.text, /^<details open><summary>运行进展<\/summary>/);
+    assert.match(draft.text, /<\/details>/);
   }
-  assert.equal(output.sent[0], drafts.at(-1)!.text.replace("<details open>", "<details>"));
+  assert.equal(output.sent[0], drafts.at(-1)!.text.split("\n\n最终答案")[0]!.replace("<details open>", "<details>"));
   assert.doesNotMatch(output.sent[0]!, /<details\s+open/);
-  assert.deepEqual(output.sent.slice(1), ["**模型发现**：资料已齐全。", "最终答案"]);
+  assert.match(output.sent[0]!, /\*\*模型发现\*\*/);
+  assert.deepEqual(output.sent.slice(1), ["最终答案"]);
 });
 
 for (const open of [false, true]) test(`long runtime labels paginate into complete ${open ? "open" : "collapsed"} details without losing Unicode`, () => {
-  const source = "<details open>**状态** & [链接](https://example.com) 👨‍👩‍👧‍👦\n".repeat(180);
+  const source = "<details open>**状态** & [链接](https://example.com) 👨‍👩‍👧‍👦\n".repeat(1000);
   const pages = planStatusDetails(source, open);
   assert.ok(pages.length > 1);
   for (const page of pages) {
-    assert.ok(page.length <= 3500);
-    assert.ok(page.startsWith(`<details${open ? " open" : ""}><summary>运行状态</summary>\n\n`));
+    assert.ok(page.length <= 32768);
+    assert.ok(page.startsWith(`<details${open ? " open" : ""}><summary>运行进展</summary>\n\n`));
     assert.match(page, /\n\n<\/details>$/);
     assert.equal(page.split(open ? "<details open>" : "<details>").length, 2);
     assert.doesNotMatch(page, /\*\*状态\*\*|\[链接\]/);
   }
   const restored = pages.map((page) => page.slice(page.indexOf("\n\n") + 2, -"\n\n</details>".length))
     .join("").replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
-  assert.equal(restored, source);
+  // Markdown pagination can wrap lines and insert paragraph separators; every
+  // visible character and encoded punctuation must survive, including graphemes.
+  assert.equal(restored.replace(/\n/g, ""), source.replace(/\n/g, ""));
+  assert.equal(restored.split("👨‍👩‍👧‍👦").length - 1, 1000);
 });
 
 test("oversized status drafts stay within Rich limits and settlement preserves every collapsed page", async () => {
@@ -80,7 +111,7 @@ test("oversized status drafts stay within Rich limits and settlement preserves e
   assert.deepEqual(output.sent.slice(0, -1), pages); assert.equal(output.sent.at(-1), "最终答案");
 });
 
-test("public findings and final answer stream and persist identical Markdown as separate units", async () => {
+test("finding Markdown streams inside progress while final Markdown remains outside", async () => {
   const output = transport();
   await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
     event("progress", { type: "text", segmentId: "prep", kind: "status", text: "上下文已准备好", finalized: true }),
@@ -90,15 +121,64 @@ test("public findings and final answer stream and persist identical Markdown as 
     event("progress", { type: "tool", name: "read", callId: "read", state: "completed" }),
     text("final", "最终答", false, "final"), text("final", "最终答案", true, "final"), event("run_succeeded"),
   ]));
-  assert.ok(output.drafts.some((draft) => draft.text === "**已确认下载成功**，"));
-  assert.ok(output.drafts.some((draft) => draft.text === "最终答"));
-  const finding = output.drafts.filter((draft) => draft.text.startsWith("**已确认"));
+  assert.ok(output.drafts.some((draft) => draft.text.includes("**已确认下载成功**，")));
+  assert.ok(output.drafts.some((draft) => draft.text.endsWith("</details>\n\n最终答")));
+  const finding = output.drafts.filter((draft) => draft.text.includes("**已确认"));
   assert.equal(new Set(finding.map((draft) => draft.id)).size, 1);
-  assert.notEqual(finding[0]!.id, output.drafts.find((draft) => draft.text === "最终答")!.id);
-  assert.ok(output.sent.includes(finding.at(-1)!.text));
+  assert.equal(new Set(output.drafts.map((draft) => draft.id)).size, 1);
+  assert.match(output.sent[0]!, /\*\*已确认下载成功\*\*/);
   assert.equal(output.sent.at(-1), "最终答案");
-  assert.ok(output.sent.indexOf(finding.at(-1)!.text) < output.sent.findIndex((value) => value.includes("已完成：")));
+  assert.match(output.sent[0]!, /已完成：/);
   assert.doesNotMatch(output.sent.join(""), /<blockquote|已完成\n/);
+});
+
+test("an unresolved Provider unit moves out of the journal when classified as final", async () => {
+  const output = transport();
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
+    event("progress", { type: "text", segmentId: "prep", kind: "status", text: "上下文已准备好", finalized: true }),
+    text("pending", "待定正文"),
+    text("pending", "最终答案", true, "final"), event("run_succeeded"),
+  ]));
+  assert.ok(output.drafts.some(({ text }) => /待定正文[\s\S]*<\/details>$/.test(text)));
+  assert.ok(output.drafts.some(({ text }) => text.endsWith("</details>\n\n最终答案")));
+  assert.equal(output.sent.length, 2);
+  assert.doesNotMatch(output.sent[0]!, /待定正文|最终答案/);
+  assert.equal(output.sent[1], "最终答案");
+});
+
+for (const terminal of ["run_failed", "run_cancelled"] as const) test(`${terminal} saves only settled progress and real states`, async () => {
+  const output = transport();
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
+    event("progress", { type: "text", segmentId: "prep", kind: "status", text: "上下文准备完成", finalized: true }),
+    text("settled", "已确认公开结论", true), text("pending", "未完成说明"),
+    text("discarded", "已撤回说明", true), event("progress", { type: "discard", segmentId: "discarded" }),
+    text("final", "未完成答案", false, "final"), event(terminal),
+  ]));
+  assert.equal(output.sent.length, 2);
+  assert.match(output.sent[0]!, /^<details>/);
+  assert.match(output.sent[0]!, /上下文准备完成[\s\S]*已确认公开结论/);
+  assert.doesNotMatch(output.sent[0]!, /未完成|已撤回/);
+  assert.match(output.sent[1]!, terminal === "run_failed" ? /处理失败/ : /已取消/);
+});
+
+test("overflowing model findings stay in complete journal pages with fenced Markdown", async () => {
+  const output = transport();
+  const source = "**已确认分页资料**\n\n```ts\n" + "const 家庭 = '👨‍👩‍👧‍👦';\n".repeat(1800) + "```\n\n尾部结论";
+  const pages = planProgressDetails(source);
+  assert.ok(pages.length > 1);
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
+    text("finding", source, true), text("final", "最终答案", true, "final"), event("run_succeeded"),
+  ]));
+  assert.deepEqual(output.sent.slice(0, -1), pages);
+  for (const page of pages) {
+    assert.ok(page.length <= 32768);
+    assert.match(page, /^<details>/); assert.match(page, /<\/details>$/);
+    assert.equal((page.match(/^```/gm) ?? []).length % 2, 0);
+  }
+  assert.equal(pages.join("").split("const 家庭").length - 1, 1800);
+  assert.equal(pages.join("").split("👨‍👩‍👧‍👦").length - 1, 1800);
+  assert.ok(output.drafts.every(({ text }) => text.length <= 32768));
+  assert.ok(output.drafts.some(({ text }) => text.includes("尾部结论") && text.endsWith("</details>\n\n最终答案")));
 });
 
 test("a rate-limited draft waits and resumes with the same ID without switching to a card", async () => {
@@ -131,8 +211,9 @@ test("draft and status sends that ignore cancellation cannot hold final delivery
 });
 
 test("discarded auxiliary drafts never persist while settled auxiliary findings retain their source", async () => {
-  const output = transport(); const delivered: Array<{ text: string; source?: string }> = [];
+  const output = transport(); const delivered: Array<{ text: string; source?: string }> = []; const receipts: Record<string, unknown>[] = [];
   await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5,
+    recordProgress: async (_event, fact) => { receipts.push(fact); },
     deliver: async (_event, content) => { delivered.push(content); return { complete: true, messageId: 1 }; },
   }).consume(handle([
     event("progress", { type: "text", segmentId: "stale", kind: "progress", text: "旧结论", finalized: false, source: "progress-model" }),
@@ -141,8 +222,10 @@ test("discarded auxiliary drafts never persist while settled auxiliary findings 
     event("run_succeeded"),
   ]));
   assert.deepEqual(delivered.map(({ text, source }) => ({ text, source })), [
-    { text: "已确认新来源", source: "progress-model" }, { text: "最终答案", source: "execution" },
+    { text: "最终答案", source: "execution" },
   ]);
+  assert.match(output.sent[0]!, /已确认新来源/); assert.doesNotMatch(output.sent[0]!, /旧结论/);
+  assert.ok(receipts.some((fact) => fact.state === "sent" && Array.isArray(fact.segmentIds) && fact.segmentIds.includes("valid")));
   const count = output.drafts.length; await delay(20); assert.equal(output.drafts.length, count);
 });
 
@@ -157,15 +240,39 @@ test("partial invalid Markdown keeps the last native preview and accepts a later
   assert.deepEqual(rich.plan({ id: "finding", text: "**结论**", kind: "progress" }), ["**结论**"]);
 });
 
-test("a hanging settled finding freezes later progress sends and cannot hold the final", async () => {
+test("a hanging journal send stops subsequent pages and cannot hold final delivery", async () => {
   const output = transport(); let attempts = 0; let aborted: AbortSignal | undefined;
   await createTelegramHostProjection({ ...output.rich, chatId: 42, progressTimeoutMs: 10,
-    deliver: async (_event, content, signal) => {
-      if (content.kind === "final") { output.sent.push(content.text); return { complete: true, messageId: 1 }; }
-      attempts++; aborted = signal; await new Promise(() => {}); return { complete: false };
-    },
+    sendPage: async (_text, _chat, signal) => { attempts++; aborted = signal; await new Promise(() => {}); return 1; },
+    deliver: async (_event, content) => { assert.equal(content.kind, "final"); output.sent.push(content.text); return { complete: true, messageId: 1 }; },
   }).consume(handle([text("first", "阶段结论一", true), text("second", "阶段结论二", true), event("run_succeeded")], 0));
   assert.equal(attempts, 1); assert.equal(aborted?.aborted, true); assert.equal(output.sent.at(-1), "最终答案");
+});
+
+test("a late journal page cannot dispatch remaining pages after the progress deadline", async () => {
+  const output = transport(); let attempts = 0; let release!: () => void;
+  const wait = new Promise<void>((resolve) => { release = resolve; });
+  const source = "公开结论".repeat(10000);
+  assert.ok(planProgressDetails(source).length > 1);
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, progressTimeoutMs: 10,
+    sendPage: async () => { attempts++; await wait; return 1; },
+    deliver: async (_event, content) => { output.sent.push(content.text); return { complete: true, messageId: 2 }; },
+  }).consume(handle([text("finding", source, true), event("run_succeeded")], 0));
+  assert.deepEqual(output.sent, ["最终答案"]);
+  release(); await delay(20);
+  assert.equal(attempts, 1);
+});
+
+test("an unpageable journal cannot stop draft timers or final delivery", async () => {
+  const output = transport(); const receipts: Record<string, unknown>[] = [];
+  const source = "| h |\n| --- |\n| " + "x".repeat(40000) + " |";
+  assert.throws(() => planProgressDetails(source), /表格行超过/);
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5,
+    recordProgress: async (_event, fact) => { receipts.push(fact); },
+  }).consume(handle([text("finding", source, true), text("final", "最终答案", true, "final"), event("run_succeeded")], 30));
+  assert.deepEqual(output.sent, ["最终答案"]);
+  assert.ok(output.drafts.some(({ text }) => text === "最终答案"));
+  assert.equal(receipts.filter((fact) => fact.source === "journal" && fact.reason === "planning").length, 1);
 });
 
 test("Rich delivery retries only the rejected Markdown page and preserves full fenced Unicode content", async (t) => {
