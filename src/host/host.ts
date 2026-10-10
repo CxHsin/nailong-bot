@@ -239,9 +239,12 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     if (steer && input.parts.length) {
       const target = [...jobs.values()].find((other) => other.input.conversationId === input.conversationId && other.started && other.steeringOpen && !other.cancelled && !other.closed && !other.control);
       if (target) {
+        const previousSteer = [...jobs.values()].findLast((other) => other.target === target);
         job.target = target;
         jobs.set(runId, job);
         job.submitted = append(job, "control_received", { phase: "steer", parts: input.parts, contextPolicy: "exclude" }).then(async () => {
+          // Skill/image preparation may finish out of order; deliver in receipt order.
+          await previousSteer?.submitted;
           if (!await prepare(job, true)) return;
           if (!target.steeringOpen || target.closed || target.cancelled) {
             await promoteSteer(job); return;
