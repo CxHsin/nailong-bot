@@ -1,6 +1,7 @@
 import { assistantText } from "../agent/model-message.js";
 import { segmentDelivery } from "../runtime/delivery-facts.js";
 import { sourceDigest } from "../runtime/event-digest.js";
+import { factOwnerId } from "../runtime/facts.js";
 import type { Api, AssistantMessage, ImageContent, Message, Model, ToolCall } from "@mariozechner/pi-ai";
 import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "../runtime/runtime-types.js";
@@ -77,7 +78,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); onProgress?.(index - (seed?.start ?? 0), events.length - (seed?.start ?? 0)); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
     if (!effectiveInput(event, events, currentId)) continue;
-    const owner = event.requestId ?? (typeof event.runId === "string" ? event.runId : legacyRequest);
+    const owner = factOwnerId(event) ?? legacyRequest;
     if (!owner || !selected.has(owner)) continue;
     const timestamp = Date.parse(event.at) || 0;
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {

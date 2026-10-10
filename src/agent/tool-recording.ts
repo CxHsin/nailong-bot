@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
 import type { ToolResult } from "../runtime/runtime-types.js";
@@ -15,7 +16,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
       try { archive = await request.log.archive(result); }
       catch (error) { archiveError = String(error); }
       const view = toolResultView(toolName, result, archive, request.log.isArchiveRead(toolName, args));
-      await request.log.append({ type: "tool_result", requestId: request.id,
+      await appendRuntimeFact(request.log, { type: "tool_result", requestId: request.id,
         toolCallId, toolName, isError: result.isError,
         modelVisible: view.modelVisible, modelProjectionVersion: TOOL_RESULT_PROJECTION_VERSION,
         modelProjection: view.modelProjection,
@@ -30,7 +31,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
         if (events.some((e) => e.type === "tool_result" && e.requestId === request.id && e.toolCallId === event.toolCallId)) return;
         if (!events.some((e) => (e.type === "tool_dispatch" || e.type === "tool_blocked") &&
           e.requestId === request.id && e.toolCallId === event.toolCallId))
-          await request.log.append({ type: "tool_blocked", requestId: request.id,
+          await appendRuntimeFact(request.log, { type: "tool_blocked", requestId: request.id,
             toolCallId: event.toolCallId, toolName: event.toolName });
         await recordResult(event.toolCallId, event.toolName,
           { ...event.result, isError: event.isError }, events.findLast((e) => e.toolCallId === event.toolCallId && e.args)?.args);
@@ -51,7 +52,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
         args.limit = Math.min(Math.max(1, args.limit ?? 120), 120);
       }
       try {
-        await request.log.append({ type: "tool_dispatch", requestId: request.id,
+        await appendRuntimeFact(request.log, { type: "tool_dispatch", requestId: request.id,
           toolCallId: context.toolCall.id, toolName: context.toolCall.name, args: context.args });
         request.onProgress?.({ type: "tool", name: context.toolCall.name, callId: context.toolCall.id, state: "started" });
       } catch (error) {

@@ -15,6 +15,14 @@ export type ToolResult = {
 export type ToolArchive = { path: string; bytes: number; sha256: string;
   rawPath: string; rawBytes: number; rawSha256: string };
 
+/** Durable bytes and their provenance, independent of any Context Projection implementation. */
+export type RecordedToolProjection = {
+  content: ToolResult["content"];
+  details: unknown;
+  sourceDigest: string;
+  digest: string;
+};
+
 export interface RuntimeLog {
   bytes(): Promise<number>;
   read(): Promise<StoredEvent[]>;

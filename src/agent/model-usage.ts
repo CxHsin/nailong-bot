@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 import type { Request } from "../application/app-types.js";
 
@@ -7,7 +8,7 @@ export function hasProviderUsage(message: AssistantMessage, initial?: Usage): bo
 }
 
 export async function recordModelUsage(request: Request | undefined, callId: string, purpose: string, message: AssistantMessage, initial?: Usage) {
-  await request?.log.append({ type: "model_usage", requestId: request.id, callId, purpose,
+  if (request) await appendRuntimeFact(request.log, { type: "model_usage", requestId: request.id, callId, purpose,
     provider: message.provider, model: message.model, usageAvailable: hasProviderUsage(message, initial), usage: message.usage,
     stopReason: message.stopReason, providerTimestamp: message.timestamp });
 }

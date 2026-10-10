@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import { createReplayCache } from "./replay-cache.js";
 import { estimateInput, modelInputBudget } from "./input-budget.js";
 import { summaryInput, summarySource, validateSummary } from "./history-summary.js";
@@ -151,12 +152,12 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
               }
             }
           }
-          if (failure) await options.log.append({ type: "compaction_failed", requestId: options.requestId,
+          if (failure) await appendRuntimeFact(options.log, { type: "compaction_failed", requestId: options.requestId,
             failureKey, reason: failure, attempts, initialTokens, budget, target, contextPolicy: "exclude" });
         }
       }
       const estimatedTokens = estimateInput(projected);
-      await options.log.append({ type: "context_projected", requestId: options.requestId, estimatedTokens, initialTokens, budget, trigger, target,
+      await appendRuntimeFact(options.log, { type: "context_projected", requestId: options.requestId, estimatedTokens, initialTokens, budget, trigger, target,
         compactionAttempts: attempts, releasedTokens, degraded: failure, checkpointId: checkpoint?.id,
         coverage: { originalIds: sourceIds(), summaryIds: replay.units.filter((unit) => unit.through <= (checkpoint?.through ?? 0) && !keptUnits().includes(unit)).flatMap((unit) => unit.sourceIds ?? []) },
         diagnostics: replay.diagnostics, logBytes: await options.log.bytes(), replayMs, replayProcessedEvents: replay.processedEvents,

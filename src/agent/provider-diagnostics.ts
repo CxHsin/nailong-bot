@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { channel } from "node:diagnostics_channel";
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
@@ -60,12 +61,12 @@ export async function startObservedProvider(streamFn: AgentSession["agent"]["str
     for (const remove of removers) remove();
     if (error) observation.causes.push(...transportCauses(error).slice(0, 4 - observation.causes.length));
     const { started: _started, ...transport } = observation;
-    recorded = Promise.resolve(request?.log.append({ type: "model_transport", requestId: request.id, callId, purpose, provider: model.provider, model: model.id,
+    recorded = Promise.resolve(request ? appendRuntimeFact(request.log, { type: "model_transport", requestId: request.id, callId, purpose, provider: model.provider, model: model.id,
       ...transport, elapsedMs: elapsed(), stopReason: message?.stopReason ?? "error",
       firstStreamEventMs, firstPublicTextMs, terminalEventMs, normalTerminal,
       abortSource, abortMs, runSignalAborted: request.signal?.aborted ?? false, providerSignalAborted: options.signal?.aborted ?? false,
       configuredTimeoutMs: typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : null,
-      errorCategory: abortSource !== "none" ? "aborted" : providerErrorCategory(message?.stopReason ?? "error", message?.errorMessage, observation.causes), contextPolicy: "exclude" }));
+      errorCategory: abortSource !== "none" ? "aborted" : providerErrorCategory(message?.stopReason ?? "error", message?.errorMessage, observation.causes), contextPolicy: "exclude" }) : undefined);
     return recorded;
   };
   let raw;

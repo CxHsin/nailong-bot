@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import { randomUUID, createHash } from "node:crypto";
 import { createAssistantMessageEventStream, isContextOverflow } from "@mariozechner/pi-ai";
 import type { Api, Model, Message, Usage, SimpleStreamOptions, Tool } from "@mariozechner/pi-ai";
@@ -40,7 +41,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     try { await checkToolPath(context.toolCall.name, context.args as Record<string, unknown>); }
     catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      await request?.log.append({ type: "tool_blocked", requestId: request.id,
+      if (request) await appendRuntimeFact(request.log, { type: "tool_blocked", requestId: request.id,
         toolCallId: context.toolCall.id, toolName: context.toolCall.name, args: context.args, reason });
       return { block: true, reason };
     }
@@ -100,7 +101,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
     summarize: async (context, maxTokens) => {
       request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "正在整理历史摘要……", actionState: "started", finalized: true, formal: false, source: "execution" });
       const callId = randomUUID();
-      await request?.log.append({ type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
+      if (request) await appendRuntimeFact(request.log, { type: "model_call_started", requestId: request.id, callId, purpose: "summary", provider: model.provider, model: model.id });
       const observed = await startObservedProvider(providerStream, model, projectNativeContext(context, model), providerStreamOptions({ maxTokens, signal: session.agent.signal,
         ...(model.reasoning ? { reasoning: "low" as const } : {}) }), request, callId, "summary");
       const stream = observed.source;
@@ -179,18 +180,18 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           // Persist only additions selected for the accepted Provider input. Later
           // steps append a fact rather than replacing the first sent snapshot.
           const appendedReferences = selectedMemory?.shown.filter((reference) => !reference.existing) ?? [];
-          const nextSnapshot = { type: snapshot ? "context_input_updated" : "context_input_snapshot", messages: result.supplemental,
+          const nextSnapshot = { type: snapshot ? "context_input_updated" as const : "context_input_snapshot" as const, messages: result.supplemental,
             shown: appendedReferences, tokens: selectedMemory?.tokens ?? 0,
             memoryCoverage: selectedMemory?.coverage.filter((entry) => appendedReferences.some((reference) =>
               reference.nodeId === entry.nodeId && reference.messageId === entry.messageId && reference.offset === entry.offset && reference.end === entry.end)) ?? [],
             memoryNodeIds: selectedMemory?.quotes.flatMap((quote) => { const reference = quote as { nodeId: string; associationPaths?: string[][] };
               return [reference.nodeId, ...(reference.associationPaths?.flat() ?? [])]; }) ?? [] };
-          await request.log.append({ ...nextSnapshot, requestId: request.id });
+          await appendRuntimeFact(request.log, { ...nextSnapshot, requestId: request.id });
           snapshot ??= { ...nextSnapshot, at: new Date().toISOString() };
         }
         phase("context-check", "上下文预算检查通过。", "completed");
         const loadMs = performance.now() - loadStarted;
-        await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
+        if (request) await appendRuntimeFact(request.log, { type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
         const textSegments = new Map<number, string>();
@@ -202,7 +203,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         };
         activePreview = textSegmentId;
         if (++step > 128) throw new Error("模型超过本轮执行步数上限");
-        await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
+        if (request) await appendRuntimeFact(request.log, { type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
           systemPrompt: result.context.systemPrompt, cacheKey: projectionIdentity?.cacheKey,
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
         request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "上下文已准备好，等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
@@ -264,7 +265,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             if (part?.type === "text" && publicTextPhase(part).phase === "commentary" && part.text.trim()) {
               const id = segmentFor(event.contentIndex);
               const publicPhase = publicTextPhase(part);
-              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+              if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
                 textSegmentId: id, modelTextIndex: event.contentIndex, contentKind: "progress", text: part.text, protocolVersion, source: "execution", ...publicPhase });
               request?.onProgress?.({ type: "text", segmentId: id, kind: "progress", text: part.text, finalized: true, formal: true, source: "execution", ...publicPhase });
               settledSegments.add(event.contentIndex);
@@ -279,9 +280,9 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           await request.log.append({ type: "memory_presented", requestId: request.id,
             modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, memoryCoverage: combined.coverage,
             tokens: combined.tokens, budget: memoryBudget(inputBudget, options.memoryBudget) });
-        await request?.log.append({ type: "model_message", requestId: request.id, step,
+        if (request) await appendRuntimeFact(request.log, { type: "model_message", requestId: request.id, step,
           modelStepId, protocolVersion, message });
-        await request?.log.append({ type: "model_step_completed", requestId: request.id,
+        if (request) await appendRuntimeFact(request.log, { type: "model_step_completed", requestId: request.id,
           step, modelStepId, stopReason: message.stopReason });
         if (attempt === 0 && message.stopReason === "error" && !producedOutput && !message.content.length &&
           isContextOverflow(message, selected.contextWindow)) {
@@ -304,7 +305,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
             const kind = publicPhase.phase === "commentary" ? "progress" : "final";
             const id = segmentFor(index);
             if (!settledSegments.has(index)) {
-              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+              if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
                 textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution", ...publicPhase });
               request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution", ...publicPhase });
             }
@@ -312,7 +313,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           }
           if (finalParts.length) finalText = finalParts.join("\n");
           else if (!toolCalls.length) await queueFeedback("上一条是公开进展说明，请继续实际操作，或提交最终答复、阻碍或澄清问题。");
-          for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
+          for (const part of toolCalls) if (request) await appendRuntimeFact(request.log, { type: "tool_call", requestId: request.id,
             toolCallId: part.id, toolName: part.name, args: part.arguments });
           const response = createAssistantMessageEventStream();
           response.push({ type: "done", reason: message.stopReason, message });
@@ -335,7 +336,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           normalizedWhitespace: !invalid && normalizeOutputWhitespace(raw) !== raw, repairedEnvelope });
         const response = createAssistantMessageEventStream();
         if (invalid) {
-          await request?.log.append({ type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
+          if (request) await appendRuntimeFact(request.log, { type: "text_discarded", requestId: request.id, modelStepId, textSegmentId, reason: invalid });
           request?.onProgress?.({ type: "discard", segmentId: textSegmentId });
           if (request && (await request.log.read()).some((entry) => entry.textSegmentId === textSegmentId && entry.type === "telegram_delivery_attempt"))
             throw new Error("模型协议在部分正文提交后失效，本轮未完成");
@@ -359,14 +360,14 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           }
           await request?.log.append({ type: "text_snapshot", requestId: request.id, modelStepId,
             textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
-          await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+          if (request) await appendRuntimeFact(request.log, { type: "text_finalized", requestId: request.id, modelStepId,
             textSegmentId, contentKind: parsed.type, text: parsed.text, protocolVersion: parsed.type === "progress" ? "json-text-v1" : OUTPUT_PROTOCOL_VERSION });
           request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind: parsed.type, text: parsed.text, finalized: true });
           await request?.onText?.(textSegmentId);
           if (parsed.type !== "final" && !toolCalls.length)
             await queueFeedback(`上一条输出是 ${parsed.type}，请继续实际操作，或用 final 提交答案、阻碍或澄清问题。`);
         }
-        for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
+        for (const part of toolCalls) if (request) await appendRuntimeFact(request.log, { type: "tool_call", requestId: request.id,
           toolCallId: part.id, toolName: part.name, args: part.arguments });
         response.push({ type: "done", reason: message.stopReason, message });
         return response;

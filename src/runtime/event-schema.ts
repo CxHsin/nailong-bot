@@ -1,26 +1,90 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 import type { EventInput } from "./sqlite-runtime-log.js";
-import type { ToolResult } from "./runtime-types.js";
+import type { ToolArchive, ToolResult, RecordedToolProjection } from "./runtime-types.js";
+import type { ContentPart } from "../host/content-parts.js";
+import type { PublicTextPhase, RunProgress } from "./progress.js";
+import type { TransportCause } from "./transport-diagnostics.js";
 import { validModelAlias } from "../agent/model-config.js";
 
-type RequestFact = { requestId: string; conversationId?: string };
+type RequestFact = { requestId: string };
 type ToolFact = RequestFact & { toolCallId: string; toolName: string };
 type ContentFact = RequestFact & { textSegmentId: string };
 type PageFact = ContentFact & { partIndex: number; target: number };
-/** Core v2 semantic shapes. Legacy and memory metadata retain their own compatibility schemas. */
-export type RuntimeSemanticFact =
-  | ({ type: "model_selected"; conversationId: string; modelAlias: string; contextPolicy: "exclude" })
-  | (RequestFact & { type: "message"; role: "user" | "assistant"; text: string })
-  | ({ type: "run_submitted" | "run_started" | "run_succeeded" | "run_failed" | "run_cancelled"; runId: string; conversationId?: string; result?: Record<string, unknown> })
-  | (RequestFact & { type: "request_started" | "request_completed" | "request_failed" | "request_interrupted" })
-  | (RequestFact & { type: "model_message"; modelStepId: string; message: AssistantMessage })
-  | (ToolFact & { type: "tool_dispatch" | "tool_call" | "tool_blocked"; args?: unknown })
-  | (ToolFact & { type: "tool_result"; result: ToolResult })
-  | (ContentFact & { type: "text_finalized"; text: string; contentKind: "progress" | "final" | "status" | "result"; source?: "execution" | "progress-model"; evidenceIds?: string[] })
-  | (ContentFact & { type: "text_discarded"; reason?: string })
-  | (PageFact & { type: "telegram_page"; text: string })
-  | (ContentFact & { type: "telegram_plan_finalized"; parts: number })
-  | (PageFact & { type: "telegram_delivery_attempt" | "telegram_delivery_succeeded" | "telegram_delivery_failed" | "telegram_delivery_unknown"; attemptId: string; telegramMessageId?: number });
+type HostFact = { runId: string; conversationId: string; actorId?: string; phase?: string;
+  source?: "runtime" | "provider" | "channel"; visibility?: "quiet" | "normal" | "verbose" | "always";
+  text?: string; error?: string; reason?: string; parts?: ContentPart[]; receiptId?: string;
+  cancelledInputs?: number; inputKey?: string; progress?: RunProgress; result?: Record<string, unknown> };
+type ModelCall = RequestFact & { callId: string; purpose: string; provider: string; model: string };
+type ModelStep = RequestFact & { modelStepId: string; step: number };
+type CatalogTool = { name: string; source: string; originalName: string; description: string; parameters: unknown; digest: string };
+type OriginalCoverage = { kind: "original"; nodeId: string; messageId: string; offset: number; end: number; complete: boolean };
+type ShownMemory = { nodeId: string; messageId: string; offset: number; end: number; existing: boolean };
+type ContextInput = RequestFact & { messages: Message[]; shown: ShownMemory[]; tokens: number;
+  memoryCoverage: OriginalCoverage[]; memoryNodeIds: string[] };
+
+/** The current production facts. Raw historical/unknown records stay on RuntimeLog's compatibility boundary. */
+type RuntimeFactShapes = {
+  model_selected: { conversationId: string; modelAlias: string; contextPolicy: "exclude" };
+  message: RequestFact & { role: "user" | "assistant"; text: string; originalText?: string; chatId?: number;
+    messageId?: unknown; replyToMessageId?: number; replyContext?: unknown; images?: unknown[]; inputId?: string; inputKind?: "steer" };
+  run_submitted: HostFact;
+  run_started: HostFact;
+  run_succeeded: HostFact & { result: Record<string, unknown> & { resultId: string } };
+  run_failed: HostFact;
+  run_cancelled: HostFact;
+  run_blocked: HostFact;
+  run_recovered: HostFact;
+  conversation_reset: Partial<HostFact> & { conversationId: string; source?: "runtime" | "provider" | "channel" };
+  input_receipt: HostFact;
+  control_received: HostFact;
+  control_completed: HostFact;
+  steer_consumed: RequestFact & { inputId: string; conversationId: string; contextPolicy: "exclude" };
+  request_started: RequestFact;
+  request_completed: RequestFact;
+  request_failed: RequestFact & { error?: string; phase?: string };
+  request_interrupted: RequestFact;
+  model_message: RequestFact & { modelStepId: string; message: AssistantMessage; step?: number; protocolVersion?: string };
+  model_step_started: ModelStep & { purpose: "execution"; provider: string; model: string; systemPrompt?: string; cacheKey?: string; stablePrefixKey: string };
+  model_step_completed: ModelStep & { stopReason: AssistantMessage["stopReason"] };
+  model_call_started: ModelCall;
+  model_usage: ModelCall & { usageAvailable: boolean; usage: Usage; stopReason: AssistantMessage["stopReason"]; providerTimestamp: number };
+  model_transport: ModelCall & { causes: TransportCause[]; httpStatus: number | null; providerRequestId: string | null; headersMs: number | null;
+    elapsedMs: number; stopReason: AssistantMessage["stopReason"]; firstStreamEventMs: number | null; firstPublicTextMs: number | null;
+    terminalEventMs: number | null; normalTerminal: boolean; abortSource: "none" | "run-signal" | "provider-signal" | "timeout-signal";
+    abortMs: number | null; runSignalAborted: boolean; providerSignalAborted: boolean; configuredTimeoutMs: number | null;
+    errorCategory: "none" | "stream_terminated" | "network" | "aborted" | "context_overflow" | "unknown"; contextPolicy: "exclude" };
+  tool_dispatch: ToolFact & { args: unknown };
+  tool_call: ToolFact & { args: unknown };
+  tool_blocked: ToolFact & { args?: unknown; reason?: string };
+  tool_result: ToolFact & { result: ToolResult; isError: boolean; modelVisible: "original" | "archive";
+    modelProjectionVersion: number; modelProjection: RecordedToolProjection; archive?: ToolArchive; archiveError?: string };
+  tool_discovered: RequestFact & { query: string; tools: CatalogTool[] };
+  capability_snapshot: RequestFact & { catalogDigest: string; skillsDigest: string; mode: "native" | "compat"; unavailableSources: string[]; tools: CatalogTool[] };
+  capability_dispatched: ToolFact & { source: string; digest: string; args: unknown };
+  capability_executed: ToolFact & { source: string; digest: string; result: { content: ToolResult["content"]; details: unknown } };
+  text_finalized: ContentFact & { text: string; contentKind: "progress" | "final" | "status" | "result";
+    source?: "execution" | "progress-model"; evidenceIds?: string[]; modelStepId?: string; modelTextIndex?: number; protocolVersion?: string } & Partial<PublicTextPhase>;
+  text_discarded: ContentFact & { reason?: string; modelStepId?: string };
+  telegram_page: PageFact & { text: string; contentKind: "progress" | "final" };
+  telegram_plan_finalized: ContentFact & { parts: number };
+  telegram_delivery_attempt: PageFact & { attemptId: string };
+  telegram_delivery_succeeded: PageFact & { attemptId: string; telegramMessageId: number };
+  telegram_delivery_failed: PageFact & { attemptId: string; error: string };
+  telegram_delivery_unknown: PageFact & { attemptId: string; error: string };
+  delivery_succeeded: RequestFact & { runId: string; resultId: string; channel: "telegram" | "cli"; telegramMessageId?: number; stageSegmentIds?: unknown };
+  answer_generated: RequestFact & { text: string; resultId: string };
+  context_input_snapshot: ContextInput;
+  context_input_updated: ContextInput;
+  context_phase_timing: RequestFact & { restoreMs: number; selectMs: number; loadMs: number; contextPolicy: "exclude" };
+  context_projected: RequestFact & { estimatedTokens: number; initialTokens: number; budget: number; trigger: number; target: number;
+    compactionAttempts: number; releasedTokens: number; degraded?: string; checkpointId?: string;
+    coverage: { originalIds: string[]; summaryIds: string[] }; diagnostics: string[]; logBytes: number; replayMs: number; replayProcessedEvents?: number; processPeakRssBytes: number };
+  compaction_failed: RequestFact & { failureKey: string; reason: string; attempts: number; initialTokens: number; budget: number; target: number; contextPolicy: "exclude" };
+};
+
+export type RuntimeFactType = keyof RuntimeFactShapes;
+export type RuntimeFactOf<T extends RuntimeFactType> = { [K in T]: { type: K; at?: string; conversationId?: string; contextPolicy?: "include" | "exclude" } & RuntimeFactShapes[K] }[T];
+export type RuntimeSemanticFact = RuntimeFactOf<RuntimeFactType>;
 
 /** Validate before the transaction writes anything; previews do not enter this boundary. */
 export function validateRuntimeFact(event: EventInput): void {
