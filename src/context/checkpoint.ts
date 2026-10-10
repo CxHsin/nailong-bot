@@ -6,7 +6,7 @@ import { sourceDigest } from "../runtime/event-digest.js";
 
 export type Checkpoint = { version: 2; id: string; boundary: string; through: number; sourceDigest: string;
   lastEventDigest: string; summaryStrategy: "full-result-v1" | "structured-text-v1";
-  summary: string; previousId?: string; model: string; ratio: number; createdAt: string };
+  summary: string; retainedInstructionThrough?: number[]; previousId?: string; model: string; ratio: number; createdAt: string };
 
 export function createCheckpointStore(dataDir: string, strategy: Checkpoint["summaryStrategy"] = "full-result-v1", conversationId?: string, log?: RuntimeLog) {
   const root = conversationId ? join(dataDir, "checkpoints", "conversations") : dataDir;
@@ -22,6 +22,7 @@ export function createCheckpointStore(dataDir: string, strategy: Checkpoint["sum
       const validCheckpoint = (c: Checkpoint, expectedBoundary = boundary) => c?.version === 2 && typeof c.id === "string" &&
         typeof c.createdAt === "string" && c.summaryStrategy === strategy &&
         c.boundary === expectedBoundary && Number.isInteger(c.through) && c.through >= 1 && c.through <= events.length &&
+        (c.retainedInstructionThrough === undefined || Array.isArray(c.retainedInstructionThrough) && c.retainedInstructionThrough.every((through) => Number.isInteger(through) && through > 0 && through <= c.through)) &&
         typeof c.summary === "string" && c.sourceDigest === sourceDigest(events.slice(0, c.through)) &&
         c.lastEventDigest === sourceDigest(events[c.through - 1]) &&
         !events.slice(c.through).some((event) => {

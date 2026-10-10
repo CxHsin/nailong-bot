@@ -54,9 +54,9 @@ export async function scanSkills(sources: SkillSource[]): Promise<SkillSnapshot>
   const metadata = skills.length ? `\n\n可用 skills（指令）：${JSON.stringify(items)}\n任务匹配时先用 read 读取对应 SKILL.md 全文，按继续读取提示取得所有分页后再遵循。资源路径相对于 skill 根目录；仅按任务需要读取引用的文件。读取脚本不等于执行，脚本需通过已配置的执行工具运行；缺少执行能力时明确说明。` : "";
   return { skills, metadata, digest: skillDigest(JSON.stringify(items)) };
 }
-export async function explicitSkills(snapshot: SkillSnapshot, text: string, request: Request) {
-  const prefix = request.channel === "telegram" ? "/" : "@";
-  const references = [...new Set(request.channel === "telegram" ? telegramSkillReferences(text) :
+export function resolveExplicitSkills(snapshot: SkillSnapshot, text: string, channel?: string) {
+  const prefix = channel === "telegram" ? "/" : "@";
+  const references = [...new Set(channel === "telegram" ? telegramSkillReferences(text) :
     [...text.matchAll(/(?:^|\s)@([a-z0-9][a-z0-9:_-]*)(?=$|\s|[，。！？,!?])/g)].map((match) => match[1]!))];
   // Resolve every name before recording any successful injection.
   const resolved = references.map((name) => {
@@ -65,8 +65,11 @@ export async function explicitSkills(snapshot: SkillSnapshot, text: string, requ
     if (found.length > 1) throw new SkillReferenceError(`skill 名称有歧义：${prefix}${name}；请选择 ${found.map((skill) => `${prefix}${skill.source}:${skill.name}`).join("、")}。`);
     return found[0]!;
   });
-  const selected = resolved.filter((skill, index) => resolved.findIndex((candidate) => candidate.path === skill.path) === index);
-  for (const skill of selected) await request.log.append({ type: "skill_loaded", requestId: request.id, name: skill.name, source: skill.source,
+  return resolved.filter((skill, index) => resolved.findIndex((candidate) => candidate.path === skill.path) === index);
+}
+export async function explicitSkills(snapshot: SkillSnapshot, text: string, request: Request) {
+  const selected = resolveExplicitSkills(snapshot, text, request.channel);
+  for (const skill of selected) await request.log.append({ type: "skill_loaded", requestId: request.id, ...(request.inputId ? { inputId: request.inputId } : {}), name: skill.name, source: skill.source,
     path: skill.path, root: skill.root, digest: skill.digest, body: skill.body, mode: "explicit" });
   return selected;
 }

@@ -17,7 +17,8 @@
 | Telegram 私聊 | `npm start`；只接受配置账号的私聊文字和照片，照片先下载再归一化 | [`src/main.ts`](src/main.ts)、[`telegram-input.ts`](src/telegram/telegram-input.ts) | [`telegram-images.test.ts`](test/telegram-images.test.ts) |
 | CLI 对话 | `npm run chat` 逐行交互；`npm run send -- "问题"` 单次发送；send 支持 `--image` | [`src/cli/main.ts`](src/cli/main.ts)、[`cli-channel.ts`](src/cli/cli-channel.ts) | [`cli-channel.test.ts`](test/cli-channel.test.ts) |
 | 统一输入与运行 | 两个入口都用 Host API；输入携带 Actor、conversationId 和文字／图片 Content Parts，返回有序 RunHandle 事件；同一 Host 实例内模型任务串行执行，只读缓存查询独立处理 | [`host.ts`](src/host/host.ts)、[`content-parts.ts`](src/host/content-parts.ts) | [`host.test.ts`](test/host.test.ts) |
-| 会话隔离与跨 Channel 续聊 | 历史、提示词设置、摘要 checkpoint 和记忆按 conversationId 隔离；共用数据目录时，CLI 指定 Telegram 的 conversationId 可继续同一会话 | [`agent-host.ts`](src/application/agent-host.ts)、[`conversation-log.ts`](src/runtime/conversation-log.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
+| 会话隔离与跨 Channel 续聊 | 历史、提示词设置、摘要 checkpoint 和记忆按 conversationId 隔离；停用旧 Host 后，CLI 指定相同目录和 Telegram conversationId 可继续同一会话 | [`agent-host.ts`](src/application/agent-host.ts)、[`conversation-log.ts`](src/runtime/conversation-log.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`cache-provider.test.ts`](test/cache-provider.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
+| Follow-up、Steer 与 Stop | 忙时普通输入独立排队；/steer 在完整工具批次后引导当前 Run；/stop 取消此前待处理输入并等待退出 | [`host.ts`](src/host/host.ts)、[`ADR-0005`](docs/adr/0005-follow-up-and-steering-lifecycle.md) | [`input-controls.test.ts`](test/input-controls.test.ts)、[`host-process.test.ts`](test/host-process.test.ts) |
 | 共享控制命令 | Telegram／CLI 支持 `/help`、`/kvcache`、`/reset`、`/prompt`、`/forget`、`/memory log`；修改命令进入串行队列，/kvcache 即时读取快照，均不调用模型；Telegram 启动时同步账号专属命令菜单 | [`agent-host.ts`](src/application/agent-host.ts)、[`host-channel.ts`](src/channel/telegram/host-channel.ts) | [`agent-host.test.ts`](test/agent-host.test.ts)、[`command-channels.test.ts`](test/command-channels.test.ts) |
 | Telegram 排版与交付 | 可见说明、工具状态和最终正文通过原生 Rich Markdown 草稿持续更新，结算后以相同格式保留；长文分段交付，解析失败保留上一份有效预览 | [`projection.ts`](src/channel/telegram/projection.ts)、[`rich-transport.ts`](src/channel/telegram/rich-transport.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-rich-transport.test.ts`](test/telegram-rich-transport.test.ts)、[`ui-projection.test.ts`](test/ui-projection.test.ts) |
 | 实时进展 | 模型自然说明与真实工具状态共存；Telegram 约每 250ms 合并原生草稿快照，等待耗时每五秒更新，结束停止刷新；交付失败或超时不阻断最终答复 | [`progress.ts`](src/runtime/progress.ts)、[`agent-host.ts`](src/application/agent-host.ts)、[`native-progress.ts`](src/channel/telegram/native-progress.ts) | [`telegram-progress-journal.test.ts`](test/telegram-progress-journal.test.ts)、[`telegram-channel.test.ts`](test/telegram-channel.test.ts) |
@@ -73,7 +74,7 @@ Host／Channel 集成规格见 [#60](https://github.com/CxHsin/nailong-bot/issue
 | 指定 conversationId | `npm run send -- "继续" --conversation-id telegram:private:42` |
 | 机器可读事件 | `npm run send -- "问题" --ndjson` |
 
-Telegram 使用 long polling，无需公网地址；只有进程运行时在线。CLI 使用同一 Host 实现，各启动进程持有自己的 Host 实例；队列只保证实例内串行。
+Telegram 使用 long polling，无需公网地址；只有进程运行时在线。CLI 使用同一 Host 实现，各启动进程持有自己的 Host 实例。同一实际数据目录只允许一个 Host，第二个在初始化和恢复前拒绝启动；正常退出或进程死亡后释放所有权。CLI 不控制另一进程中的 Telegram 活动任务。
 
 可用 `AGENT_DATA_DIR` 指定运行数据目录（默认 `data/`），`AGENT_PROMPT_FILE` 指定提示词文件（默认 `system-prompt.md`），`AGENT_ACTOR_ID` 指定 CLI Actor（默认 `cli`）。Telegram 会话为 `telegram:private:<用户 ID>`，CLI 默认为 `cli:<Actor ID>`；不同 conversationId 的历史与记忆隔离。跨入口续聊需要使用同一数据目录和 conversationId。
 
@@ -82,6 +83,8 @@ Telegram 私聊和 CLI chat／send 共用以下纯文字命令；CLI 单次调�
 | 命令 | 行为 |
 | --- | --- |
 | `/help` | 查看命令帮助 |
+| `/steer 内容` | 在完整模型步骤和工具批次后引导当前 Run，可附图片和显式技能；没有活动 Run 或正在停止时按普通输入处理 |
+| `/stop` | 即时停止当前 Run，并取消此前接受的待处理输入和排队命令；反馈实际停止与取消条数，保留已完成操作 |
 | `/kvcache` | 即时查询最近五组运行的缓存快照；不调用模型 |
 | `/feed` | 喂奶龙小面包，临时提升下一次普通对话上下文预算 |
 | `/dance` | Telegram 随机发送奶龙跳舞贴纸 |
@@ -91,6 +94,10 @@ Telegram 私聊和 CLI chat／send 共用以下纯文字命令；CLI 单次调�
 | `/memory log 节点引用 [字符位置]` | 分段诊断查阅原始轮次，不恢复记忆或参与强化 |
 
 Telegram 启动时为配置账号注册命令菜单；菜单同步失败会报告错误并继续启动聊天。
+
+忙时直接发送普通任务即为 Follow-up：立即确认排队，当前任务成功后按接收顺序各自运行。当前任务失败时取消本 Conversation 已有队列；Stop 后的新输入等待旧执行退出。CLI chat 在运行中按 Ctrl+C 走同一 Stop 入口并继续接收输入，空闲时退出。`--json` 控制回执包含 phase、receiptId 和 cancelledInputs。
+
+重启只记录中断，不自动执行旧任务或队列；启动 Channel 汇总需要重新提交的输入。没有恢复事项时安静，已知成功或结果未知的通知不重复发送。已生效引导、工具事实和停止状态可重建；从未用于模型的取消输入只保留审计记录。技能正文冻结于输入接受时，后续文件改动不改变已接受输入。
 
 ## 运行数据与上下文
 

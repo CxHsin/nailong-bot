@@ -52,6 +52,35 @@ test("Host serializes runs globally and exposes ordered terminal events", async 
   assert.deepEqual(stored.map((event) => event.type), firstEvents.filter((event) => event.type !== "progress").map((event) => event.type));
 });
 
+test("a Steer validated after its target closes keeps its acceptance order as an ordinary Run", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "host-steer-close-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = createRuntimeLog(dir);
+  const barrier = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((complete) => { resolve = complete; });
+    return { promise, resolve };
+  };
+  const started = barrier(); const finish = barrier();
+  const validating = barrier(); const validated = barrier();
+  const execution: string[] = [];
+  const host = createHost({ log,
+    prepare: async (_input, steering) => { if (steering) { validating.resolve(); await validated.promise; } },
+    execute: async (request) => {
+      const text = request.parts.find((part) => part.type === "text")!.text;
+      execution.push(text);
+      if (text === "first") { started.resolve(); await finish.promise; }
+      return { text };
+    } });
+  const first = host.submit(input("first")); await started.promise;
+  const steer = host.submit(input("/steer earlier-steer")); await validating.promise;
+  const followup = host.submit(input("later-followup"));
+  finish.resolve(); await first.done; validated.resolve();
+  assert.equal((await steer.done).type, "run_succeeded");
+  await followup.done;
+  assert.deepEqual(execution, ["first", "earlier-steer", "later-followup"]);
+});
+
 test("Host persists envelopes through SQLite without claiming log identities", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "host-sqlite-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

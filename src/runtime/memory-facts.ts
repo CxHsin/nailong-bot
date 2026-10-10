@@ -4,6 +4,14 @@ import type { StoredEvent } from "./runtime-types.js";
 
 export type MemoryMessage = { id: string; role: "user" | "assistant"; text: string; at: string; availableSequence?: number; images?: unknown[] };
 export type MemoryNode = { id: string; requestId?: string; userId: number; at: string; messages: MemoryMessage[] };
+/** Prepared steering is visible only to its live projection until a Provider payload accepts it. */
+export function effectiveInput(event: StoredEvent, events: StoredEvent[], currentId?: string): boolean {
+  if (typeof event.inputId !== "string") return true;
+  if (events.some((item) => item.runId === event.inputId && item.type === "control_completed" && item.phase === "steer_applied")) return true;
+  return event.requestId === currentId && !events.some((item) =>
+    (item.inputId === event.inputId && item.type === "steer_unapplied") ||
+    ((item.requestId === currentId || item.runId === currentId) && ["request_interrupted", "request_failed", "run_cancelled", "run_failed"].includes(item.type)));
+}
 export function eventIdentity(event: StoredEvent, index: number): string {
   return typeof event.eventId === "string" ? event.eventId : `event:${index}:${sourceDigest(event)}`;
 }
@@ -45,15 +53,18 @@ export function memoryNodes(events: StoredEvent[], userId: number): MemoryNode[]
   for (const [index, event] of events.entries()) {
     if (event.type === "message" && event.role === "user" && typeof event.text === "string") {
       legacy = undefined;
-      if (event.chatId !== undefined && event.chatId !== userId || event.text.startsWith("/")) continue;
+      if (!effectiveInput(event, events)) continue;
+      if (event.chatId !== undefined && event.chatId !== userId || event.text.startsWith("/") && event.inputKind !== "steer") continue;
       const id = event.requestId ?? eventIdentity(event, index);
       if (excluded.has(id)) continue;
-      const node: MemoryNode = { id, requestId: event.requestId, userId, at: event.at, messages: [
+      const node: MemoryNode = nodes.find((node) => node.id === id) ?? { id, requestId: event.requestId, userId, at: event.at, messages: [] };
+      node.messages.push(
         { id: eventIdentity(event, index), role: "user", text: event.originalText === null ? "" : typeof event.originalText === "string" ? event.originalText : event.text,
           at: event.at, availableSequence: index, ...(Array.isArray(event.images) ? { images: event.images.map((image, imageIndex) => ({
             eventId: eventIdentity(event, index), imageIndex, mimeType: (image as { mimeType?: string }).mimeType })) } : {}) },
-      ] };
-      nodes.push(node); legacy = node;
+      );
+      if (!nodes.includes(node)) nodes.push(node);
+      legacy = node;
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && legacy && typeof event.text === "string") {
       legacy.messages.push({ id: eventIdentity(event, index), role: "assistant", text: event.text, at: event.at, availableSequence: index });
     }

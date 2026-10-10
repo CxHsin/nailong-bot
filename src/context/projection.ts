@@ -6,14 +6,14 @@ import { type RuntimeLog, type StoredEvent, type ToolArchive,
   type ToolResult } from "../runtime/runtime-types.js";
 import { protocolText } from "../agent/output-protocol.js";
 import { replayToolResultView } from "./tool-result-projection.js";
-import { eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
+import { effectiveInput, eventIdentity, memoryExclusions } from "../runtime/memory-facts.js";
 import { filterMemoryEvents, filterMemoryToolResult, filterArchivedMemoryResult } from "../runtime/memory-exclusion.js";
 import { userInputText } from "../runtime/reply-context.js";
 import { replayableReasoning } from "./provider-aware.js";
 import { prepareActiveContext, activeContextStart, activeRequestIds } from "./active-context.js";
 
 export type ReplayUnit = { messages: Message[]; summaryMessages?: Message[];
-  through: number; requestId?: string; safe: boolean; sourceIds?: string[] };
+  through: number; requestId?: string; safe: boolean; sourceIds?: string[]; protected?: boolean };
 export type Replay = { events: StoredEvent[]; boundary: string; units: ReplayUnit[]; current: Message;
   diagnostics: string[]; processedEvents?: number };
 
@@ -76,6 +76,7 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     if (index < (seed?.start ?? 0)) continue;
     if (index % 32 === 0) { if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError"); onProgress?.(index - (seed?.start ?? 0), events.length - (seed?.start ?? 0)); await new Promise<void>((resolve) => setImmediate(resolve)); }
     if (event.type === "text_finalized" && discarded.has(event.textSegmentId)) continue;
+    if (!effectiveInput(event, events, currentId)) continue;
     const owner = event.requestId ?? (typeof event.runId === "string" ? event.runId : legacyRequest);
     if (!owner || !selected.has(owner)) continue;
     const timestamp = Date.parse(event.at) || 0;
@@ -84,9 +85,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       const text = userInputText(event, excluded);
       const message: Message = { role: "user", content: images.length
         ? [{ type: "text", text }, ...images] : text, timestamp };
-      if (event.requestId === currentId) current = message;
+      if (event.requestId === currentId && event.inputKind !== "steer") current = message;
       legacyRequest = event.requestId ?? (active ? `legacy:${eventIdentity(event, all.indexOf(event))}` : `legacy:${index}`);
-      const snapshots = events.filter((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);
+      const snapshots = event.inputKind === "steer" ? [] : events.filter((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);
       const supplemental = snapshots.flatMap((snapshot) => {
         const messages = Array.isArray(snapshot.messages) ? snapshot.messages as Message[] : [];
         const excludedQuotes = Array.isArray(snapshot.memoryNodeIds) && snapshot.memoryNodeIds.some((id) => excluded.has(String(id)));
@@ -94,6 +95,9 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
       });
       units.push({ messages: [...supplemental, message], through: Math.max(index + 1, ...snapshots.map((snapshot) => events.indexOf(snapshot) + 1)), requestId: legacyRequest, safe: true,
         sourceIds: [eventIdentity(event, all.indexOf(event))] });
+    } else if (["run_cancelled", "run_failed"].includes(event.type)) {
+      units.push({ messages: [{ role: "user", timestamp, content: `运行层状态记录：Run ${owner} 已${event.type === "run_cancelled" ? "停止" : "失败"}。已完成的操作保留；不要自动续做已停止的任务或执行已取消的待处理输入，后续工作以新的用户输入为准。` }],
+        through: index + 1, requestId: owner, safe: true, protected: true });
     } else if (event.type === "context_input_updated" && Array.isArray(event.messages)) {
       const excludedQuotes = Array.isArray(event.memoryNodeIds) && event.memoryNodeIds.some((id) => excluded.has(String(id)));
       const messages = (event.messages as Message[]).filter((message) => !excludedQuotes ||
@@ -105,7 +109,8 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
     } else if (event.type === "message" && event.role === "assistant" && !event.requestId && typeof event.text === "string") {
       units.push({ messages: [replayText("final", event.text, timestamp)], through: index + 1,
         requestId: legacyRequest, safe: true, sourceIds: [eventIdentity(event, all.indexOf(event))] });
-    } else if (structured && event.type === "protocol_feedback" && event.requestId === currentId && typeof event.text === "string") {
+    } else if (structured && event.type === "protocol_feedback" && event.requestId === currentId && typeof event.text === "string" &&
+      !events.slice(index + 1).some((next) => next.type === "protocol_feedback_superseded" && next.requestId === currentId)) {
       units.push({ messages: [{ role: "user", content: event.text, timestamp }], through: index + 1,
         requestId: event.requestId, safe: true, summaryMessages: [] });
     } else if (event.type === "model_message") {

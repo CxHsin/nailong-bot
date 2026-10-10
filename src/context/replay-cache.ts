@@ -12,7 +12,7 @@ import { eventIdentity } from "../runtime/memory-facts.js";
 type Snapshot = { version: 1; key: string; identity?: string; prefixDigest?: string;
   raw: StoredEvent[]; replay: Replay; results: Record<string, ToolResult> };
 export function createReplayCache(dataDir: string, identity: string) {
-  const key = sourceDigest({ version: 1, policy: "continuous-active-context-v1", identity });
+  const key = sourceDigest({ version: 1, policy: "continuous-active-context-input-controls-v2", identity });
   const path = join(dataDir, "context-projections", `${key}.json`);
   let cached: Snapshot | undefined;
   let loaded = false;

@@ -7,9 +7,12 @@ export type Message = { role: "user" | "assistant"; text: string; images?: Image
 export type Request = { modelAlias?: string; contextBudgetBoost?: boolean; id: string; log: RuntimeLog; conversationId?: string; botPrompt?: string; botPromptVersion?: string;
   channel?: string;
   skillSnapshot?: import("../agent/skills.js").SkillSnapshot;
+  inputId?: string;
   loadedSkillPaths?: string[];
   onProgress?: (progress: RunProgress) => void;
   signal?: AbortSignal;
+  bindSteering?: import("../host/host.js").RunExecutionContext["bindSteering"];
+  onModelInput?: () => Promise<void>;
   /** Compatibility callback for the old log-backed Telegram application. */
   onText?: (textSegmentId: string) => Promise<void> };
 export class DeliveryRejected extends Error {

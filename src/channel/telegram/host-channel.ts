@@ -23,6 +23,7 @@ export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId
     options.reportFailure(new Error("Telegram 命令菜单同步失败；聊天继续启动，下次启动将重试。", { cause: error }));
   }
   const pickSticker = createNailongStickerPicker();
+  await options.host.notifyRecovery("telegram", async (text) => { await options.transport.send(text, ownerId); });
   const projection = createTelegramHostProjection({ ...options.transport,
     recordProgress: (event, fact) => options.host.recordProgress(event, fact),
     sendSticker: options.transport.sendSticker ?? (async (category, chatId) =>
