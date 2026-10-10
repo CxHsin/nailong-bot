@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Preserve continuous active context across runs and restarts
@@ -10,7 +10,13 @@ An input budget applies throughout execution. Reaching a threshold triggers batc
 
 Compaction must retain effective user constraints, unfinished work, key decisions, continuation state and evidence references, alongside recent originals. Details of completed topics may leave active context and remain recoverable from the log or Akasha. Akasha continues automatic question-related retrieval, appending relevant original fragments not already fully represented in active context; explicit search and read remain available. Lossy summary coverage must not block recovery of the originals it covers. Exact and partial original coverage therefore need to remain distinct from summary coverage.
 
-These directions were confirmed during the 2026-10-10 design discussion. Budget values, initial transition from the existing policy and compaction failure handling remain open. This proposal does not yet supersede ADR-0003 or change runtime behavior; the complete design and implementation acceptance are pending. Supporting evidence: [long-conversation research](../research/long-conversation-prompt-cache-2026-10-10.md).
+At the initial transition, continue from the last valid active context, including its settled answer, instead of loading all older history. This is a one-time migration boundary, retained during subsequent reconstruction. Runtime Event Log and Akasha continue to provide access to earlier facts.
+
+Failed or ineffective compaction preserves the original context and checkpoint. Continue with a recorded degraded state only when the complete input still fits the hard budget; otherwise fail explicitly. Bound retries for the same compaction boundary, preserve completed tool outcomes and avoid clearing the Conversation as a recovery action.
+
+These directions were confirmed during the 2026-10-10 design discussion. Initial configurable watermarks are delegated to read-only replay measurements; count fixed prompts, tools, memory and output headroom as well as conversation history. This is an accepted design, with implementation and migration still pending: ADR-0003 describes current runtime behavior until that change is validated and deployed. Supporting evidence: [long-conversation research](../research/long-conversation-prompt-cache-2026-10-10.md).
+
+Confirmed conclusion: [#125](https://github.com/CxHsin/nailong-bot/issues/125). Initial candidates are a trigger at 70% and a target at 40% of the effective hard input budget, a recent-original allowance of 20,000 tokens and a summary ceiling of 4,000 tokens. Fit the complete request within budget; these allowances are not unconditional retention guarantees. The recorded four-turn replay supports a conservative starting point, not optimal watermarks or measured continuous-context performance; see the research note's offline measurement section.
 
 ## Consequences
 

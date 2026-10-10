@@ -41,8 +41,12 @@ The Provider-aware transformation from durable runtime records into the exact mo
 _Avoid_: chat history (which includes records that may never be sent to a model)
 
 **Recent Turn**:
-One user input and its replayable assistant messages and paired tool exchanges. Context Projection retains the latest three prior turns plus the current turn; older relevant memory is recalled by Akasha.
+One user input and its replayable assistant messages and paired tool exchanges.
 _Avoid_: model step, three messages
+
+**Active Context**:
+The bounded conversation state available to the model for continuing work, including retained original turns, supporting material and compaction state when present. Its continuity survives a process restart; older details remain recoverable from durable history and Akasha.
+_Avoid_: complete runtime history, server-side KV cache
 
 **Delivery Fact**:
 A durable record of a channel delivery attempt and its known outcome, scoped to a run result and channel target.
