@@ -48,6 +48,8 @@ type RuntimeFactShapes = {
   control_received: HostFact;
   control_completed: HostFact;
   steer_consumed: RequestFact & { inputId: string; conversationId: string; contextPolicy: "exclude" };
+  steer_unapplied: RequestFact & { inputId: string; contextPolicy: "exclude" };
+  protocol_feedback_superseded: RequestFact & { reason: "user_steer"; contextPolicy: "exclude" };
   request_started: RequestFact;
   request_completed: RequestFact;
   request_failed: RequestFact & { error?: string; phase?: string };

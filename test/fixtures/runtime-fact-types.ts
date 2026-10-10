@@ -3,6 +3,12 @@ import type { RuntimeLog } from "../../src/runtime/runtime-types.js";
 
 /** Compiled by the existing typecheck; these are never executed as runtime tests. */
 export function productionFactTypes(log: RuntimeLog) {
+  appendRuntimeFact(log, { type: "protocol_feedback_superseded", requestId: "request", reason: "user_steer", contextPolicy: "exclude" });
+  appendRuntimeFact(log, { type: "steer_unapplied", requestId: "request", inputId: "input", contextPolicy: "exclude" });
+  // @ts-expect-error A consumed Steer not accepted by the Provider must identify its input.
+  appendRuntimeFact(log, { type: "steer_unapplied", requestId: "request", contextPolicy: "exclude" });
+  // @ts-expect-error Superseded protocol feedback must identify its owning request.
+  appendRuntimeFact(log, { type: "protocol_feedback_superseded", reason: "user_steer", contextPolicy: "exclude" });
   appendRuntimeFact(log, { type: "tool_dispatch", requestId: "request", toolCallId: "call", toolName: "read", args: {} });
   appendRuntimeFact(log, { type: "run_succeeded", runId: "run", conversationId: "conversation", result: { resultId: "result", text: "answer" } });
   // @ts-expect-error A reusable successful result must carry its own durable identity.
