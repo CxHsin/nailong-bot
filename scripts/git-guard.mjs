@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const action = process.argv[2];
@@ -6,6 +6,9 @@ try {
   if (action === "commit") {
     const branch = execFileSync("git", ["symbolic-ref", "--quiet", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
     if (branch !== "refs/heads/development") throw new Error("Commit on development; switch branches before committing.");
+    const check = spawnSync("git", ["diff", "--cached", "--check"], { encoding: "utf8" });
+    if (check.error || check.status !== 0)
+      throw new Error(`Staged whitespace check failed. Fix the index before committing.\n${check.stdout ?? ""}${check.stderr ?? ""}${check.error?.message ?? ""}`);
   } else if (action === "push") {
     for (const line of readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean)) {
       const fields = line.trim().split(/\s+/);

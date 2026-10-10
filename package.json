@@ -6,6 +6,7 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "hooks:install": "node scripts/install-git-hooks.mjs",
+    "docs:check": "node scripts/check-doc-links.mjs",
     "run:diagnose": "node --import tsx src/cli/diagnose-run.ts",
     "telegram:accept": "node --env-file-if-exists=.env --import tsx src/cli/accept-telegram.ts",
     "context:diagnose": "node --import tsx src/cli/diagnose-context.ts",

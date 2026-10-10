@@ -2,6 +2,8 @@
 
 调研日期：2026-09-29。范围：公开的 Maka 与 Codex 实现/文档，以及本仓库当前代码。这里的“阶段性进展”指像「我发现了什么，接下来要做什么」这样的用户可读说明，而非工具名、参数或输出列表。
 
+本文记录 2026-09-29 的历史状态，仓库源码链接固定到调研提交 `24dc8f0`；当前实现见 [运行进展与迁移](../runtime-progress.md)。
+
 ## 已确认的事实
 
 ### Maka
@@ -26,10 +28,10 @@
 ### Telegram API 与本仓库
 
 - Telegram [Bot API 的 `sendMessage`](https://core.telegram.org/bots/api#sendmessage) 发送新文本消息并返回 `Message`；[`editMessageText`](https://core.telegram.org/bots/api#editmessagetext) 需要 `chat_id` 与 `message_id`（或 inline ID）来编辑已有消息。这使「逐条发进展」和「编辑一条进展消息」成为两种不同的 UI 投影策略；后者若需重启恢复，应可靠保存 Telegram 返回的消息 ID。
-- 本仓库 [`src/pi-agent.ts`](../../src/pi-agent.ts) 第 85–110 行排空 `text_delta`、`thinking_delta`、`toolcall_delta` 后只返回最终 settled message；第 171–190 行记录模型步骤、工具调用及 `message_end` 的 `model_message`，尚未把用户可见的中途文本交给 Telegram。第 66 行设置 `thinkingLevel: "off"`。
-- [`src/app.ts`](../../src/app.ts) 第 67–82 行只在 `answer()` 返回后发送答案；[`src/main.ts`](../../src/main.ts) 第 32–40 行调用 `sendMessage`，但没有保留其返回的 `message_id`。因此目前既没有实时进展呈现路径，也没有重启后编辑进度消息的投递事实。
-- [`src/runtime-log.ts`](../../src/runtime-log.ts) 第 6–11 行的 `StoredEvent` 只有宽松的 `type`、`at`、`requestId` 等字段；第 50–65 行按 JSONL 读全量并追加。文件位置提供当前重放顺序；尚无显式持久 `event_seq`、事件/消息 ID 和 schema 版本。项目**已经**在 [`src/projection.ts`](../../src/projection.ts) 与 [`src/checkpoint.ts`](../../src/checkpoint.ts) 中使用事件数量、前缀摘要和最后事件摘要校验 checkpoint，因此差距不是完全缺少前缀校验，而是缺少所有消费者可共用的稳定事件身份和提交游标。
-- [`src/pi-agent.ts`](../../src/pi-agent.ts) 第 171 行传给 `session.subscribe()` 的回调是 async，但已安装 Pi 的 `agent-session.js` 中 `_emit()` 直接调用监听器，不等待其 Promise（`node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js` 第 219–223 行；其 `.d.ts` 将监听器返回值定义为 void）。因此不能仅凭这个订阅接口假定模型步骤/消息事件已在下一步前持久化，或所有订阅写入在 `session.prompt()` 返回前都已完成。当前 `beforeToolCall` 与 `afterToolCall` 仍显式等待工具派发/结果写入，这是已有保护；未来公共日志提交边界应另外明确。这里是代码确认的接口风险，未通过故障注入证明每一种事件重排。
+- 本仓库 [`src/pi-agent.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/pi-agent.ts) 第 85–110 行排空 `text_delta`、`thinking_delta`、`toolcall_delta` 后只返回最终 settled message；第 171–190 行记录模型步骤、工具调用及 `message_end` 的 `model_message`，尚未把用户可见的中途文本交给 Telegram。第 66 行设置 `thinkingLevel: "off"`。
+- [`src/app.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/app.ts) 第 67–82 行只在 `answer()` 返回后发送答案；[`src/main.ts`](../../src/main.ts) 第 32–40 行调用 `sendMessage`，但没有保留其返回的 `message_id`。因此目前既没有实时进展呈现路径，也没有重启后编辑进度消息的投递事实。
+- [`src/runtime-log.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/runtime-log.ts) 第 6–11 行的 `StoredEvent` 只有宽松的 `type`、`at`、`requestId` 等字段；第 50–65 行按 JSONL 读全量并追加。文件位置提供当前重放顺序；尚无显式持久 `event_seq`、事件/消息 ID 和 schema 版本。项目**已经**在 [`src/projection.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/projection.ts) 与 [`src/checkpoint.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/checkpoint.ts) 中使用事件数量、前缀摘要和最后事件摘要校验 checkpoint，因此差距不是完全缺少前缀校验，而是缺少所有消费者可共用的稳定事件身份和提交游标。
+- [`src/pi-agent.ts`](https://github.com/CxHsin/nailong-bot/blob/24dc8f0478e69f995506a36223e9af12371938be/src/pi-agent.ts) 第 171 行传给 `session.subscribe()` 的回调是 async，但已安装 Pi 的 `agent-session.js` 中 `_emit()` 直接调用监听器，不等待其 Promise（`node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js` 第 219–223 行；其 `.d.ts` 将监听器返回值定义为 void）。因此不能仅凭这个订阅接口假定模型步骤/消息事件已在下一步前持久化，或所有订阅写入在 `session.prompt()` 返回前都已完成。当前 `beforeToolCall` 与 `afterToolCall` 仍显式等待工具派发/结果写入，这是已有保护；未来公共日志提交边界应另外明确。这里是代码确认的接口风险，未通过故障注入证明每一种事件重排。
 
 ## 对设计的直接含义（推论）
 

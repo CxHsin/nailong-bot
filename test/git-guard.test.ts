@@ -16,6 +16,18 @@ test("installed hooks reject main commits and protected remote refs even when pu
   execFileSync(process.execPath, ["scripts/install-git-hooks.mjs"], { cwd: repo });
   assert.equal(git("config", "--local", "core.hooksPath"), ".githooks");
   await writeFile(join(repo, "file.txt"), "one"); git("add", "."); git("commit", "-m", "test(agent): fixture");
+  const initial = git("rev-parse", "HEAD");
+  await writeFile(join(repo, "new.txt"), "new line with trailing space \n"); git("add", "new.txt");
+  const whitespace = spawnSync("git", ["commit", "-m", "test(agent): whitespace blocked"], { cwd: repo, encoding: "utf8" });
+  assert.notEqual(whitespace.status, 0);
+  assert.match(whitespace.stderr, /Staged whitespace check failed/);
+  assert.match(whitespace.stderr, /new\.txt:1: trailing whitespace/);
+  assert.equal(git("rev-parse", "HEAD"), initial);
+  // Correcting only the working tree must still fail: the hook checks the index.
+  await writeFile(join(repo, "new.txt"), "new line without trailing space\n");
+  const unstagedFix = spawnSync("git", ["commit", "-m", "test(agent): index still dirty"], { cwd: repo, encoding: "utf8" });
+  assert.notEqual(unstagedFix.status, 0);
+  git("add", "new.txt"); git("commit", "-m", "test(agent): corrected index");
   execFileSync("git", ["init", "--bare", remote], { stdio: "pipe" }); git("remote", "add", "origin", remote);
   git("push", "origin", "HEAD:development");
   for (const ref of ["HEAD:main", ":main"]) {
