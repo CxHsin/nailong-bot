@@ -1,5 +1,5 @@
 import { createDeliveryLifecycle } from "../telegram/telegram-delivery.js";
-import { handleCommand } from "./commands.js";
+import { handleLegacyCommand, handleLegacyMemoryCommand } from "./legacy-commands.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,7 @@ import { projectDeliveredChat, projectFinalAnswer,
   projectRequestState } from "./runtime-projections.js";
 import { commitMemoryLearning } from "./memory-learning.js";
 import type { MemoryDynamics } from "../memory/dynamics.js";
-import { handleMemoryCommand } from "./memory-commands.js";
+
 
 import { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
 export { DeliveryRejected, type Update, type Message, type Request } from "./app-types.js";
@@ -63,8 +63,8 @@ export function createApp(options: {
     telegram?.resume();
     if (pendingRequests > 1) telegram?.interrupt();
     const text = update.text?.trim() || "请分析这张图片。";
-    if (await handleMemoryCommand(log, options, update, text, onStarted)) return;
-    if (await handleCommand(log, options, update, text, onStarted)) return;
+    if (await handleLegacyMemoryCommand(log, options, update, text, onStarted)) return;
+    if (await handleLegacyCommand(log, options, update, text, onStarted)) return;
     const id = randomUUID();
     let history: Awaited<ReturnType<typeof log.read>>;
     try {

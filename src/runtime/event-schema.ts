@@ -4,6 +4,7 @@ import type { ToolArchive, ToolResult, RecordedToolProjection } from "./runtime-
 import type { ContentPart } from "../host/content-parts.js";
 import type { PublicTextPhase, RunProgress } from "./progress.js";
 import type { TransportCause } from "./transport-diagnostics.js";
+import type { BuildIdentity } from "./build-identity.js";
 import { validModelAlias } from "../agent/model-config.js";
 
 type RequestFact = { requestId: string };
@@ -24,6 +25,14 @@ type ContextInput = RequestFact & { messages: Message[]; shown: ShownMemory[]; t
 
 /** The current production facts. Raw historical/unknown records stay on RuntimeLog's compatibility boundary. */
 type RuntimeFactShapes = {
+  command_received: { command: string; messageId?: unknown; contextPolicy: "exclude" };
+  input_received: { chatId: number; messageId: number; intent?: string; replyToMessageId?: number; diagnosticInspection?: boolean };
+  bot_prompt_config: { chatId: number; version: string; text?: string };
+  memory_excluded: { nodeId: string; userId: number; messageId: number; replyToMessageId?: number; intent: string };
+  memory_degraded: ({ requestId: string } | { userId: number }) & { reason: string };
+  runtime_identity: RequestFact & { identity: BuildIdentity; contextPolicy: "exclude" };
+  context_feed: { contextPolicy: "exclude" };
+  context_feed_consumed: RequestFact & { contextPolicy: "exclude" };
   model_selected: { conversationId: string; modelAlias: string; contextPolicy: "exclude" };
   message: RequestFact & { role: "user" | "assistant"; text: string; originalText?: string; chatId?: number;
     messageId?: unknown; replyToMessageId?: number; replyContext?: unknown; images?: unknown[]; inputId?: string; inputKind?: "steer" };

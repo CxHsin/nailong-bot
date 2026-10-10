@@ -3,14 +3,14 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createNailongStickerPicker } from "./nailong-stickers.js";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { createAgentHost } from "../../application/agent-host.js";
-import { AGENT_COMMANDS } from "../../application/agent-host.js";
+import type { TelegramChannelHost } from "../../application/channel-contract.js";
+import { AGENT_COMMANDS } from "../../application/commands.js";
 import { createTelegramHostProjection, normalizeTelegramInput, type TelegramHostTransport } from "./index.js";
 import { registerTelegramInput } from "../../telegram/telegram-input.js";
 import type { HostEvent } from "../../host/host.js";
 
 /** Startup and input boundary shared by production and Channel acceptance tests. */
-export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId: number; host: ReturnType<typeof createAgentHost>;
+export async function initializeTelegramHostChannel(options: { bot: Bot; ownerId: number; host: TelegramChannelHost;
   transport: TelegramHostTransport; download: (fileId: string) => Promise<ImageContent>;
   reportFailure: (error?: unknown) => void; onDelivered?: (event: HostEvent, messageId: number) => Promise<void> }) {
   const { bot, ownerId } = options;

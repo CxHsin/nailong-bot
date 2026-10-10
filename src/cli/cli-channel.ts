@@ -1,7 +1,8 @@
 import { toolDisplayName } from "../runtime/tool-display.js";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import type { Actor, HostInputLike, RunHandle } from "../host/host.js";
+import type { Actor, RunHandle } from "../host/host.js";
+import type { ChannelHost } from "../application/channel-contract.js";
 import { normalizeHostInput } from "../host/host.js";
 import type { ContentPart } from "../host/content-parts.js";
 import type { HostEvent } from "../host/host.js";
@@ -43,7 +44,7 @@ function humanEvent(event: HostEvent): string | undefined {
   return event.type;
 }
 
-export function createCliChannel(options: { host: { submit(input: HostInputLike): RunHandle }; actor: Actor; stdout: (line: string) => void; stderr: (line: string) => void; defaultConversationId?: string; onDelivered?: (event: HostEvent) => Promise<void> }) {
+export function createCliChannel(options: { host: ChannelHost; actor: Actor; stdout: (line: string) => void; stderr: (line: string) => void; defaultConversationId?: string; onDelivered?: (event: HostEvent) => Promise<void> }) {
   const sessionId = options.defaultConversationId ?? `cli:${options.actor.id}`;
   async function inputParts(text: string | undefined, imagePath?: string): Promise<ContentPart[]> {
     const parts: ContentPart[] = [];
