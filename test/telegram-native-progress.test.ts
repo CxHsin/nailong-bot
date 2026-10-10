@@ -10,6 +10,7 @@ import { deliverContent } from "../src/runtime/content-delivery.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { planStatusDetails } from "../src/channel/telegram/status-details.js";
 
 function event(type: HostEvent["type"], progress?: RunProgress): HostEvent {
   return { type, schemaVersion: 1, runId: "native", conversationId: "telegram:42", sequence: 1, at: new Date().toISOString(),
@@ -28,6 +29,54 @@ function handle(events: HostEvent[], wait = 20): RunHandle {
 }
 const text = (id: string, value: string, finalized = false, kind: "progress" | "final" = "progress") =>
   event("progress", { type: "text", segmentId: id, kind, text: value, finalized, formal: finalized && kind !== "final", source: "execution" });
+
+test("runtime preparation is collapsed in the same streaming draft and formal message", async () => {
+  const output = transport();
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
+    event("progress", { type: "text", segmentId: "memory", kind: "status", text: "正在检索记忆", finalized: true, actionState: "started" }),
+    event("progress", { type: "text", segmentId: "memory", kind: "status", text: "检索完成：72 条候选记忆。", finalized: true, actionState: "completed" }),
+    event("progress", { type: "text", segmentId: "context", kind: "status", text: "上下文已准备好，等待模型输出……", finalized: true, actionState: "completed" }),
+    text("finding", "**模型发现**：资料已齐全。", true),
+    text("final", "最终答案", true, "final"), event("run_succeeded"),
+  ]));
+  const drafts = output.drafts.filter((draft) => draft.text.includes("记忆"));
+  assert.ok(drafts.length >= 2);
+  assert.equal(new Set(drafts.map((draft) => draft.id)).size, 1);
+  for (const draft of drafts) {
+    assert.match(draft.text, /^<details><summary>运行状态<\/summary>/);
+    assert.match(draft.text, /<\/details>$/); assert.doesNotMatch(draft.text, /<details\s+open/);
+  }
+  assert.equal(output.sent[0], drafts.at(-1)!.text);
+  assert.deepEqual(output.sent.slice(1), ["**模型发现**：资料已齐全。", "最终答案"]);
+});
+
+test("long runtime labels paginate into closed details without interpreting markup or losing Unicode", () => {
+  const source = "<details open>**状态** & [链接](https://example.com) 👨‍👩‍👧‍👦\n".repeat(180);
+  const pages = planStatusDetails(source);
+  assert.ok(pages.length > 1);
+  for (const page of pages) {
+    assert.ok(page.length <= 3500);
+    assert.match(page, /^<details><summary>运行状态<\/summary>\n\n/);
+    assert.match(page, /\n\n<\/details>$/);
+    assert.equal(page.split("<details>").length, 2);
+    assert.doesNotMatch(page, /<details open>|\*\*状态\*\*|\[链接\]/);
+  }
+  const restored = pages.map((page) => page.slice(page.indexOf("\n\n") + 2, -"\n\n</details>".length))
+    .join("").replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
+  assert.equal(restored, source);
+});
+
+test("oversized status drafts stay within Rich limits and settlement preserves every collapsed page", async () => {
+  const output = transport(); const source = "准备状态".repeat(10000) + "状态尾部标记";
+  const pages = planStatusDetails(source);
+  await createTelegramHostProjection({ ...output.rich, chatId: 42, draftIntervalMs: 5 }).consume(handle([
+    event("progress", { type: "text", segmentId: "prep", kind: "status", text: source, finalized: true }),
+    text("final", "最终答案", true, "final"), event("run_succeeded"),
+  ]));
+  const draft = output.drafts.find((value) => value.text.includes("状态尾部标记"))!;
+  assert.equal(draft.text, pages.at(-1)); assert.ok(draft.text.length <= 32768);
+  assert.deepEqual(output.sent.slice(0, -1), pages); assert.equal(output.sent.at(-1), "最终答案");
+});
 
 test("public findings and final answer stream and persist identical Markdown as separate units", async () => {
   const output = transport();
@@ -70,7 +119,7 @@ test("draft and status sends that ignore cancellation cannot hold final delivery
   const started = Date.now(); let aborted: AbortSignal | undefined;
   await createTelegramHostProjection({ ...output.rich, chatId: 42, draftTimeoutMs: 10, progressTimeoutMs: 10,
     draft: async (_id, _value, _chat, signal) => { aborted = signal; await new Promise(() => {}); },
-    send: async (value) => { if (value === "正在准备") await new Promise(() => {}); output.sent.push(value); return 1; },
+    sendPage: async (value) => { if (value.includes("正在准备")) await new Promise(() => {}); output.sent.push(value); return 1; },
     recordProgress: async (_event, fact) => { receipts.push(fact); },
   }).consume(handle([event("progress", { type: "text", segmentId: "prep", kind: "status", text: "正在准备", finalized: true }), event("run_succeeded")], 0));
   assert.ok(Date.now() - started < 500);

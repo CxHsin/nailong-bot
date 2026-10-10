@@ -25,6 +25,8 @@ test("acceptance exercises actual projection append and settlement, leaving visu
   assert.ok(pages.length > 1);
   assert.deepEqual(sent.slice(-pages.length), pages);
   assert.ok(sent.includes(acceptanceScenario.finding));
+  assert.match(sent[0]!, /^<details><summary>运行状态<\/summary>/);
+  assert.doesNotMatch(sent[0]!, /<details\s+open/);
   assert.ok(drafts.includes(acceptanceScenario.finding));
   assert.ok(drafts.includes(acceptanceScenario.finalText));
   assert.ok(report.drafts.some((draft) => draft.segment === "finding" && draft.characters < acceptanceScenario.finding.length));

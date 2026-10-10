@@ -2,10 +2,11 @@ import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { TelegramHostTransport } from "./projection.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { DeliveryContent } from "../../runtime/content-delivery.js";
+import { planStatusDetails } from "./status-details.js";
 
 let nextDraftId = 1;
 
-/** Stream public text units; settlement persists the same Markdown, never a folded card. */
+/** Stream public text units; runtime labels share native collapsed details in drafts and settlement. */
 export async function consumeNativeProgress(handle: RunHandle, options: TelegramHostTransport & {
   chatId: number; draftIntervalMs?: number; draftTimeoutMs?: number; progressTimeoutMs?: number;
   recordProgress?: (event: HostEvent, fact: Record<string, unknown>) => Promise<void>;
@@ -18,10 +19,14 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
   let modelText = false; let lastEvent: HostEvent | undefined;
   let progressDisabled = false;
   const record = async (fact: Record<string, unknown>) => { if (lastEvent) await options.recordProgress?.(lastEvent, fact); };
-  const renderStates = () => [...states.values()].map((state) => {
+  const statePages = () => planStatusDetails([...states.values()].map((state) => {
     const seconds = Math.floor((Date.now() - state.started) / 5000) * 5;
     return state.text + (state.active && seconds >= 5 ? `（已等待 ${seconds} 秒）` : "");
-  }).join("\n\n");
+  }).join("\n\n"));
+  const renderStates = () => {
+    const pages = statePages(); const text = pages.join("\n\n");
+    return text.length <= 32768 ? text : pages.at(-1) ?? "";
+  };
   const setView = (id: string, text: string) => {
     if (view !== id) { view = id; draftId = nextDraftId++; published = ""; publishedAt = -Infinity; }
     latest = text;
@@ -68,10 +73,9 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
     if (!states.size || control) return;
     if (progressDisabled) { states.clear(); return; }
     for (const state of states.values()) state.active = false;
-    const text = renderStates();
+    const pages = statePages();
     await record({ state: "sending", source: "status" });
     await persistProgress(async (signal) => {
-      const pages = options.plan?.({ id: `${handle.runId}:status`, text, kind: "progress" }) ?? [text];
       for (const page of pages) {
         if (signal.aborted) return;
         const messageId = await (options.sendPage ?? options.send)(page, options.chatId, signal);
