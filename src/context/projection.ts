@@ -86,12 +86,19 @@ export async function replayEvents(log: RuntimeLog, currentId: string, model: Mo
         ? [{ type: "text", text }, ...images] : text, timestamp };
       if (event.requestId === currentId) current = message;
       legacyRequest = event.requestId ?? (active ? `legacy:${eventIdentity(event, all.indexOf(event))}` : `legacy:${index}`);
-      const snapshot = events.find((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);
-      const snapshotMessages = Array.isArray(snapshot?.messages) ? snapshot.messages as Message[] : [];
-      const quotesExcluded = Array.isArray(snapshot?.memoryNodeIds) && snapshot.memoryNodeIds.some((id) => excluded.has(String(id)));
-      const supplemental = quotesExcluded ? snapshotMessages.slice(0, 1) : snapshotMessages;
-      units.push({ messages: [...supplemental, message], through: Math.max(index + 1, snapshot ? events.indexOf(snapshot) + 1 : 0), requestId: legacyRequest, safe: true,
+      const snapshots = events.filter((entry) => entry.type === "context_input_snapshot" && entry.requestId === event.requestId);
+      const supplemental = snapshots.flatMap((snapshot) => {
+        const messages = Array.isArray(snapshot.messages) ? snapshot.messages as Message[] : [];
+        const excludedQuotes = Array.isArray(snapshot.memoryNodeIds) && snapshot.memoryNodeIds.some((id) => excluded.has(String(id)));
+        return excludedQuotes ? messages.filter((message) => typeof message.content === "string" && !message.content.startsWith("长期记忆原文引用")) : messages;
+      });
+      units.push({ messages: [...supplemental, message], through: Math.max(index + 1, ...snapshots.map((snapshot) => events.indexOf(snapshot) + 1)), requestId: legacyRequest, safe: true,
         sourceIds: [eventIdentity(event, all.indexOf(event))] });
+    } else if (event.type === "context_input_updated" && Array.isArray(event.messages)) {
+      const excludedQuotes = Array.isArray(event.memoryNodeIds) && event.memoryNodeIds.some((id) => excluded.has(String(id)));
+      const messages = (event.messages as Message[]).filter((message) => !excludedQuotes ||
+        typeof message.content === "string" && !message.content.startsWith("长期记忆原文引用"));
+      if (messages.length) units.push({ messages, through: index + 1, requestId: owner, safe: true });
     } else if (event.type === "skill_loaded" && event.mode === "explicit" && typeof event.body === "string") {
       units.push({ messages: [{ role: "user", timestamp, content: `运行层按用户显式引用加载的 skill 指令（${String(event.source)}:${String(event.name)}；根目录 ${String(event.root)}；版本 ${String(event.digest)}）：\n${event.body}` }],
         through: index + 1, requestId: event.requestId, safe: event.requestId !== currentId });

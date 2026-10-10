@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getModel } from "@mariozechner/pi-ai";
 import { createRuntimeLog } from "../runtime/runtime-log.js";
+import { decodeRuntimeEvent, type RuntimeEventRow } from "../runtime/sqlite-runtime-log.js";
 import { createToolArchive } from "../runtime/tool-archive.js";
 import { conversationEvents } from "../runtime/conversation-log.js";
 import type { StoredEvent } from "../runtime/runtime-types.js";
@@ -50,10 +51,8 @@ export async function diagnoseContext(options: { dataDir: string; conversationId
   const db = new DatabaseSync(join(options.dataDir, "runtime-v2.sqlite"), { readOnly: true });
   let events: StoredEvent[];
   try {
-    events = conversationEvents(db.prepare("SELECT sequence,event_id,schema_version,session_id,payload FROM runtime_events ORDER BY sequence").all()
-      // Preserve the production decoder's complete identity and key order: source digests certify these exact facts.
-      .map((row) => ({ ...JSON.parse(String(row.payload)), schemaVersion: Number(row.schema_version),
-        eventId: String(row.event_id), sequence: Number(row.sequence), sessionId: String(row.session_id) })), options.conversationId);
+    const rows = db.prepare("SELECT sequence,event_id,schema_version,session_id,payload FROM runtime_events ORDER BY sequence").all() as RuntimeEventRow[];
+    events = conversationEvents(rows.map(decodeRuntimeEvent), options.conversationId);
   } finally { db.close(); }
   const requestId = options.requestId ?? events.findLast((event) => event.type === "message" && event.role === "user")?.requestId;
   if (!requestId) throw new Error("诊断范围中没有用户轮次");

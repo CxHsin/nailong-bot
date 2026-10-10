@@ -33,7 +33,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
   const caches = new Map<string, ReturnType<typeof createReplayCache>>();
   return {
     async project(model: Model<Api>, context: Context, force = false, reserveTokens = 0,
-      prepare?: (context: Context, sourceIds: string[]) => Promise<Message[]>): Promise<{ context: Context; maxTokens: number; sourceIds: string[] }> {
+      prepare?: (context: Context, sourceIds: string[], budget: number, candidate: boolean) => Promise<Message[]>): Promise<{ context: Context; maxTokens: number; sourceIds: string[]; supplemental: Message[] }> {
       const resolved = modelInputBudget(model, options.ratio, options.ratios);
       const ratio = resolved.ratio;
       const budget = resolved.budget - reserveTokens;
@@ -49,14 +49,18 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
       let checkpoint = await store.load(replay.boundary, replay.events);
       const keptUnits = () => replay.units.filter((u) => u.through > (checkpoint?.through ?? 0) ||
         u.requestId === options.requestId && u.messages.every((message) => message.role === "user"));
-      const sourceIds = () => keptUnits().flatMap((u) => u.sourceIds ?? []);
+      const sourceIdsFor = (value: Pick<Checkpoint, "through"> | undefined = checkpoint) => replay.units.filter((u) =>
+        u.through > (value?.through ?? 0) || u.requestId === options.requestId && u.messages.every((message) => message.role === "user"))
+        .flatMap((u) => u.sourceIds ?? []);
+      const sourceIds = () => sourceIdsFor();
       let supplemental: Message[] = [];
-      const compose = (value: Pick<Checkpoint, "through" | "summary"> | undefined = checkpoint): Context => {
+      const compose = (value: Pick<Checkpoint, "through" | "summary"> | undefined = checkpoint, additions = supplemental): Context => {
         const messages = contextMessages(replay, options.requestId, value);
-        if (supplemental.length) messages.splice(Math.max(0, messages.indexOf(replay.current)), 0, ...supplemental);
+        const alreadySent = replay.events.some((event) => event.type === "context_input_snapshot" && event.requestId === options.requestId);
+        if (additions.length) messages.splice(alreadySent ? messages.length : Math.max(0, messages.indexOf(replay.current)), 0, ...additions);
         return { ...context, messages };
       };
-      if (prepare) supplemental = await prepare(compose(), sourceIds());
+      if (prepare) supplemental = await prepare(compose(), sourceIds(), budget, false);
       let projected = compose();
       const initialTokens = estimateInput(projected);
       let attempts = 0;
@@ -69,7 +73,8 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         else {
           // Whole ended turns and settled tool steps are indivisible. Current user/Skill instructions stay outside summaries.
           const candidates = replay.units.filter((unit, index, units) => unit.safe &&
-            !units.slice(0, index).some((earlier) => !earlier.safe) && unit.through > (checkpoint?.through ?? 0) &&
+            !units.slice(0, index).some((earlier) => !earlier.safe && !(earlier.requestId === options.requestId &&
+              earlier.messages.every((message) => message.role === "user"))) && unit.through > (checkpoint?.through ?? 0) &&
             (unit.requestId !== options.requestId && units[index + 1]?.requestId !== unit.requestId ||
               unit.messages.some((message) => message.role === "toolResult")));
           let chosen: typeof candidates[number] | undefined;
@@ -124,10 +129,14 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
                   summaryStrategy: "structured-text-v1" as const,
                   previousId: checkpoint?.id, model: `${model.provider}/${model.id}`, ratio };
                 const preview: Checkpoint = { ...value, version: 2, id: "candidate", createdAt: "" };
-                const estimate = estimateInput(compose(preview));
+                // Recall must be selected against the candidate's surviving originals,
+                // and its actual cost validated before accepting the replacement.
+                const additions = prepare ? await prepare(compose(preview, []), sourceIdsFor(preview), target, true) : supplemental;
+                const estimate = estimateInput(compose(preview, additions));
                 if (estimate >= initialTokens) throw new Error("no_reduction");
                 if (estimate > target) throw new Error("target_not_reached");
-                checkpoint = await store.save(value);
+                checkpoint = await store.save(value, options.signal);
+                supplemental = additions;
                 projected = compose();
                 releasedTokens = initialTokens - estimate;
                 options.onCheckpointValidated?.();
@@ -150,7 +159,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         diagnostics: replay.diagnostics, logBytes: await options.log.bytes(), replayMs, replayProcessedEvents: replay.processedEvents,
         processPeakRssBytes: process.resourceUsage().maxRSS * 1024 });
       if (estimatedTokens > budget || (force && failure)) throw new Error("上下文超过预算且无法有效压缩；请缩小输入或选择更大模型窗口");
-      return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)), sourceIds: sourceIds() };
+      return { context: projected, maxTokens: Math.max(1, Math.min(model.maxTokens, model.contextWindow - estimatedTokens)), sourceIds: sourceIds(), supplemental };
     },
   };
 }

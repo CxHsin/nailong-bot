@@ -68,23 +68,27 @@ export function createCheckpointStore(dataDir: string, strategy: Checkpoint["sum
       }
       return valid.sort((a, b) => b.through - a.through || b.createdAt.localeCompare(a.createdAt))[0];
     },
-    async save(value: Omit<Checkpoint, "version" | "id" | "createdAt">): Promise<Checkpoint> {
+    async save(value: Omit<Checkpoint, "version" | "id" | "createdAt">, signal?: AbortSignal): Promise<Checkpoint> {
       const checkpoint: Checkpoint = { ...value, version: 2, id: randomUUID(), createdAt: new Date().toISOString() };
       const serialized = JSON.stringify({ checkpoint, sha256: sourceDigest(checkpoint) });
       await mkdir(dir, { recursive: true });
       const path = join(dir, `${checkpoint.id}.json`);
       const temp = `${path}.tmp`;
       try {
+        signal?.throwIfAborted();
         const file = await open(temp, "wx");
         try { await file.writeFile(serialized, "utf8"); await file.sync(); }
         finally { await file.close(); }
         if (createHash("sha256").update(await readFile(temp)).digest("hex") !==
           createHash("sha256").update(serialized).digest("hex")) throw new Error("历史 checkpoint 写入校验失败");
         await rename(temp, path);
-        if (log) {
-          try { await log.append({ type: "context_checkpoint_committed", checkpoint, sha256: sourceDigest(checkpoint), contextPolicy: "exclude" }); }
-          catch (error) { await rm(path, { force: true }).catch(() => undefined); throw error; }
-        }
+        try {
+          // This is the acceptance boundary. Cancellation observed before the
+          // authoritative append leaves the old replacement intact; a committed
+          // fact is never rolled back by a later cancellation.
+          signal?.throwIfAborted();
+          if (log) await log.append({ type: "context_checkpoint_committed", checkpoint, sha256: sourceDigest(checkpoint), contextPolicy: "exclude" });
+        } catch (error) { await rm(path, { force: true }).catch(() => undefined); throw error; }
         return checkpoint;
       } finally { await rm(temp, { force: true }); }
     },

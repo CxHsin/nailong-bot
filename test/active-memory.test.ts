@@ -97,8 +97,7 @@ test("compaction coverage allows automatic recall and an explicit memory read of
     compaction: { trigger: 0.7, target: 0.6, recentTokens: 8000, summaryTokens: 500 } }, (data, res, plan) => {
     const compact = JSON.stringify(data.messages).includes("HISTORY_COMPACTION");
     if (compact) summaries++;
-    const last = data.messages.at(-1)!;
-    const selected = !compact && last.role === "user" && last.content === "read exact recovery_key" ?
+    const selected = !compact && data.messages.some((message) => message.role === "user" && message.content === "read exact recovery_key") && !data.messages.some((message) => message.role === "tool") ?
       plan.select("memory_read", { ...source, offset: 0, limit: 80 }) : undefined;
     const delta = selected ? { tool_calls: [{ index: 0, id: "recover-original", type: "function",
       function: { name: selected.name, arguments: JSON.stringify(selected.args) } }] } : { content: compact ? summary : "Recorded." };
@@ -136,4 +135,32 @@ test("an unrelated user quote claiming a source range cannot hide the original f
   const quotes = visibleQuotes(f.seen.at(-1)!.messages);
   assert.ok(quotes.some((quote) => quote.nodeId === original.runId && quote.text === text),
     "range labels alone do not prove the exact original text was supplied");
+});
+
+test("the query that compacts an original receives its exact relevant memory quote in the same Provider input", async (t) => {
+  let summaries = 0;
+  const summary = "## Goal\nContinue work.\n## Progress\nPast topic completed.\n## Constraints\nKeep the current user task.\n## Decisions\nUse original evidence.\n## Next Steps\nAnswer the followup.\n## Critical Context\nDetailed originals remain recoverable.";
+  const f = await fixture(t, { contextWindow: 18000,
+    compaction: { trigger: 0.7, target: 0.6, recentTokens: 8000, summaryTokens: 500 } }, (data, res) => {
+    const compact = JSON.stringify(data.messages).includes("HISTORY_COMPACTION");
+    if (compact) summaries++;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: compact ? summary : "Recorded." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  const original = await f.send("recovery_key CRITICAL_ORIGINAL_DETAIL " + "past padding ".repeat(1700));
+  const current = await f.send("recovery_key what exact detail? " + "current padding ".repeat(1250));
+  assert.equal(summaries, 1);
+  const quotes = visibleQuotes(f.seen.at(-1)!.messages);
+  assert.ok(quotes.some((quote) => quote.nodeId === original.runId && quote.text.includes("CRITICAL_ORIGINAL_DETAIL")),
+    "removing a deduplicated original must restore its relevant quote before dispatching this query");
+  const facts = await f.log.read();
+  const snapshot = facts.findLast((event) => event.type === "context_input_snapshot" && event.requestId === current.runId)!;
+  assert.ok((snapshot.memoryCoverage as OriginalCoverage[]).some((entry) => entry.nodeId === original.runId));
+  const projected = facts.findLast((event) => event.type === "context_projected" && event.requestId === current.runId)!;
+  assert.ok(Number(projected.estimatedTokens) <= Number(projected.target), "accepted quote cost is inside the compaction target");
+  await f.restart();
+  await f.send("unrelated next task");
+  assert.equal(summaries, 1, "restoring the accepted quote does not cause immediate repeat compaction");
+  const restored = visibleQuotes(f.seen.at(-1)!.messages).filter((quote) => quote.nodeId === original.runId && quote.text.includes("CRITICAL_ORIGINAL_DETAIL"));
+  assert.equal(restored.length, 1, "the actual appended quote is durable and deduplicated across restart");
 });
