@@ -125,6 +125,9 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     job.eventTail = turn;
     return turn.then(() => result);
   };
+  const settle = (job: Job, terminal: HostEvent) => {
+    job.closed = true; job.resolve(terminal); job.queue.close(); jobs.delete(job.runId);
+  };
   const prepare = async (job: Job, steering: boolean) => {
     const validation = preparation.then(async () => {
       if (job.closed) return;
@@ -132,7 +135,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
       if (key && (await options.log.read()).some((event) => event.inputKey === key && event.runId !== job.runId)) {
         job.closed = true;
         const terminal = await append(job, "control_completed", { phase: "duplicate", contextPolicy: "exclude" });
-        job.resolve(terminal); job.queue.close(); jobs.delete(job.runId); return;
+        settle(job, terminal); return;
       }
       await options.prepare?.(job.input, steering);
     });
@@ -142,7 +145,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
       if (job.closed) return false;
       job.closed = true;
       const terminal = await append(job, "control_completed", { phase: "invalid", text: error instanceof Error ? error.message : "输入无效，请重新提交。", contextPolicy: "exclude" });
-      job.resolve(terminal); job.queue.close(); jobs.delete(job.runId); return false;
+      settle(job, terminal); return false;
     }
   };
   const promoteSteer = async (job: Job) => {
@@ -155,7 +158,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     if (job.closed) return;
     if (job.cancelled || job.controller.signal.aborted) {
       const terminal = await append(job, "run_cancelled", { reason: "cancelled_before_start" });
-      job.resolve(terminal); job.queue.close(); jobs.delete(job.runId); return;
+      settle(job, terminal); return;
     }
     job.started = true;
     job.steeringOpen = true;
@@ -194,7 +197,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
         if (steer.target !== job || steer.closed) continue;
         steer.closed = true;
         const terminal = await append(steer, "control_completed", { phase: "steer_cancelled", text: "引导未生效，当前任务已结束，请按需重新提交。", contextPolicy: "exclude" });
-        steer.resolve(terminal); steer.queue.close(); jobs.delete(steer.runId);
+        settle(steer, terminal);
       }
       job.queue.close(); jobs.delete(job.runId);
     }
@@ -206,7 +209,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
       await job.submitted;
       const terminal = await append(job, job.target ? "control_completed" : "run_cancelled", { reason,
         ...(job.target ? { phase: "steer_cancelled", text: "待处理引导已取消。", contextPolicy: "exclude" as const } : {}) });
-      job.resolve(terminal); job.queue.close(); jobs.delete(job.runId);
+      settle(job, terminal);
     }));
     return { count: pending.length, done };
   };
@@ -263,7 +266,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
             if (job.closed) return;
             job.closed = true;
             const terminal = await append(job, "control_completed", { phase: "steer_applied", text: "引导已生效。", contextPolicy: "exclude" });
-            job.resolve(terminal); job.queue.close(); jobs.delete(runId);
+            settle(job, terminal);
           } };
         // Reserve receipt order now. Applied controls close this slot; a Steer
         // whose target ends during validation becomes an ordinary Run here.
@@ -274,7 +277,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     if (steer && !input.parts.length) {
       job.control = true; jobs.set(runId, job);
       void append(job, "control_completed", { phase: "invalid", text: "用法：/steer 内容（可附图片）", contextPolicy: "exclude" }).then((terminal) => {
-        job.closed = true; job.resolve(terminal); job.queue.close(); jobs.delete(runId);
+        settle(job, terminal);
       });
       return handle;
     }
@@ -288,7 +291,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
         if (!restoredDone) await restored;
         if (key && restoredKeys.has(key)) {
           const terminal = await append(job, "control_completed", { phase: "duplicate", contextPolicy: "exclude" });
-          job.closed = true; job.resolve(terminal); job.queue.close(); jobs.delete(runId); return;
+          settle(job, terminal); return;
         }
         const pending = valid ? cancelPending(input.conversationId, "stopped_before_start", candidates) : { count: 0, done: Promise.resolve() };
         if (valid && active && !active.closed) { active.cancelled = true; active.controller.abort(); }
@@ -299,7 +302,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
         if (valid && active) await active.done;
         const text = !valid ? "用法：/stop" : active ? `已停止，已取消 ${pending.count} 条待处理输入。` : pending.count ? `已取消 ${pending.count} 条待处理输入，当前没有运行中的任务。` : "当前没有运行中或待处理的任务。";
         const terminal = await append(job, "control_completed", { phase: valid ? active ? "stopped" : "idle" : "invalid", text, cancelledInputs: pending.count, contextPolicy: "exclude" });
-        job.closed = true; job.resolve(terminal); job.queue.close(); jobs.delete(runId);
+        settle(job, terminal);
       })().catch((error) => { job.reject(error); job.queue.close(); jobs.delete(runId); });
       return handle;
     }

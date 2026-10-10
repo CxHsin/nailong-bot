@@ -73,20 +73,25 @@ export async function explicitSkills(snapshot: SkillSnapshot, text: string, requ
     path: skill.path, root: skill.root, digest: skill.digest, body: skill.body, mode: "explicit" });
   return selected;
 }
-export function skillRead(ordinary: ToolDefinition, snapshot: SkillSnapshot, request?: Request): ToolDefinition {
+export function skillRead(ordinary: ToolDefinition, snapshot: SkillSnapshot, request?: Request): ToolDefinition & { registerSkills: (loaded: SkillSnapshot["skills"]) => void } {
   const selected = new Set<string>(request?.loadedSkillPaths);
+  const skills = new Map(snapshot.skills.map((skill) => [resolve(skill.path), skill]));
   const pages = new Map<string, Set<number>>();
-  return { ...ordinary, async execute(id, args: { path: string; offset?: number; limit?: number }, signal, update, context) {
+  return { ...ordinary, registerSkills(loaded: SkillSnapshot["skills"]) {
+    for (const skill of loaded) {
+      skills.set(resolve(skill.path), skill); selected.add(skill.path); pages.delete(skill.path);
+    }
+  }, async execute(id, args: { path: string; offset?: number; limit?: number }, signal, update, context) {
     let path = resolve(context.cwd, args.path);
     let relativeResource = false;
-    let skill = snapshot.skills.find((skill) => resolve(skill.path) === path);
+    let skill = skills.get(path);
     if (!skill && !isAbsolute(args.path)) {
-      const candidates = snapshot.skills.filter((skill) => selected.has(skill.path)).map((skill) => resolve(skill.root, args.path));
+      const candidates = [...skills.values()].filter((skill) => selected.has(skill.path)).map((skill) => resolve(skill.root, args.path));
       const existing: string[] = [];
       for (const candidate of candidates) { try { await realpath(candidate); existing.push(candidate); } catch {} }
       if (existing.length > 1) throw new Error("资源路径有歧义，请提供 skill 根目录下的完整路径");
       if (existing[0]) { path = existing[0]; relativeResource = true; }
-      skill = snapshot.skills.find((skill) => resolve(skill.path) === path);
+      skill = skills.get(path);
     }
     if (!skill) return ordinary.execute(id, relativeResource ? { ...args, path } : args, signal, update, context);
     signal?.throwIfAborted(); selected.add(skill.path);

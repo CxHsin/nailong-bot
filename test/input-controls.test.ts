@@ -229,14 +229,14 @@ test("compaction and full reconstruction retain applied Steer and explicit stopp
       assert.doesNotMatch(JSON.stringify(wire), /never-consumed/);
       final(res, "## Goal\n处理新的资料。\n## Progress\n此前部分工作结束。\n## Constraints\n保留新的要求。\n## Decisions\n后续根据实际资料执行。\n## Next Steps\n继续检查新任务。\n## Critical Context\n精确信息需查询原始日志，工具的完成情况以记录为准；未确认的操作应先检查现状。");
     } else if (count === 1) { first.release(); await finishFirst.reached; final(res); }
-    else if (count === 2) { second.release(); await finishSecond.reached; if (!res.destroyed) final(res); }
+    else if (count === 2) { res.writeHead(200, { "content-type": "text/event-stream" }); res.flushHeaders(); second.release(); await finishSecond.reached; if (!res.destroyed) res.end(); }
     else if (reads++ < 8) tools(res, [{ name: "read", args: { path: "source.txt" } }]);
     else final(res);
   }, { contextWindow: 16000, compaction: { trigger: 0.75, target: 0.6 } });
   await writeFile(join(f.dir, "source.txt"), "evidence ".repeat(500));
   await f.send("old-work"); await first.reached;
   await f.send("/steer applied-instruction"); await f.waitForReply("引导已接收");
-  finishFirst.release(); await second.reached;
+  finishFirst.release(); await second.reached; await f.waitForReply("引导已生效");
   await f.send("never-consumed-B"); await f.send("never-consumed-C"); await f.send("/stop"); await f.waitForReply("已停止");
   finishSecond.release();
   await f.send("inspect-new-evidence"); await f.channel.finish();
@@ -271,6 +271,72 @@ test("a prepared Steer rejected by the input budget remains audit-only after fai
   assert.equal(f.wire.length, 2);
   assert.doesNotMatch(JSON.stringify(f.wire[1]), /never-effective-input|NEVER-EFFECTIVE-INSTRUCTION/);
   assert.doesNotMatch(JSON.stringify(memoryNodes(await f.log.read(), 42)), /never-effective-input/);
+});
+
+test("Steer registers its accepted skill version and relative resources in the active read tool", { timeout: 12000 }, async (t) => {
+  const started = barrier(); const finish = barrier(); t.after(finish.release);
+  let skillPath = "";
+  const f = await fixture(t, async (_wire, count, res) => {
+    if (count === 1) { started.release(); await finish.reached; final(res); }
+    else if (count === 2) tools(res, [{ name: "read", args: { path: "references/x.md" } }, { name: "read", args: { path: skillPath } }]);
+    else final(res);
+  }, { skills: ["demo"] });
+  skillPath = join(f.dir, "skills", "demo", "SKILL.md");
+  await mkdir(join(f.dir, "skills", "demo", "references"));
+  await writeFile(join(f.dir, "skills", "demo", "references", "x.md"), "RELATIVE-RESOURCE-CONTENT");
+  await f.send("task-without-skill"); await started.reached;
+  await writeFile(skillPath, "---\nname: demo\ndescription: accepted\n---\nACCEPTED-STEER-VERSION");
+  await f.send("/steer /demo read relative resource and skill again"); await f.waitForReply("引导已接收");
+  await writeFile(skillPath, "---\nname: demo\ndescription: later\n---\nLATER-UNACCEPTED-VERSION");
+  finish.release(); await f.channel.finish();
+  assert.equal(f.wire.length, 3);
+  const results = f.wire[2]!.messages.filter((message) => message.role === "tool");
+  assert.match(JSON.stringify(results), /RELATIVE-RESOURCE-CONTENT.*ACCEPTED-STEER-VERSION/);
+  assert.doesNotMatch(JSON.stringify(results), /version-one|LATER-UNACCEPTED-VERSION/);
+});
+
+test("a Provider rejection never emits an applied receipt or makes prepared steering effective", { timeout: 12000 }, async (t) => {
+  const started = barrier(); const finish = barrier(); t.after(finish.release);
+  const f = await fixture(t, async (_wire, count, res) => {
+    if (count === 1) { started.release(); await finish.reached; final(res); }
+    else if (count === 2) res.writeHead(400).end("rejected input");
+    else final(res);
+  });
+  await f.send("task"); await started.reached;
+  await f.send("/steer provider-rejected-instruction"); await f.waitForReply("引导已接收");
+  finish.release(); await f.channel.finish();
+  assert.equal(f.replies.some((text) => text.includes("引导已生效")), false);
+  await f.send("fresh-task"); await f.channel.finish();
+  assert.doesNotMatch(JSON.stringify(f.wire[2]), /provider-rejected-instruction/);
+});
+
+test("Stop after the first applied receipt preserves the entire Provider-accepted Steer batch", { timeout: 12000 }, async (t) => {
+  const started = barrier(); const finish = barrier(); t.after(finish.release);
+  const holding = barrier(); const releaseHolding = barrier(); t.after(releaseHolding.release);
+  const recording = barrier(); const releaseRecording = barrier(); t.after(releaseRecording.release);
+  const f = await fixture(t, async (_wire, count, res) => {
+    if (count === 1) { started.release(); await finish.reached; final(res); }
+    else if (count === 2) { res.writeHead(200, { "content-type": "text/event-stream" }); res.flushHeaders(); holding.release(); await releaseHolding.reached; if (!res.destroyed) res.end(); }
+    else final(res);
+  });
+  // Hold one durable receipt write, an external persistence boundary, after
+  // the Provider confirms its complete payload. No private queue is inspected.
+  const append = f.log.append.bind(f.log); let firstConfirmation = true;
+  f.log.append = async (event) => {
+    if (event.type === "control_completed" && event.phase === "steer_applied" && firstConfirmation) {
+      firstConfirmation = false; recording.release(); await releaseRecording.reached;
+    }
+    return append(event);
+  };
+  await f.send("task"); await started.reached;
+  await f.send("/steer accepted-one"); await f.send("/steer accepted-two"); await f.waitForReplies(2);
+  finish.release(); await holding.reached; await recording.reached;
+  await f.send("/stop"); await f.waitForReply("正在停止"); releaseRecording.release();
+  await f.waitForReply("已停止"); releaseHolding.release(); await f.channel.finish();
+  assert.equal(f.replies.filter((text) => text.includes("引导已生效")).length, 2);
+  assert.ok(f.replies.some((text) => /已停止.*0 条/.test(text)));
+  await f.send("fresh-task"); await f.channel.finish();
+  assert.match(JSON.stringify(f.wire[2]), /accepted-one.*accepted-two/);
 });
 
 test("Stop during a tool batch cancels waiting steering and repeated Stop cancels only newly queued input", { timeout: 12000 }, async (t) => {

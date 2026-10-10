@@ -141,7 +141,8 @@ export async function createPiAgent(options: {
       const sources: ToolSource[] = [{ source: "local", tools: [createLsToolDefinition(options.dataDir), createFindToolDefinition(options.dataDir), createGrepToolDefinition(options.dataDir), ...(options.executionTool ? [createBashToolDefinition(options.dataDir)] : [])] },
         ...(memory && request ? [{ source: "memory", tools: memoryTools(memory, request.id) }] : []),
         ...(tinyfish ? [{ source: "tinyfish", tools: tinyfish.tools.filter((tool) => tool.name !== "web_search") }] : []), ...connections.map((item) => item.source)];
-      const catalog = createToolCatalog([skillRead(createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)), skills, request),
+      const reader = skillRead(createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)), skills, request);
+      const catalog = createToolCatalog([reader,
         // write/edit retain the SDK's ordinary definitions and execution policy.
       ], sources, request);
       const webSearch = tinyfish?.tools.find((tool) => tool.name === "web_search") ?? unavailableWebSearch();
@@ -204,14 +205,17 @@ export async function createPiAgent(options: {
           const images = steer.input.parts.flatMap((part) => part.type === "image" && part.data ? [{ type: "image" as const, mimeType: part.mimeType, data: part.data }] : []);
           await request?.log.append({ type: "message", role: "user", text, originalText: text, requestId: request.id, inputId: steer.id,
             chatId: userId, messageId: steer.input.metadata?.messageId, inputKind: "steer", ...(images.length ? { images } : {}) });
-          if (request) await explicitSkills(steer.input.metadata?.skillSnapshot as SkillSnapshot ?? skills, text, { ...request, inputId: steer.id });
+          if (request) {
+            const selected = await explicitSkills(steer.input.metadata?.skillSnapshot as SkillSnapshot ?? skills, text, { ...request, inputId: steer.id });
+            reader.registerSkills(selected);
+          }
           appliedSteers.push(steer);
         }
       });
       if (request) request.onModelInput = async () => {
-        request.signal?.throwIfAborted();
-        for (const steer of appliedSteers.splice(0)) await steer.applied();
-        request.signal?.throwIfAborted();
+        // The response confirms one payload containing the entire batch. Claim
+        // every input synchronously before any durable write can interleave Stop.
+        await Promise.all(appliedSteers.splice(0).map((steer) => steer.applied()));
       };
       try {
         try {
