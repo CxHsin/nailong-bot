@@ -21,6 +21,22 @@ Create a GitHub Issue in this repository and return its URL. Follow the linking 
 
 Read the referenced Issue's body, labels, and comments with `gh issue view <number> --comments` before acting on it.
 
+## Targeted retrieval
+
+For a status check, request only the state:
+
+```powershell
+gh issue view <number> --json state --jq '.state'
+```
+
+For comment navigation, retrieve an index before selecting the relevant discussion:
+
+```powershell
+gh issue view <number> --json comments --jq '.comments[] | {url, createdAt}'
+```
+
+Before acting on an Issue, complete the body, labels, and comments read required above. For a large Issue, save the full JSON in a temporary file outside the repository and read it in bounded sections. Use comment URLs to track which decisions were read; an index alone does not satisfy the requirement. On later checks, retrieve the changed sections needed for the current question. Follow [context-handoff.md](context-handoff.md) when output is truncated or work is handed off.
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The map is one Issue, with child Issues for tickets.
