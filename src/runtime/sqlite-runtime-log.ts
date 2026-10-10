@@ -16,13 +16,19 @@ export type SqliteEvent = StoredEvent & {
   toolCallId?: string;
 };
 
-type EventRow = {
+export type RuntimeEventRow = {
   sequence: number;
   event_id: string;
   schema_version: number;
   session_id: string;
   payload: string;
 };
+
+/** Decode the authoritative envelope identically for replay and readonly diagnostics. */
+export function decodeRuntimeEvent(row: RuntimeEventRow): SqliteEvent {
+  return { ...JSON.parse(row.payload) as StoredEvent, schemaVersion: row.schema_version as 1 | 2,
+    eventId: row.event_id, sequence: row.sequence, sessionId: row.session_id };
+}
 
 const reserved = new Set(["eventId", "sequence", "schemaVersion"]);
 const legacyKinds = new Set([
@@ -222,10 +228,8 @@ export function createSqliteRuntimeLog(dataDir: string, options: { fileName?: st
       if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new Error("事件游标无效");
       return withDatabase((db) => {
         const rows = db.prepare(`SELECT sequence, event_id, schema_version, session_id, payload
-          FROM runtime_events WHERE sequence > ? ORDER BY sequence`).all(afterSequence) as EventRow[];
-        return rows.map((row) => ({ ...JSON.parse(row.payload) as StoredEvent,
-          schemaVersion: row.schema_version as 1 | 2, eventId: row.event_id,
-          sequence: row.sequence, sessionId: row.session_id }));
+          FROM runtime_events WHERE sequence > ? ORDER BY sequence`).all(afterSequence) as RuntimeEventRow[];
+        return rows.map(decodeRuntimeEvent);
       });
     },
     async readSince(afterSequence: number): Promise<SqliteEvent[]> {

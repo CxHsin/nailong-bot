@@ -242,3 +242,27 @@ test("feed ratio increases by 0.1, caps at 0.9 and preserves higher configuratio
   assert.equal(fedContextRatio(0.86), 0.9);
   assert.equal(fedContextRatio(0.95), 0.95);
 });
+
+test("cache report exposes each Run's first execution call even when later tool iterations hit cache", () => {
+  const at = "2026-10-10T00:00:00Z";
+  const events = [
+    { type: "request_started", requestId: "first-run", conversationId: "c", at },
+    { type: "model_step_started", requestId: "first-run", modelStepId: "cold", purpose: "execution", at },
+    { type: "model_usage", requestId: "first-run", callId: "cold", usageAvailable: true, usage: { cacheRead: 0, input: 100 }, at },
+    { type: "model_step_started", requestId: "first-run", modelStepId: "warm", purpose: "execution", at },
+    { type: "model_usage", requestId: "first-run", callId: "warm", usageAvailable: true, usage: { cacheRead: 900, input: 0 }, at },
+    { type: "model_call_started", requestId: "first-run", callId: "summary", purpose: "summary", at },
+    { type: "model_usage", requestId: "first-run", callId: "summary", purpose: "summary", usageAvailable: true, usage: { cacheRead: 20, input: 80 }, at },
+    { type: "run_succeeded", requestId: "first-run", conversationId: "c", at },
+    { type: "request_started", requestId: "second-run", conversationId: "c", at },
+    { type: "model_step_started", requestId: "second-run", modelStepId: "pending", purpose: "execution", at },
+  ];
+  const report = cacheStatistics(events, "c");
+  assert.equal(report.recent[0]!.execution.hitRate, 0.9);
+  assert.deepEqual(report.recent[0]!.firstExecution, { callId: "cold", usage: { hit: 0, miss: 100, input: 100, hitRate: 0, calls: 1, measured: 1, pending: 0 } });
+  assert.equal(report.current!.firstExecution?.usage.pending, 1);
+  const text = cacheReportText(report);
+  assert.match(text, /首个执行调用：\*\*0\.00%\*\*/);
+  assert.match(text, /首个执行调用：待结算/);
+  assert.match(text, /摘要\/辅助调用.*20.*80/s);
+});

@@ -14,7 +14,8 @@ async function main() {
   const promptFile = resolve(process.env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md");
   const modelConfiguration = modelEnvironment(process.env);
   const log = await createRuntimeEventLog(dataDir);
-  const agent = await createPiAgent({ ...await capabilityEnvironment(process.env), dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
+  const agent = await createPiAgent({ ...await capabilityEnvironment(process.env), dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
+    compaction: process.env.CONTEXT_COMPACTION ? JSON.parse(process.env.CONTEXT_COMPACTION) : undefined });
   const host = createAgentHost({ log, dataDir, promptFile, agent });
   await host.recoverInterrupted();
   const cli = createCliChannel({ host, actor: { id: process.env.AGENT_ACTOR_ID?.trim() || "cli", kind: "user" }, stdout: (line) => stdout.write(`${line}\n`), stderr: (line) => stderr.write(`${line}\n`),

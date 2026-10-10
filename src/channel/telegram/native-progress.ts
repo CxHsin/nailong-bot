@@ -1,3 +1,4 @@
+import { agentCommand } from "../../application/commands.js";
 import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { TelegramHostTransport } from "./projection.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
@@ -108,7 +109,7 @@ export async function consumeNativeProgress(handle: RunHandle, options: Telegram
       lastEvent = event;
       if (ended) continue;
       if (event.type === "run_submitted") control = !!event.parts?.length && event.parts.every((part) => part.type === "text") &&
-        event.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim().startsWith("/");
+        !!agentCommand(event.parts.map((part) => part.type === "text" ? part.text : "").join("\n"));
       const progress = event.progress;
       if (event.type === "progress" && progress && !control) {
         if (progress.type === "discard") {

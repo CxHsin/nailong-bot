@@ -36,10 +36,18 @@ export function registerTelegramInput(bot: Bot, options: {
   bot.on(["message:text", "message:photo"], async (ctx) => {
     if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private") return;
     let text = ctx.message.text ?? ctx.message.caption;
-    const addressed = !ctx.message.photo && text && /^\/([a-zA-Z0-9_]+)@([a-zA-Z0-9_]+)(?=\s|$)/.exec(text);
-    if (addressed && options.botUsername) {
-      if (addressed[2]!.toLowerCase() !== options.botUsername.toLowerCase()) return;
-      text = text!.replace(addressed[0], `/${addressed[1]}`);
+    if (text && options.botUsername) {
+      let otherBot = false;
+      // Only command tokens in the leading first-line sequence carry bot addressing.
+      const leading = /^[\t ]*(?:\/[a-zA-Z0-9_-]+(?::[a-zA-Z0-9-]+)?(?:@[a-zA-Z0-9_]+)?(?=[\t ]|\r?$)(?:[\t ]+|$))+/m.exec(text);
+      if (leading?.index === 0) {
+        const normalized = leading[0].replace(/(\/[a-zA-Z0-9_-]+(?::[a-zA-Z0-9-]+)?)@([a-zA-Z0-9_]+)/g, (_all, name: string, botName: string) => {
+          if (botName.toLowerCase() !== options.botUsername!.toLowerCase()) otherBot = true;
+          return name;
+        });
+        if (otherBot) return;
+        text = normalized + text.slice(leading[0].length);
+      }
     }
     let releaseAcceptance!: () => void;
     // Include downloads in the shutdown boundary so polling cannot confirm an unaccepted photo.

@@ -93,7 +93,7 @@ export function createSkillStore(dataDir: string, download: typeof fetch = fetch
       finally { await rm(temporary, { force: true }); }
       staging = undefined;
       await request.log.append({ type: "skill_installed", requestId: request.id, ...entry, updated: !!previous, result: "succeeded" });
-      return `${previous ? "已更新" : "已安装"} skill：${metadata.name}。${singleFile ? "单文件安装仅含 SKILL.md 正文。" : "已保留附带资源。"}下次 Run 可通过 @${metadata.name} 调用。`;
+      return `${previous ? "已更新" : "已安装"} skill：${metadata.name}。${singleFile ? "单文件安装仅含 SKILL.md 正文。" : "已保留附带资源。"}下次 Run 可通过 ${request.channel === "telegram" ? "/" : "@"}${metadata.name} 调用；重名或与内置命令冲突时使用 ${request.channel === "telegram" ? "/" : "@"}installed:${metadata.name}。`;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       await request.log.append({ type: "skill_install_failed", requestId: request.id, source, reason, result: "failed" });

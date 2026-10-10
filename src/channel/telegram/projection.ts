@@ -1,3 +1,4 @@
+import { agentCommand } from "../../application/commands.js";
 import { consumeNativeProgress } from "./native-progress.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { HostEvent, RunHandle } from "../../host/host.js";
@@ -105,7 +106,7 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
         for await (const event of handle.events()) {
           if (finished) continue;
           if (event.type === "run_submitted") control = !!event.parts?.length && event.parts.every((part) => part.type === "text") &&
-            event.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim().startsWith("/");
+            !!agentCommand(event.parts.map((part) => part.type === "text" ? part.text : "").join("\n"));
           if (event.type === "run_started" && !control) latest = "处理中";
           if (event.type === "progress") {
             const progress = event.progress;

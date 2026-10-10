@@ -18,6 +18,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
       await request.log.append({ type: "tool_result", requestId: request.id,
         toolCallId, toolName, isError: result.isError,
         modelVisible: view.modelVisible, modelProjectionVersion: TOOL_RESULT_PROJECTION_VERSION,
+        modelProjection: view.modelProjection,
         result, ...(archive ? { archive } : { archiveError }) });
       request.onProgress?.({ type: "tool", name: toolName, callId: toolCallId, state: result.isError ? "failed" : "completed" });
       return view;
@@ -77,7 +78,7 @@ export function attachToolRecording(agent: AgentSession["agent"], request: Reque
         return { content: [{ type: "text", text: "工具结果未能写入运行日志；本轮已停止。" }], terminate: true };
       }
       if (view.modelVisible === "original") return previous;
-      return { content: view.content, details: {} };
+      return { content: view.content, details: view.details };
     };
   }
   return () => logFailure;

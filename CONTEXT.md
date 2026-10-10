@@ -45,7 +45,7 @@ One user input and its replayable assistant messages and paired tool exchanges.
 _Avoid_: model step, three messages
 
 **Active Context**:
-The bounded conversation state available to the model for continuing work, including retained original turns, supporting material and compaction state when present. Its continuity survives a process restart; older details remain recoverable from durable history and Akasha.
+The bounded conversation state available to the model for continuing work, including retained original turns, supporting material and compaction state when present. Its continuity survives a process restart through a durable start boundary, recorded model-visible views and frozen compaction facts; validated snapshots are disposable derived caches. Older details remain recoverable from durable history and Akasha. Exact original coverage, partial original ranges and lossy summary involvement have distinct roles in memory recovery.
 _Avoid_: complete runtime history, server-side KV cache
 
 **Delivery Fact**:

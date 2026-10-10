@@ -6,6 +6,8 @@ import type { Request } from "./app-types.js";
 import { toolProvenance } from "../runtime/tool-provenance.js";
 
 export type MemoryBudget = { maxTokens?: number; ratio?: number };
+export type OriginalMemoryCoverage = { kind: "original"; nodeId: string; messageId: string;
+  offset: number; end: number; complete: boolean };
 export function memoryBudget(inputBudget: number, config: MemoryBudget = {}): number {
   const max = config.maxTokens ?? 4096; const ratio = config.ratio ?? 0.1;
   if (!Number.isSafeInteger(max) || max < 0 || max > 4096 || !Number.isFinite(ratio) || ratio < 0 || ratio > 0.1) throw new Error("记忆预算无效");
@@ -55,8 +57,11 @@ function* composeMemorySteps(context: Context, sourceIds: string[], candidates: 
       const items = Array.isArray(parsed) ? parsed : [parsed];
       for (const item of items) for (const part of item.messages ?? [item]) {
         const messageId = part.messageId ?? part.id;
-        if (typeof item.nodeId === "string" && typeof messageId === "string" && typeof part.text === "string" &&
-          Number.isSafeInteger(part.offset) && Number.isSafeInteger(part.end))
+        const original = candidates.find((candidate) => candidate.node.id === item.nodeId)?.node.messages.find((entry) => entry.id === messageId);
+        if (original && typeof item.nodeId === "string" && typeof messageId === "string" && typeof part.text === "string" &&
+          Number.isSafeInteger(part.offset) && Number.isSafeInteger(part.end) && part.offset >= 0 && part.end >= part.offset &&
+          part.end <= Array.from(original.text).length &&
+          Array.from(original.text).slice(part.offset, part.end).join("") === part.text)
           shown.push({ nodeId: item.nodeId, messageId, offset: part.offset, end: part.end, existing: true });
       }
     } catch { continue; }
@@ -108,7 +113,12 @@ function* composeMemorySteps(context: Context, sourceIds: string[], candidates: 
   const messages = [...context.messages];
   const current = messages.findLastIndex((message) => message.role === "user");
   if (quotes.length) messages.splice(Math.max(0, current), 0, makeMessage());
-  return { context: { ...context, messages }, shown, tokens: quotes.length ? memoryCost() : 0, quotes };
+  const coverage: OriginalMemoryCoverage[] = shown.flatMap((entry) => {
+    const original = candidates.find((candidate) => candidate.node.id === entry.nodeId)?.node.messages.find((message) => message.id === entry.messageId);
+    return original ? [{ kind: "original" as const, nodeId: entry.nodeId, messageId: entry.messageId,
+      offset: entry.offset, end: entry.end, complete: entry.offset === 0 && entry.end === Array.from(original.text).length }] : [];
+  });
+  return { context: { ...context, messages }, shown, coverage, tokens: quotes.length ? memoryCost() : 0, quotes };
 }
 
 export function composeMemory(...args: Parameters<typeof composeMemorySteps>) {
