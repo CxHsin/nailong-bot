@@ -4,7 +4,7 @@ import { channel } from "node:diagnostics_channel";
 import type { Api, AssistantMessage, AssistantMessageEvent, Context, Model, SimpleStreamOptions } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
-import { providerErrorCategory, safeProviderRequestId, transportCauses, type TransportCause } from "../runtime/transport-diagnostics.js";
+import { providerErrorCategory, providerFailure, safeProviderError, safeProviderRequestId, transportCauses, type TransportCause, type ProviderError } from "../runtime/transport-diagnostics.js";
 
 type Observation = { causes: TransportCause[]; httpStatus: number | null; providerRequestId: string | null; headersMs: number | null; started: number };
 const active = new AsyncLocalStorage<Observation>();
@@ -61,12 +61,15 @@ export async function startObservedProvider(streamFn: AgentSession["agent"]["str
     for (const remove of removers) remove();
     if (error) observation.causes.push(...transportCauses(error).slice(0, 4 - observation.causes.length));
     const { started: _started, ...transport } = observation;
+    const providerError = safeProviderError((message as (AssistantMessage & { providerError?: ProviderError }) | undefined)?.providerError) ??
+      providerFailure(message?.errorMessage, error);
     recorded = Promise.resolve(request ? appendRuntimeFact(request.log, { type: "model_transport", requestId: request.id, callId, purpose, provider: model.provider, model: model.id,
       ...transport, elapsedMs: elapsed(), stopReason: message?.stopReason ?? "error",
       firstStreamEventMs, firstPublicTextMs, terminalEventMs, normalTerminal,
       abortSource, abortMs, runSignalAborted: request.signal?.aborted ?? false, providerSignalAborted: options.signal?.aborted ?? false,
       configuredTimeoutMs: typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : null,
-      errorCategory: abortSource !== "none" ? "aborted" : providerErrorCategory(message?.stopReason ?? "error", message?.errorMessage, observation.causes), contextPolicy: "exclude" }) : undefined);
+      providerError,
+      errorCategory: abortSource !== "none" ? "aborted" : providerErrorCategory(message?.stopReason ?? "error", message?.errorMessage, observation.causes, providerError), contextPolicy: "exclude" }) : undefined);
     return recorded;
   };
   let raw;

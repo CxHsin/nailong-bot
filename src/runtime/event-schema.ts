@@ -3,7 +3,7 @@ import type { EventInput } from "./sqlite-runtime-log.js";
 import type { ToolArchive, ToolResult, RecordedToolProjection } from "./runtime-types.js";
 import type { ContentPart } from "../host/content-parts.js";
 import type { PublicTextPhase, RunProgress } from "./progress.js";
-import type { TransportCause } from "./transport-diagnostics.js";
+import type { ProviderError, TransportCause } from "./transport-diagnostics.js";
 import type { BuildIdentity } from "./build-identity.js";
 import { validModelAlias } from "../agent/model-config.js";
 
@@ -63,7 +63,8 @@ type RuntimeFactShapes = {
     elapsedMs: number; stopReason: AssistantMessage["stopReason"]; firstStreamEventMs: number | null; firstPublicTextMs: number | null;
     terminalEventMs: number | null; normalTerminal: boolean; abortSource: "none" | "run-signal" | "provider-signal" | "timeout-signal";
     abortMs: number | null; runSignalAborted: boolean; providerSignalAborted: boolean; configuredTimeoutMs: number | null;
-    errorCategory: "none" | "stream_terminated" | "network" | "aborted" | "context_overflow" | "unknown"; contextPolicy: "exclude" };
+    providerError?: ProviderError | null;
+    errorCategory: "none" | "stream_terminated" | "network" | "aborted" | "context_overflow" | "provider_error" | "unknown"; contextPolicy: "exclude" };
   tool_dispatch: ToolFact & { args: unknown };
   tool_call: ToolFact & { args: unknown };
   tool_blocked: ToolFact & { args?: unknown; reason?: string };

@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import type { StoredEvent } from "../runtime/runtime-types.js";
 import { safeBuildIdentity } from "../runtime/build-identity.js";
-import { errorCategories, providerErrorCategory, safeProviderRequestId, streamEvidence, transportCauses } from "../runtime/transport-diagnostics.js";
+import { errorCategories, providerErrorCategory, safeProviderError, safeProviderRequestId, streamEvidence, transportCauses } from "../runtime/transport-diagnostics.js";
 
 const finite = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 const label = (value: unknown): string | null => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) ? value : null;
@@ -32,6 +32,7 @@ export function diagnoseRun(options: { dataDir: string; runId: string }) {
       stopReason: typeof reason === "string" && stopReasons.has(reason) ? reason : null,
       httpStatus: finite(transport?.httpStatus), providerRequestId: safeProviderRequestId(transport?.providerRequestId), elapsedMs: finite(transport?.elapsedMs),
       ...streamEvidence(transport),
+      providerError: safeProviderError(transport?.providerError),
       errorCategory: typeof transport?.errorCategory === "string" && errorCategories.has(transport.errorCategory) ? transport.errorCategory : providerErrorCategory(reason, message?.errorMessage, causes), causes };
   });
   const mode = events.find((e) => e.type === "capability_snapshot")?.mode;

@@ -12,6 +12,10 @@ npm run run:diagnose -- --run-id "待排查Run" --data-dir data
 
 新增 `model_transport` 事实通过 Provider 的响应回调和 Node/Undici 诊断通道记录；错误 cause 仅保留已知名称与错误码。缺失的信息显示 `null` 或空列表，旧记录不会被补写。未使用 Undici 的传输可能没有 cause；这些信息用于定位，不能单独证明具体网络节点故障。摘要调用也关联自己的 call ID。
 
+`providerError` 与传输 `causes` 分开保存。它只保留受限错误码、来源和直接观察到的错误事件类型：`source=stream-event` 表示原生 Responses 解码器观察到的错误事件，`source=exception` 表示异常对象提供的信息，`source=sdk-message` 表示从 SDK 固定格式的错误字符串提取了已知错误码。后者的 `eventType` 始终为 null，无法据此区分 `error` 与 `response.failed`。未知代码不保存，异常正文不落入诊断；只读 CLI 再次校验这些字段。`provider_error` 表示保存了 Provider 错误证据，容量错误仍归 `context_overflow`；旧记录缺失字段显示 null。
+
+排查报告分别说明：本轮在哪个检查处终止、哪些调用异常导致该条件成立，以及实际外部根因是否已被证实。HTTP 200 只证明收到响应头；SDK 处理流内错误后清理连接也可能产生 `AbortError`。核查取消信号、Provider 错误与传输原因后再判断，不能仅凭清理异常称为网络断流。本地对照证明某机制能产生相同记录，不证明真实 Run 必然走过该机制；缺失的历史错误码不能通过升级诊断补回。
+
 新调用还记录以下结构化证据，计时均相对本次模型调用开始：
 
 - `headersMs`：响应头到达；HTTP 200 不代表流已完成。

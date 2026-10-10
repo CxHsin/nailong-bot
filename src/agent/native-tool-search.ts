@@ -1,6 +1,7 @@
 import { createAssistantMessageEventStream, type Api, type Model, type Context, type SimpleStreamOptions, type AssistantMessage, type Tool } from "@mariozechner/pi-ai";
 import type { createToolCatalog } from "./tool-catalog.js";
 import { textPhase } from "./text-phase.js";
+import { safeProviderError, type ProviderError } from "../runtime/transport-diagnostics.js";
 
 type Catalog = ReturnType<typeof createToolCatalog>;
 const functionTool = (tool: Tool) => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.parameters, strict: false });
@@ -77,7 +78,7 @@ async function* events(response: Response) {
 export function streamNativeResponses(model: Model<Api>, context: Context, options: SimpleStreamOptions, key: string, currentCalls: Set<string>) {
   const stream = createAssistantMessageEventStream();
   void (async () => {
-    const output: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), content: [], stopReason: "stop",
+    const output: AssistantMessage & { providerError?: ProviderError | null } = { role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), content: [], stopReason: "stop",
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
     try {
       const tools = (context.tools ?? []).map((tool) => tool.name === "tool_search" ? { type: "tool_search", execution: "client", description: tool.description, parameters: tool.parameters } : functionTool(tool));
@@ -135,7 +136,11 @@ export function streamNativeResponses(model: Model<Api>, context: Context, optio
           if (usage) { output.usage.cacheRead = usage.input_tokens_details?.cached_tokens ?? 0; output.usage.input = Math.max(0, (usage.input_tokens ?? 0) - output.usage.cacheRead); output.usage.output = usage.output_tokens ?? 0; output.usage.totalTokens = (usage.input_tokens ?? 0) + output.usage.output; }
           if (event.type === "response.incomplete") output.stopReason = "length";
         }
-        if (event.type === "error" || event.type === "response.failed") throw new Error("Provider 事件流失败");
+        if (event.type === "error" || event.type === "response.failed") {
+          output.providerError = safeProviderError({ source: "stream-event", eventType: event.type,
+            code: event.code ?? event.error?.code ?? event.response?.error?.code });
+          throw new Error("Provider 事件流失败");
+        }
       }
       if (!completed) throw new Error("Provider 事件流未完整结束");
       options.signal?.throwIfAborted(); stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output }); stream.end();
