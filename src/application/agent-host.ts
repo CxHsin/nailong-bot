@@ -14,6 +14,7 @@ import { recordInterruptedRuns } from "../runtime/startup-recovery.js";
 import { projectTimeline } from "../runtime/timeline.js";
 import { validModelAlias } from "../agent/model-config.js";
 import { SkillReferenceError } from "../agent/skills.js";
+import type { BuildIdentity } from "../runtime/build-identity.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
@@ -28,7 +29,7 @@ export const AGENT_COMMANDS = [
   { command: "memory", description: "诊断查阅原始轮次日志", usage: "/memory log 节点引用 [字符位置]" },
 ] as const;
 
-type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; progressSummary?: ProgressSummaryOptions; agent: {
+type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; runtimeIdentity?: BuildIdentity; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
   prepareCapabilities?: (text: string, request: Request) => Promise<void>;
   installSkill?: (text: string, request: Request) => Promise<string | undefined>;
@@ -93,6 +94,7 @@ export function createAgentHost(options: AgentHostOptions) {
       input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim() === "/kvcache",
     execute: async (input, context) => {
     const log = conversationLog(options.log, input.conversationId);
+    if (options.runtimeIdentity) await log.append({ type: "runtime_identity", requestId: context.runId, identity: options.runtimeIdentity, contextPolicy: "exclude" });
     if (input.metadata?.channel === "telegram" && typeof input.metadata.messageId === "number" &&
       (await log.read()).some((event) => event.messageId === input.metadata!.messageId &&
         (["input_received", "command_received"].includes(event.type) || event.type === "message" && event.role === "user")))

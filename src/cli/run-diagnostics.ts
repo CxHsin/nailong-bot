@@ -1,7 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import type { StoredEvent } from "../runtime/runtime-types.js";
-import { errorCategories, providerErrorCategory, safeProviderRequestId, transportCauses } from "../runtime/transport-diagnostics.js";
+import { safeBuildIdentity } from "../runtime/build-identity.js";
+import { errorCategories, providerErrorCategory, safeProviderRequestId, streamEvidence, transportCauses } from "../runtime/transport-diagnostics.js";
 
 const finite = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 const label = (value: unknown): string | null => typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) ? value : null;
@@ -30,11 +31,13 @@ export function diagnoseRun(options: { dataDir: string; runId: string }) {
     return { callId: label(id), purpose: label(started.purpose), step: finite(started.step), model: label(started.model), provider: label(started.provider),
       stopReason: typeof reason === "string" && stopReasons.has(reason) ? reason : null,
       httpStatus: finite(transport?.httpStatus), providerRequestId: safeProviderRequestId(transport?.providerRequestId), elapsedMs: finite(transport?.elapsedMs),
+      ...streamEvidence(transport),
       errorCategory: typeof transport?.errorCategory === "string" && errorCategories.has(transport.errorCategory) ? transport.errorCategory : providerErrorCategory(reason, message?.errorMessage, causes), causes };
   });
   const mode = events.find((e) => e.type === "capability_snapshot")?.mode;
   const tools = events.filter((e) => e.type === "tool_result");
   return { runId: options.runId, state, sourceEvents: events.length, mode: mode === "compat" || mode === "native" ? mode : null,
+    runtimeIdentity: safeBuildIdentity(events.find((e) => e.type === "runtime_identity")?.identity),
     context: { estimatedTokens, budget, exceedsBudget: estimatedTokens !== null && budget !== null ? estimatedTokens > budget : null },
     tools: { results: tools.length, errors: tools.filter((e) => e.isError === true || (e.result as { isError?: boolean } | undefined)?.isError === true).length },
     modelSteps, evidenceLimit: "Recorded facts only; absent HTTP/cause fields cannot identify the failing network hop." };

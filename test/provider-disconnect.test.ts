@@ -12,7 +12,7 @@ import { createTestServer } from "./fixtures/http-server.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 import { diagnoseRun } from "../src/cli/run-diagnostics.js";
 
-async function disconnect(t: TestContext, mode: "compat" | "native") {
+async function disconnect(t: TestContext, mode: "compat" | "native", termination: "disconnect" | "cancel" = "disconnect") {
   const dir = await mkdtemp(join(tmpdir(), "provider-disconnect-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "agent");
   let calls = 0;
@@ -35,7 +35,8 @@ async function disconnect(t: TestContext, mode: "compat" | "native") {
       emit("response.content_part.added", { output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } });
       emit("response.output_text.delta", { output_index: 0, content_index: 0, delta: "PARTIAL ANSWER" });
       await partialReceived; // Disconnect only after the real client received and previewed the draft.
-      res.destroy();
+      if (termination === "disconnect") res.destroy();
+      else if (!res.destroyed) await new Promise<void>((resolve) => res.once("close", resolve));
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -46,11 +47,11 @@ async function disconnect(t: TestContext, mode: "compat" | "native") {
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const sent: string[] = [];
   const projection = createTelegramHostProjection({ chatId: 42, draftIntervalMs: 1,
-    draft: async (_id, text) => { if (text.includes("PARTIAL ANSWER")) received(); },
+    draft: async (_id, text) => { if (text.includes("PARTIAL ANSWER")) { received(); if (termination === "cancel") await run.cancel(); } },
     send: async (text) => { sent.push(text); return 1; } });
   const run = host.submit({ actor: { id: "owner" }, conversationId: "c", text: "write then answer" });
   await projection.consume(run);
-  assert.equal((await run.done).type, "run_failed");
+  assert.equal((await run.done).type, termination === "cancel" ? "run_cancelled" : "run_failed");
   assert.equal(calls, 2);
   assert.equal(await readFile(join(dir, "once.txt"), "utf8"), "ONCE");
   const events = await log.read();
@@ -58,16 +59,27 @@ async function disconnect(t: TestContext, mode: "compat" | "native") {
   assert.equal(events.some((e) => e.type === "text_finalized" && e.contentKind === "final"), false);
   assert.equal(events.some((e) => e.type === "answer_generated"), false);
   assert.equal(sent.some((text) => text.includes("PARTIAL ANSWER")), false);
-  assert.match(sent.at(-1)!, /处理失败/);
+  assert.match(sent.at(-1)!, termination === "cancel" ? /已取消/ : /处理失败/);
   const runId = String(events.find((e) => e.type === "run_started")!.runId);
   const report = diagnoseRun({ dataDir: dir, runId });
   const last = report.modelSteps.at(-1)!;
   assert.equal(last.httpStatus, 200);
   assert.equal(last.providerRequestId, `req_${mode}_2`);
-  assert.equal(last.errorCategory, "stream_terminated");
+  assert.equal(last.errorCategory, termination === "cancel" ? "aborted" : "stream_terminated");
+  assert.ok(last.headersMs !== null);
+  assert.ok(last.firstStreamEventMs !== null);
+  assert.ok(last.firstPublicTextMs !== null);
+  assert.ok(last.terminalEventMs !== null);
+  assert.equal(last.normalTerminal, false);
+  assert.equal(last.abortSource, termination === "cancel" ? "run-signal" : "none");
+  assert.equal(last.runSignalAborted, termination === "cancel");
+  assert.equal(report.modelSteps[0]!.normalTerminal, true);
+  assert.equal(report.modelSteps[0]!.firstPublicTextMs, null);
   assert.ok(last.elapsedMs! >= 0);
-  assert.ok(last.causes.some((cause) => cause.code === "UND_ERR_SOCKET"));
-  assert.equal(last.causes.filter((cause) => cause.code === "UND_ERR_SOCKET").length, 1);
+  if (termination === "disconnect") {
+    assert.ok(last.causes.some((cause) => cause.code === "UND_ERR_SOCKET"));
+    assert.equal(last.causes.filter((cause) => cause.code === "UND_ERR_SOCKET").length, 1);
+  }
   assert.equal(report.modelSteps[0]!.causes.length, 0);
   assert.doesNotMatch(JSON.stringify(report), /SECRET|PARTIAL ANSWER/);
 }
@@ -76,6 +88,9 @@ test("concurrent Responses disconnects isolate evidence, discard drafts and neve
   const modes = ["compat", "native"] as const;
   await Promise.all(modes.map((mode) => t.test(mode, (child) => disconnect(child, mode))));
 });
+
+for (const mode of ["compat", "native"] as const) test(`${mode} real HTTP Run cancellation retains source and discards partial text`, { timeout: 12000 },
+  (t) => disconnect(t, mode, "cancel"));
 
 for (const mode of ["compat", "native"] as const) test(`${mode} HTTP rejection retains status and request ID without leaking the response body`, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "provider-rejection-"));
@@ -96,5 +111,8 @@ for (const mode of ["compat", "native"] as const) test(`${mode} HTTP rejection r
   assert.equal(calls, 1);
   assert.equal(report.modelSteps[0]!.httpStatus, 503);
   assert.equal(report.modelSteps[0]!.providerRequestId, "req_rejected");
+  assert.ok(report.modelSteps[0]!.headersMs !== null);
+  assert.equal(report.modelSteps[0]!.firstPublicTextMs, null);
+  assert.equal(report.modelSteps[0]!.normalTerminal, false);
   assert.doesNotMatch(JSON.stringify(report), /SECRET BODY/);
 });

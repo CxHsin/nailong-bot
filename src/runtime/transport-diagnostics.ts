@@ -30,3 +30,15 @@ export function providerErrorCategory(stopReason: unknown, message: unknown, cau
 export function safeProviderRequestId(value: unknown): string | null {
   return typeof value === "string" && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value) ? value : null;
 }
+
+/** Old or malformed records retain missing evidence instead of inventing a stage. */
+export function streamEvidence(value?: Record<string, unknown>) {
+  const time = (key: string) => typeof value?.[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0 ? value[key] as number : null;
+  const flag = (key: string) => typeof value?.[key] === "boolean" ? value[key] as boolean : null;
+  return {
+    headersMs: time("headersMs"), firstStreamEventMs: time("firstStreamEventMs"), firstPublicTextMs: time("firstPublicTextMs"),
+    terminalEventMs: time("terminalEventMs"), normalTerminal: flag("normalTerminal"), abortMs: time("abortMs"),
+    abortSource: typeof value?.abortSource === "string" && ["none", "run-signal", "provider-signal", "timeout-signal"].includes(value.abortSource) ? value.abortSource : null,
+    runSignalAborted: flag("runSignalAborted"), providerSignalAborted: flag("providerSignalAborted"), configuredTimeoutMs: time("configuredTimeoutMs"),
+  };
+}

@@ -4,14 +4,17 @@ import { createPiAgent } from "./agent/pi-agent.js";
 import { modelEnvironment } from "./agent/model-config.js";
 import { createRuntimeEventLog } from "./runtime/event-log.js";
 import { createAgentHost } from "./application/agent-host.js";
-import { createTelegramRichTransport, telegramEnvironment } from "./channel/telegram/index.js";
+import { telegramEnvironment } from "./channel/telegram/index.js";
+import { createGrammyRichTransport } from "./channel/telegram/grammy-rich-transport.js";
 import { initializeTelegramHostChannel } from "./channel/telegram/host-channel.js";
 import { downloadTelegramPhoto } from "./telegram/telegram-input.js";
 import { memoryDynamics } from "./memory/dynamics.js";
 import { recallConfig } from "./memory/recall.js";
 import { capabilityEnvironment } from "./agent/capability-config.js";
+import { readBuildIdentity } from "./runtime/build-identity.js";
 
 async function main(): Promise<void> {
+  const runtimeIdentity = await readBuildIdentity();
   const telegram = telegramEnvironment(process.env);
   const modelConfiguration = modelEnvironment(process.env);
   const dataDir = resolve(process.env.AGENT_DATA_DIR?.trim() || "data");
@@ -38,13 +41,8 @@ async function main(): Promise<void> {
     memoryDynamics: dynamics, memoryRecall: recall,
   });
   const bot = new Bot(telegram.token);
-  // grammY's Node types use a legacy AbortSignal declaration; its runtime accepts
-  // the native signal's aborted/addEventListener/removeEventListener contract.
-  const transport = createTelegramRichTransport({
-    sendRich: async (chatId, markdown, signal) => (await bot.api.sendRichMessage(chatId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessage>[3])).message_id,
-    draftRich: async (draftId, chatId, markdown, signal) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessageDraft>[4]); },
-  });
-  const host = createAgentHost({ log, dataDir, promptFile, agent });
+  const transport = createGrammyRichTransport(bot.api);
+  const host = createAgentHost({ log, dataDir, promptFile, agent, runtimeIdentity });
   await host.recoverInterrupted();
   const reportFailure = (error?: unknown) => {
     console.error("Telegram 更新处理失败，请检查连接和本地记录。", error instanceof Error ? error.stack ?? error.message : error);
@@ -55,6 +53,7 @@ async function main(): Promise<void> {
   const stop = () => { void channel.stop().catch(reportFailure); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
   console.log("Agent 正在通过 Telegram Channel 接收私聊文字和图片消息。");
+  console.log(JSON.stringify({ type: "runtime_identity", identity: runtimeIdentity }));
   try { await channel.start(); }
   finally { await agent.close(); }
 }

@@ -12,6 +12,20 @@ npm run run:diagnose -- --run-id "待排查Run" --data-dir data
 
 新增 `model_transport` 事实通过 Provider 的响应回调和 Node/Undici 诊断通道记录；错误 cause 仅保留已知名称与错误码。缺失的信息显示 `null` 或空列表，旧记录不会被补写。未使用 Undici 的传输可能没有 cause；这些信息用于定位，不能单独证明具体网络节点故障。摘要调用也关联自己的 call ID。
 
+新调用还记录以下结构化证据，计时均相对本次模型调用开始：
+
+- `headersMs`：响应头到达；HTTP 200 不代表流已完成。
+- `firstStreamEventMs`：消费到首个 SDK 事件；`start` 可能只是 SDK 初始化，不等于服务端首 token。
+- `firstPublicTextMs`：首个非空 `text_delta`；thinking 和工具参数不算公开正文。
+- `terminalEventMs` / `normalTerminal`：收到 SDK 终态的时间，以及是否为 `done`。这不是独立的服务端协议终态证明；`error` 的值为 false。
+- `abortSource` / `abortMs`：调用期间首次观察到取消信号的来源和时间。来源是 `run-signal`、`provider-signal` 或 reason 为标准 `TimeoutError` 的 `timeout-signal`；`none` 表示未观察到外部信号，不能据此排除 SDK 内部取消。
+- `runSignalAborted` / `providerSignalAborted`：记录时信号状态。运行取消同步传递给 Provider 时，归为运行信号。
+- `configuredTimeoutMs`：显式传入的 SDK 超时配置；缺失不代表没有 SDK 默认超时，也不能用耗时反推超时触发。
+
+启动、流迭代或结果读取直接抛错也记录一次诊断。SDK 已转成字符串的异常无法恢复原始名称或错误码；保留 unknown，不根据 `AbortError` 猜测网络节点。旧 Run 的这些字段为 null。
+
+Telegram Bot 启动时固定 `runtime_identity`，每个新 Run 都记录同一身份，诊断输出 `runtimeIdentity`。源码模式记录启动时 HEAD 和 trackedDirty；编译模式读取 `npm run build` 生成的构建戳，不使用当前 checkout HEAD 冒充旧构建。trackedDirty 只覆盖已跟踪文件，不是整个运行环境或未跟踪源码的完整哈希；缺失构建戳报告 unknown。已运行的旧进程不会因拉取代码自动更新。
+
 原生与兼容 Responses 的断流回归通过真实 Host → Agent → 本地 Provider：工具执行一次，客户端确认收到草稿后断开连接；本轮失败，不结算草稿，也不重跑已执行工具。自动重试策略保持现状。
 
 ## 上下文范围
