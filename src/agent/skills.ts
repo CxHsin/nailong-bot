@@ -9,6 +9,17 @@ export type Skill = { name: string; description: string; source: string; path: s
 export type SkillSnapshot = { skills: Skill[]; metadata: string; digest: string };
 export class SkillReferenceError extends Error {}
 export const skillDigest = (text: string) => createHash("sha256").update(text).digest("hex");
+/** Only consecutive references at the start of the first line select Telegram skills. */
+function telegramSkillReferences(text: string): string[] {
+  let firstLine = text.replace(/^[\t ]+/, "").split(/\r?\n/, 1)[0]!;
+  const names: string[] = [];
+  for (;;) {
+    const match = /^\/((?:[a-z][a-z0-9_-]{0,24}:)?[a-z0-9]+(?:-[a-z0-9]+)*)(?=[\t ]|$)/.exec(firstLine);
+    if (!match) return names;
+    names.push(match[1]!);
+    firstLine = firstLine.slice(match[0].length).replace(/^[\t ]+/, "");
+  }
+}
 export function skillMetadata(body: string) {
   if (!/^---\r?\n/.test(body)) throw new Error("SKILL.md 缺少 YAML 元数据");
   const { frontmatter } = parseFrontmatter(body);
@@ -44,12 +55,14 @@ export async function scanSkills(sources: SkillSource[]): Promise<SkillSnapshot>
   return { skills, metadata, digest: skillDigest(JSON.stringify(items)) };
 }
 export async function explicitSkills(snapshot: SkillSnapshot, text: string, request: Request) {
-  const references = [...new Set([...text.matchAll(/(?:^|\s)@([a-z0-9][a-z0-9:_-]*)(?=$|\s|[，。！？,!?])/g)].map((match) => match[1]!))];
+  const prefix = request.channel === "telegram" ? "/" : "@";
+  const references = [...new Set(request.channel === "telegram" ? telegramSkillReferences(text) :
+    [...text.matchAll(/(?:^|\s)@([a-z0-9][a-z0-9:_-]*)(?=$|\s|[，。！？,!?])/g)].map((match) => match[1]!))];
   // Resolve every name before recording any successful injection.
   const resolved = references.map((name) => {
     const found = snapshot.skills.filter((skill) => name === skill.name || name === `${skill.source}:${skill.name}`);
-    if (!found.length) throw new SkillReferenceError(`未知 skill：${name}；请使用已启用技能的名称。`);
-    if (found.length > 1) throw new SkillReferenceError(`skill 名称有歧义：${name}；请选择 ${found.map((skill) => `@${skill.source}:${skill.name}`).join("、")}。`);
+    if (!found.length) throw new SkillReferenceError(`未知 skill：${prefix}${name}；可用技能：${snapshot.skills.map((skill) => `${prefix}${skill.source}:${skill.name}`).join("、") || "无"}。`);
+    if (found.length > 1) throw new SkillReferenceError(`skill 名称有歧义：${prefix}${name}；请选择 ${found.map((skill) => `${prefix}${skill.source}:${skill.name}`).join("、")}。`);
     return found[0]!;
   });
   const selected = resolved.filter((skill, index) => resolved.findIndex((candidate) => candidate.path === skill.path) === index);
@@ -78,7 +91,7 @@ export function skillRead(ordinary: ToolDefinition, snapshot: SkillSnapshot, req
     if (!Number.isInteger(offset) || offset < 1 || offset > lines.length || !Number.isInteger(limit) || limit < 1) throw new Error("skill 读取分页参数无效");
     let end = Math.min(lines.length, offset - 1 + Math.min(limit, 120));
     while (end > offset && Buffer.byteLength(lines.slice(offset - 1, end).join("\n")) > 5000) end--;
-    if (Buffer.byteLength(lines.slice(offset - 1, end).join("\n")) > 6500) throw new Error("skill 单行超过读取预算，请显式 @skill 加载完整正文");
+    if (Buffer.byteLength(lines.slice(offset - 1, end).join("\n")) > 6500) throw new Error(`skill 单行超过读取预算，请显式 ${request?.channel === "telegram" ? "/" : "@"}${skill.source}:${skill.name} 加载完整正文`);
     const loaded = pages.get(skill.path) ?? new Set<number>(); for (let i = offset - 1; i < end; i++) loaded.add(i); pages.set(skill.path, loaded);
     const complete = loaded.size === lines.length;
     const text = lines.slice(offset - 1, end).join("\n") + (end < lines.length ? `\n[继续读取：read(${JSON.stringify({ path: skill.path, offset: end + 1, limit })})；尚未加载完整 skill]` : complete ? "\n[skill 正文已完整读取]" : "\n[仍有未读取的 skill 分页]");

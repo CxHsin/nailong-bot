@@ -2,7 +2,7 @@
 
 在本机运行的个人 Agent，通过 Telegram 私聊或 CLI 接收文字和图片，使用 pi SDK 调用配置的模型，并提供本机文件工具、TinyFish 网页查询、按需 MCP 工具及 skills。
 
-[工具发现、MCP 与 skill 配置和使用](docs/capabilities.md)：五个稳定工具，其他能力按需搜索；Telegram 可用 `@skill名称` 指定技能，用 `安装 skill 链接` 或 `/skill install 链接` 显式安装。
+[工具发现、MCP 与 skill 配置和使用](docs/capabilities.md)：五个稳定工具，其他能力按需搜索；Telegram 可用 `/skill-name` 指定技能，用 `安装 skill 链接` 或 `/skill install 链接` 显式安装。
 
 [功能地图](#功能地图-feature-map) · [启动与使用](#启动与使用) · [运行数据与上下文](#运行数据与上下文) · [长期记忆](#长期记忆) · [代码结构](#代码结构) · [验证](#验证)
 
@@ -104,13 +104,17 @@ Runtime Event Log 是持久运行事实源。模型步骤、工具结果、运�
 | 旧事件日志 | `data/events.jsonl` | 启动时校验并幂等导入 SQLite，原文件保留 |
 | 工具结果归档 | `data/tool-results/` | 完整工具输出及校验信息，供 read 分段取回 |
 | 记忆与向量索引 | `data/memory.sqlite`、`data/embeddings.sqlite` | 当前 Akasha 记忆的派生缓存，可由原始事实和 embedding 服务重建 |
-| 历史摘要 | `data/checkpoints/` | 经来源校验的有损上下文投影，原始事件仍可核查 |
+| 历史摘要 | `data/checkpoints/` | 经来源校验的有损投影缓存；已接受摘要另存于 Runtime Event Log，可由持久事实恢复 |
 
-现行 pi 路径使用 `src/context/projection.ts` 与 `context-budget.ts`。每次调用估算输入大小，默认预算为模型窗口的 86%；超过预算时折叠较早的完整历史，尽量保留最近三个完整请求。Host 会话回放包含已结算进展与有效运行摘要，保留工具事实和成功模型运行的最终答复；过程说明不进入 Akasha；送达确认另行记录。完整 Provider-aware 消息投影仍待接入。
+Host 在同一 Conversation 中维护连续、有界的 Active Context。普通 Run 追加新内容，超过旧三轮边界也不滑动淘汰；首次升级从最后有效活动范围及已结算答复迁移一次，不自动载入全部旧历史。重启恢复同一起点、冻结摘要和工具视图，派生快照损坏从原始事实重建。有效快照避免重复读取未变工具归档；完整日志读取及哈希仍有成本。旧 createApp 兼容入口保留原近期范围，生产 Telegram／CLI Host 使用连续策略。设计见 [ADR-0004](docs/adr/0004-continuous-active-context.md)。
 
-system 提示词与工具定义保持稳定，当前日期及自动记忆引文按轮次冻结为 `context_input_snapshot`，后续工具步骤和压缩复用该快照。Provider-aware cache identity 已用于 pi 会话标识；实际 DeepSeek 请求过滤其不支持的缓存参数。`/kvcache` 根据日志中的 Provider usage 统计，缺失数据明确标注，摘要等辅助调用单独统计；统计不代表账单。Telegram 回复已送达缓存报表时会显式引用该查询快照。
+工具结果首次进入模型时固定实际可见内容及来源校验；小结果可全文，大结果保持精简视图，转历史和重启不展开。完整归档保留，通过显式 read 追加必要细节。Provider 专属 continuation、图片资格、reset、forget 和事实纠正优先于前缀稳定。日期、记忆引文和显式 Skill 加载按轮次追加，不用新内容替换已发送前缀。
 
-`createPiAgent` 支持 contextBudgetRatio／modelBudgetRatios 参数；Telegram 入口读取 `.env.example` 中的 `PROJECTION_BUDGET_RATIOS`，CLI 入口目前使用默认预算。
+每次模型调用估算完整输入（固定提示、工具定义、消息、图片、Skill、记忆），硬预算取窗口比例预算和扣除配置输出额度后的剩余空间中较小值。默认比例为 86%；可通过 `PROJECTION_BUDGET_RATIOS` 配置 Telegram 各模型比例。`CONTEXT_COMPACTION` 为 Telegram／CLI 共用的可选 JSON：默认 `{"trigger":0.7,"target":0.4,"recentTokens":20000,"summaryTokens":4000}`。达到有效硬预算 70% 后批量整理，目标 40%；近期与摘要额度不是无条件保留保证，模型切换和大输入也重新核对。
+
+压缩保留仍有效的约束、未完成事项、决定、执行状态、未知结果和证据引用；完整日志及工具归档不删除。已接受摘要冻结并记录到 Runtime Event Log，恢复不重新生成。一次压缩至多两次生成；遗忘等操作使旧摘要失效、重建来源超过单次输入预算时，可按合法边界分两批，但仍共享这两次额度，最终候选达到目标才整体接受。目标不足或失败保留原上下文；硬预算内降级继续，超限明确失败。同一失败输入受重复保护，诊断和 Provider overflow 不单独解锁重试；不会清空会话或重跑已完成工具。
+
+`/kvcache` 使用实际 Provider usage，保留加权总计并列出跨轮首次执行调用，辅助摘要另计，缺失数据明确标注。密集交互、压缩后首调与长空闲后首调分别观察，模拟测试不证明固定真实命中率、费用或延迟。离线诊断入口见 [上下文诊断](docs/context-diagnostics.md)。
 
 生产执行器接收普通 Markdown。原生阶段字段直接归一化；普通 Provider 的增量文字先记录为未定阶段，同一步中伴随工具调用的文字结算为进展，无工具调用的正常结束文字结算为最终回答。公开阶段与判断来源同时进入 Host 事件和结算事实。Telegram 每轮只用一个原生 Rich Markdown 草稿，将准备、工具状态和模型公开结论累积在同一进展区；结束后保存一条进展消息，最终答案单独发送。长内容分页，超出草稿容量时展示最新有界页面，结算内容完整保存。草稿约每 250ms 合并快照，等待耗时每五秒变化。工具状态不展示参数或返回原文；进展发送失败不阻断最终答复。JSON 协议仅用于兼容旧入口。详见 [运行进展与迁移](docs/runtime-progress.md)。
 
@@ -130,7 +134,7 @@ system 提示词与工具定义保持稳定，当前日期及自动记忆引文�
 
 ## 长期记忆
 
-Akasha 已接入当前 Telegram／CLI Host：按 conversationId 写入并筛选原始事件，启用 `memory_search`／`memory_read`、自动召回、后台历史初始化、送达后学习、`/forget` 和 `/memory log`。记忆范围由 conversationId 决定，指定同一身份可跨入口访问。Telegram 读取 embedding、记忆动力学、召回及预算配置；CLI 当前未读取这些可选配置，使用默认参数和本地字面召回。
+Akasha 已接入当前 Telegram／CLI Host：按 conversationId 写入并筛选原始事件，启用 `memory_search`／`memory_read`、自动召回、后台历史初始化、送达后学习、`/forget` 和 `/memory log`。记忆范围由 conversationId 决定，指定同一身份可跨入口访问。自动检索每轮追加相关且尚未完整提供的原文；完整原文、部分引用区间和有损摘要覆盖分别记录，摘要不会屏蔽精确原文恢复。压缩移除原文后仍可相关召回或主动 search/read。Telegram 读取 embedding、记忆动力学、召回及预算配置；CLI 当前未读取这些可选配置，使用默认参数和本地字面召回。
 
 Telegram 回复目标 User 或已送达 Assistant 消息发送 `/forget`，或在任一入口发送 `/forget 节点引用`，可排除指定旧轮次的召回、学习与后续上下文。`/forget 模糊话题` 只列候选等待明确选择；当前 Host 不将自然语言“忘掉这件事”作为遗忘控制命令。旧摘要失效重建，来源工具结果及其归档续读不能绕过排除。排除事实持久保存，重启、重建及 `/reset` 不会撤销；同话题的新消息仍可成为新记忆，不建立永久话题黑名单。
 

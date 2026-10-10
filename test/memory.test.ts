@@ -439,7 +439,7 @@ test("existing original context qualifies for learning but summary-only history 
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: summary }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
     } else answer(res, "答复");
-  }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
+  }, { contextWindow: 12000, compaction: { trigger: 0.8, target: 0.7, recentTokens: 3000, summaryTokens: 500 }, memoryBudget: { maxTokens: 0 } });
   for (let index = 0; index < 5; index++) {
     const requestId = `summary-source-${index}`;
     await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId, text: `limboo original_marker_${index} ` + "x".repeat(4000) });
@@ -454,6 +454,8 @@ test("existing original context qualifies for learning but summary-only history 
   assert.ok(shown.length > 0 && shown.every((item) => item.existing));
   assert.ok(activated.length > 0 && activated.length < 5);
   assert.deepEqual(new Set(activated.map((item) => item.nodeId)), new Set(shown.map((item) => item.nodeId)));
+  for (const reference of shown) assert.match(JSON.stringify(fixture.seen.at(-1)!.messages),
+    new RegExp(`original_marker_${reference.nodeId.split("-").at(-1)}`), "only actually visible originals qualify as memory presentations");
   assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /历史摘要/);
 });
 
@@ -819,15 +821,16 @@ test("forgetting invalidates affected summaries and regenerates them only from r
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: summary }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
     } else answer(res, "答复");
-  }, { contextWindow: 7600, memoryBudget: { maxTokens: 0 } });
+  }, { contextWindow: 12000, compaction: { trigger: 0.65, target: 0.6, recentTokens: 3000, summaryTokens: 500 }, memoryBudget: { maxTokens: 0 } });
   for (let index = 0; index < 5; index++) {
-    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `forget-summary-${index}`, text: `${index === 0 ? "alpha_sensitive" : "other"} ` + "x".repeat(4500) });
+    await fixture.log.append({ type: "message", role: "user", chatId: 42, requestId: `forget-summary-${index}`, text: `${index === 2 ? "alpha_sensitive" : "other"} ` + "x".repeat(4500) });
     await fixture.log.append({ type: "answer_generated", requestId: `forget-summary-${index}`, text: "y".repeat(4500) });
     await fixture.log.append({ type: "delivery_succeeded", requestId: `forget-summary-${index}` });
     await fixture.log.append({ type: "request_completed", requestId: `forget-summary-${index}` });
   }
   await fixture.send("继续"); const before = summaries; assert.ok(before > 0);
-  await fixture.send("/forget forget-summary-0"); await fixture.send("再继续");
+  assert.match(JSON.stringify(fixture.seen.at(-1)!.messages), /alpha_sensitive/);
+  await fixture.send("/forget forget-summary-2"); await fixture.send("再继续");
   assert.ok(summaries > before);
   assert.doesNotMatch(JSON.stringify(fixture.seen.at(-1)!.messages), /alpha_sensitive/);
 });

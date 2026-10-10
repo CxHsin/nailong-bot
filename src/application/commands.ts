@@ -4,6 +4,24 @@ import { randomUUID } from "node:crypto";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import type { Update } from "./app-types.js";
 
+export const AGENT_COMMANDS = [
+  { command: "help", description: "查看命令帮助", usage: "/help" },
+  { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
+  { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model 模型别名" },
+  { command: "skill", description: "显式安装或更新技能", usage: "/skill install 链接；/skill update 链接" },
+  { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
+  { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
+  { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
+  { command: "prompt", description: "查看、设置或恢复 bot 提示词", usage: "/prompt；/prompt set 提示词；/prompt reset" },
+  { command: "forget", description: "排除指定旧轮次的记忆和上下文", usage: "/forget 节点引用；回复目标消息发送 /forget" },
+  { command: "memory", description: "诊断查阅原始轮次日志", usage: "/memory log 节点引用 [字符位置]" },
+] as const;
+
+export function agentCommand(text: string) {
+  const name = /^\/([a-zA-Z0-9_]+)(?:\s|$)/.exec(text.trim())?.[1];
+  return AGENT_COMMANDS.find((item) => item.command === name);
+}
+
 export async function handleCommand(log: RuntimeLog, options: { promptFile?: string; send: (text: string, update: Update) => Promise<void> }, update: Update, text: string, onStarted?: () => void): Promise<boolean> {
   const receipt = { type: "input_received", chatId: update.userId, messageId: update.messageId };
     if (!update.images?.length && /^\/prompt(?:\s|$)/.test(text)) {

@@ -1,7 +1,7 @@
 import { createHost, type HostEvent, type HostInput, type RunResult } from "../host/host.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { conversationLog, conversationUserId } from "../runtime/conversation-log.js";
-import { handleCommand } from "./commands.js";
+import { AGENT_COMMANDS, agentCommand, handleCommand } from "./commands.js";
 import { handleMemoryCommand } from "./memory-commands.js";
 import { projectDeliveredChat } from "./runtime-projections.js";
 import type { Message, Request, Update } from "./app-types.js";
@@ -16,18 +16,7 @@ import { validModelAlias } from "../agent/model-config.js";
 import { SkillReferenceError } from "../agent/skills.js";
 import type { BuildIdentity } from "../runtime/build-identity.js";
 
-export const AGENT_COMMANDS = [
-  { command: "help", description: "查看命令帮助", usage: "/help" },
-  { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
-  { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model 模型别名" },
-  { command: "skill", description: "显式安装或更新技能", usage: "/skill install 链接；/skill update 链接" },
-  { command: "dance", description: "看奶龙扭秧歌", usage: "/dance" },
-  { command: "feed", description: "喂奶龙小面包，提升下一轮上下文预算", usage: "/feed" },
-  { command: "reset", description: "开始新上下文，保留记录和累计统计", usage: "/reset" },
-  { command: "prompt", description: "查看、设置或恢复 bot 提示词", usage: "/prompt；/prompt set 提示词；/prompt reset" },
-  { command: "forget", description: "排除指定旧轮次的记忆和上下文", usage: "/forget 节点引用；回复目标消息发送 /forget" },
-  { command: "memory", description: "诊断查阅原始轮次日志", usage: "/memory log 节点引用 [字符位置]" },
-] as const;
+export { AGENT_COMMANDS } from "./commands.js";
 
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; runtimeIdentity?: BuildIdentity; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
@@ -45,13 +34,14 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   if (!text.startsWith("/")) return undefined;
   const match = /^\/([a-zA-Z0-9_]+)(?:\s|$)/.exec(text);
   const name = match?.[1] ?? text.slice(1).split(/\s/, 1)[0]!;
-  const definition = AGENT_COMMANDS.find((item) => item.command === name);
+  const definition = agentCommand(text);
+  if (!definition && input.metadata?.channel === "telegram") return undefined;
   await log.append({ type: "command_received", command: name, messageId: input.metadata?.messageId, contextPolicy: "exclude" });
   if (!definition) return { text: "未知命令，请发送 /help 查看帮助。", kind: "control" };
   if (name === "skill") return undefined;
   if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
     return { text: `用法：${definition.usage}`, kind: "control" };
-  if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n"), kind: "control" };
+  if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n") + "\n\n技能调用：/skill-name [任务]；重名时用 /source:skill-name。首行可连续引用多个技能，也可不带参数。", kind: "control" };
   if (name === "model") {
     const models = options.agent.models ?? [{ alias: "ds", name: "DeepSeek" }];
     const selected = (await log.read()).findLast((event) => event.type === "model_selected");

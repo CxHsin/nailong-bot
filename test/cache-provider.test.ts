@@ -76,7 +76,7 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 7600 });
+  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 32000, compaction: { trigger: 0.4, target: 0.25 } });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   for (let index = 0; index < 6; index++) {
@@ -97,9 +97,7 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
   await send("/forget other-secret", "c2");
   const previousSummaries = summaries;
   await send("continue again");
-  assert.ok(summaries > previousSummaries, "the remaining recent originals still require local compaction");
-  assert.equal(summaryInputs[previousSummaries]!.previousSummary, undefined,
-    "a shifted recent-turn window must not reuse a summary containing an expired turn");
+  assert.equal(summaries, previousSummaries, "a new turn reuses the accepted summary and released headroom");
   zero = true; await send("zero", "c2");
   const empty = (await send("/kvcache", "c2")).result?.cache as { execution: { input: number; measured: number; hitRate: number | null } };
   assert.equal(empty.execution.input, 0); assert.equal(empty.execution.measured, 1); assert.equal(empty.execution.hitRate, null);
@@ -172,7 +170,7 @@ test("current input keeps its date and memory snapshot after a long tool chain i
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
-    memoryBootstrap: false, contextWindow: 6000, now: () => new Date("2026-10-04T00:00:00Z") });
+    memoryBootstrap: false, contextWindow: 16000, compaction: { trigger: 0.75, target: 0.6 }, now: () => new Date("2026-10-04T00:00:00Z") });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = createRuntimeLog(dir);
   await log.append({ type: "message", role: "user", conversationId: "c1", requestId: "secret", text: "暗号是 SECRET-ALPHA" });

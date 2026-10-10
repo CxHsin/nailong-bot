@@ -6,10 +6,13 @@ import type { RuntimeLog, StoredEvent, ToolResult } from "../runtime/runtime-typ
 import { sourceDigest } from "../runtime/event-digest.js";
 import { filterMemoryEvents } from "../runtime/memory-exclusion.js";
 import { replayEvents, type Replay } from "./projection.js";
+import { activeContextStart } from "./active-context.js";
+import { eventIdentity } from "../runtime/memory-facts.js";
 
-type Snapshot = { version: 1; key: string; raw: StoredEvent[]; replay: Replay; results: Record<string, ToolResult> };
+type Snapshot = { version: 1; key: string; identity?: string; prefixDigest?: string;
+  raw: StoredEvent[]; replay: Replay; results: Record<string, ToolResult> };
 export function createReplayCache(dataDir: string, identity: string) {
-  const key = sourceDigest({ version: 1, policy: "recent-three-skills-v2", identity });
+  const key = sourceDigest({ version: 1, policy: "continuous-active-context-v1", identity });
   const path = join(dataDir, "context-projections", `${key}.json`);
   let cached: Snapshot | undefined;
   let loaded = false;
@@ -19,10 +22,41 @@ export function createReplayCache(dataDir: string, identity: string) {
         loaded = true;
         try {
           const envelope = JSON.parse(await readFile(path, "utf8"));
-          if (envelope.snapshot?.version === 1 && envelope.snapshot.key === key && sourceDigest(envelope.snapshot) === envelope.sha256) cached = envelope.snapshot;
+          if (envelope.snapshot?.version === 1 && envelope.snapshot.key === key && envelope.snapshot.identity === identity &&
+            Array.isArray(envelope.snapshot.raw) && envelope.snapshot.prefixDigest === sourceDigest(envelope.snapshot.raw) &&
+            Array.isArray(envelope.snapshot.replay?.units) && sourceDigest(envelope.snapshot) === envelope.sha256) cached = envelope.snapshot;
         } catch { /* Derived state is disposable; raw history remains authoritative. */ }
       }
-      const raw = await log.read();
+      let raw = await log.read();
+      let legacy: { requestIds: string[]; boundary: string } | undefined;
+      if (!activeContextStart(raw)) {
+        const oldKeys = ["recent-three-skills-v2", "recent-three-stable-tools-v3"].map((policy) => sourceDigest({ version: 1, policy, identity }));
+        const candidates: Snapshot[] = [];
+        for (const oldKey of oldKeys) {
+          try {
+            const envelope = JSON.parse(await readFile(join(dataDir, "context-projections", `${oldKey}.json`), "utf8"));
+            const value = envelope.snapshot as Snapshot;
+            if (value?.version === 1 && value.key === oldKey && sourceDigest(value) === envelope.sha256 &&
+              Array.isArray(value.raw) && value.raw.length <= raw.length && sourceDigest(raw.slice(0, value.raw.length)) === sourceDigest(value.raw) &&
+              Array.isArray(value.replay?.units) && typeof value.replay.boundary === "string" &&
+              !raw.slice(value.raw.length).some((event) => ["reset", "conversation_reset", "memory_excluded", "bot_prompt_config"].includes(event.type))) candidates.push(value);
+          } catch { /* An unavailable legacy projection uses the one-time original reconstruction. */ }
+        }
+        const previous = candidates.sort((a, b) => b.raw.length - a.raw.length)[0];
+        if (previous) {
+          const requestIds = previous.replay.units.flatMap((unit) => {
+            const id = unit.requestId;
+            if (!id) return [];
+            const oldLegacy = /^legacy:(\d+)$/.exec(id);
+            if (!oldLegacy) return [id];
+            const source = previous.replay.events[Number(oldLegacy[1])];
+            const index = source ? previous.raw.findIndex((event) => sourceDigest(event) === sourceDigest(source)) : -1;
+            return index < 0 ? [] : [`legacy:${eventIdentity(previous.raw[index]!, index)}`];
+          });
+          legacy = { requestIds: [...new Set(requestIds)], boundary: previous.replay.boundary };
+          cached = previous;
+        }
+      }
       const results: Record<string, ToolResult> = { ...(cached?.results ?? {}) };
       let start = 0;
       if (cached && raw.length >= cached.raw.length && sourceDigest(raw.slice(0, cached.raw.length)) === sourceDigest(cached.raw)) {
@@ -32,16 +66,18 @@ export function createReplayCache(dataDir: string, identity: string) {
         const all = filterMemoryEvents(raw);
         const reset = all.findLastIndex((event) => ["reset", "conversation_reset"].includes(event.type));
         const events = all.slice(reset + 1);
-        // Legacy recency changes affect historical tool visibility: retain its full replay policy.
+        // Conversation snapshots replay the earliest affected Run. The retained
+        // legacy adapter still uses its original complete reconstruction.
         if (!invalidates && host && cached.replay.events.length <= events.length) {
           start = cached.replay.events.length;
           const affected = new Set<string>([currentId]);
-          // The previous active Run now needs complete historical tool results,
-          // rather than its bounded live-step view.
           const previousCurrent = cached.replay.units.find((unit) => unit.messages.some((message) =>
-            message.role === "user" && message.timestamp === cached!.replay.current.timestamp &&
-            sourceDigest(message) === sourceDigest(cached!.replay.current)));
+            message.role === "user" && sourceDigest(message) === sourceDigest(cached!.replay.current)));
+          // Eligibility changes across a Run boundary (for example current-only
+          // feedback), even though recorded tool-result bytes stay identical.
           if (previousCurrent?.requestId && previousCurrent.requestId !== currentId) affected.add(previousCurrent.requestId);
+          // Tool views remain stable when a Run becomes historical. The new
+          // Run and genuinely appended facts alone determine the replay suffix.
           for (const event of delta) {
             const id = event.requestId ?? event.runId;
             if (typeof id === "string") affected.add(id);
@@ -60,16 +96,23 @@ export function createReplayCache(dataDir: string, identity: string) {
           }
         }
       }
-      const replay = await replayEvents({ ...log, read: async () => raw, recoverArchive: async (archive, source) => {
+      const replayLog = { ...log, read: async () => raw, append: async (event: Omit<StoredEvent, "at">) => {
+        const result = await log.append(event); raw = await log.read(); return result;
+      }, recoverArchive: async (archive: Parameters<RuntimeLog["recoverArchive"]>[0], source?: ToolResult) => {
         const archiveKey = sourceDigest(archive);
-        if (results[archiveKey]) return structuredClone(results[archiveKey]);
+        if (results[archiveKey]) {
+          if (source && sourceDigest(source) !== sourceDigest(results[archiveKey]))
+            throw new Error("工具归档与事件结果不一致");
+          return structuredClone(results[archiveKey]);
+        }
         const result = await log.recoverArchive(archive, source);
         results[archiveKey] = structuredClone(result);
         return result;
-      } }, currentId, model, structured, progress, signal,
-        start && cached ? { replay: cached.replay, start } : undefined);
+      } };
+      const replay = await replayEvents(replayLog, currentId, model, structured, progress, signal,
+        start && cached && !legacy ? { replay: cached.replay, start } : undefined, legacy);
       if (signal?.aborted) throw new DOMException("历史恢复已取消", "AbortError");
-      cached = { version: 1, key, raw, replay: structuredClone(replay), results };
+      cached = { version: 1, key, identity, prefixDigest: sourceDigest(raw), raw, replay: structuredClone(replay), results };
       const temporary = `${path}.${randomUUID()}.tmp`;
       try {
         await mkdir(join(dataDir, "context-projections"), { recursive: true });

@@ -47,7 +47,7 @@ test("Telegram startup registers owner commands before polling and routes authen
     await channel.finish();
   };
   await send("/kvcache@test_bot"); assert.match(responses.at(-1)!, /暂无/);
-  await send("/missing@test_bot"); assert.match(responses.at(-1)!, /未知命令/);
+  await send("/help@test_bot"); assert.match(responses.at(-1)!, /技能调用：\/skill-name/);
   await send("/kvcache@other_bot"); await send("/kvcache", 99); await send("/kvcache", 42, "group");
   assert.equal(responses.length, 2); assert.equal(modelCalls, 0);
   await send("/dance@test_bot");

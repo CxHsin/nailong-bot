@@ -21,13 +21,13 @@ test("long history batches complete turns instead of summarizing one old turn pe
   }
   await log.append({ type: "message", role: "user", requestId: "current", text: "current task" });
   let calls = 0;
-  const model = { ...getModel("deepseek", "deepseek-v4-flash"), contextWindow: 7600, maxTokens: 1024 };
-  const projection = createContextProjection({ log, dataDir: dir, requestId: "current", structured: false,
-    summarize: async (input) => { calls++; assert.ok(estimateInput(input) <= Math.floor(7600 * 0.86)); return summary; } });
+  const model = { ...getModel("deepseek", "deepseek-v4-flash"), contextWindow: 16000, maxTokens: 1024 };
+  const projection = createContextProjection({ log, dataDir: dir, requestId: "current", structured: false, compaction: { trigger: 0.4, target: 0.3 },
+    summarize: async (input) => { calls++; assert.ok(estimateInput(input) <= Math.floor(16000 * 0.86)); return summary; } });
   const result = await projection.project(model, { messages: [] });
   assert.ok(calls > 0 && calls <= 2, `expected one or two batched summaries, observed ${calls}`);
   assert.equal(result.context.messages.at(-1)?.content, "current task");
   assert.ok(JSON.stringify(result.context.messages).includes("old-11:"), "retain recent original turns");
-  assert.ok(estimateInput(result.context) <= Math.floor(7600 * 0.86));
+  assert.ok(estimateInput(result.context) <= Math.floor(16000 * 0.86));
   assert.equal((await log.read()).filter((event) => event.type === "message").length, 25);
 });

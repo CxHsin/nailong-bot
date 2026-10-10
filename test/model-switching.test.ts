@@ -168,7 +168,7 @@ test("GPT compacts oversized recent turns through Responses and continues with t
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false,
-    modelConfiguration: profiles(`http://127.0.0.1:${address.port}/v1`, { contextWindow: 7600, maxTokens: 1024 }) });
+    modelConfiguration: profiles(`http://127.0.0.1:${address.port}/v1`, { contextWindow: 32000, maxTokens: 1024 }), compaction: { trigger: 0.4, target: 0.25 } });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
   const log = await createRuntimeEventLog(dir);
   for (let index = 0; index < 6; index++) {

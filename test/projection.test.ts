@@ -156,13 +156,13 @@ test("recent turns retain complete tool pairs and settled text across restart wh
   } }, currentId, model);
 });
 
-test("restart restores only three complete recent turns without summarizing older history", async (t) => {
+test("the legacy adapter retains its three-prior-turn scope below the configured watermark", async (t) => {
   let summaries = 0;
   const f = await fixture(t, (data, res) => {
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
       summaries++; reply(res, summary);
     } else reply(res, "finished");
-  }, { contextWindow: 7600 });
+  }, { contextWindow: 7600, compaction: { trigger: 0.99, target: 0.9 } });
   const events = Array.from({ length: 6 }, (_, i) => [
     { type: "message", role: "user", text: `old-${i}:` + "x".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
     { type: "message", role: "assistant", text: "answer:" + "y".repeat(1500), at: `2026-01-01T00:00:0${i}Z` },
@@ -253,7 +253,7 @@ test("a single long tool chain compacts settled earlier steps while keeping the 
       compacted = true; reply(res, summary);
     } else if (tools < 8) reply(res, "", { id: `read-${tools++}`, name: "read", args: { path: "source.txt" } });
     else reply(res, "chain finished");
-  }, { contextWindow: 6000 });
+  }, { contextWindow: 16000, compaction: { trigger: 0.75, target: 0.6 } });
   await writeFile(join(f.dir, "source.txt"), "evidence ".repeat(500));
   await f.send("inspect all evidence");
   assert.equal(f.replies.at(-1), "chain finished", JSON.stringify(await f.log.read()));
@@ -281,7 +281,7 @@ test("an input that cannot be split is rejected before provider dispatch at a pe
   assert.ok(!(await readdir(f.dir)).includes("events.jsonl"), "ordinary projection runs must not write JSONL");
 });
 
-test("recent archived results restore complete content on restart and corrupt copies recover from events", async (t) => {
+test("recorded archived views remain bounded on restart and corrupt copies recover from complete source events", async (t) => {
   const f = await fixture(t, (data, res) => {
     if (data.messages.at(-1)?.content === "read large") {
       reply(res, "", { id: "large", name: "read", args: { path: "large.txt" } });
@@ -289,11 +289,13 @@ test("recent archived results restore complete content on restart and corrupt co
   });
   await writeFile(join(f.dir, "large.txt"), "big-evidence ".repeat(2000));
   await f.send("read large");
+  const firstView = f.seen.at(-1)!.messages.find((m) => m.role === "tool")!;
   await f.restart();
   await f.send("continue");
   const tool = f.seen.at(-1)!.messages.find((m) => m.role === "tool")!;
-  assert.doesNotMatch(tool.content!, /工具结果已归档/);
-  assert.match(tool.content!, /big-evidence/);
+  assert.deepEqual(tool, firstView);
+  assert.match(tool.content!, /工具结果已归档/);
+  assert.doesNotMatch(tool.content!, /big-evidence/);
   const events = await f.log.read();
   const result = events.find((e) => e.type === "tool_result");
   assert.equal(result?.modelVisible, "archive");
@@ -343,7 +345,7 @@ test("a crashed dispatched tool is marked interrupted before its outcome becomes
   assert.match(JSON.stringify(await f.log.read()), /request_interrupted/);
 });
 
-test("an oversized old request is summarized in complete tool steps", async (t) => {
+test("an oversized legacy tool step fails clearly without repeated summaries", async (t) => {
   let summarizeCalls = 0;
   const f = await fixture(t, (data, res) => {
     if (data.messages.some((m) => m.content?.includes("HISTORY_COMPACTION"))) {
@@ -364,12 +366,11 @@ test("an oversized old request is summarized in complete tool steps", async (t) 
     { type: "delivery_succeeded", requestId: "old" }, { type: "request_completed", requestId: "old" });
   await f.log.appendBatch(old);
   await f.send("continue");
-  assert.equal(f.replies.at(-1), "continued");
-  assert.ok(summarizeCalls >= 2);
-  assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
+  assert.match(f.replies.at(-1)!, /预算/);
+  assert.equal(summarizeCalls, 0, "an unbounded legacy tool result cannot fit summary input");
 });
 
-test("recent-history compaction reads the complete original archived result", async (t) => {
+test("compaction summarizes the stable bounded view and keeps full originals archived", async (t) => {
   const compactInputs: string[] = [];
   let normalCalls = 0;
   const f = await fixture(t, (data, res) => {
@@ -380,7 +381,7 @@ test("recent-history compaction reads the complete original archived result", as
       res.writeHead(400, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
     } else reply(res, "continued");
-  }, { contextWindow: 6000 });
+  }, { contextWindow: 16000, compaction: { trigger: 0.75, target: 0.6 } });
   const log = f.log;
   const result = { content: [
     { type: "text" as const, text: "specific-evidence-A:" + "龙".repeat(9000) },
@@ -402,10 +403,10 @@ test("recent-history compaction reads the complete original archived result", as
   ]) await log.append(event);
   await f.send("continue");
   assert.equal(f.replies.at(-1), "continued", JSON.stringify(await f.log.read()));
-  assert.ok(compactInputs.length > 1);
-  assert.ok(compactInputs.some((input) => input.includes("specific-evidence-A")));
-  assert.ok(compactInputs.some((input) => input.includes("specific-evidence-B")));
-  assert.ok(compactInputs.every((input) => !input.includes("工具结果已归档")));
+  assert.equal(compactInputs.length, 1);
+  assert.ok(compactInputs.every((input) => !input.includes("specific-evidence-A")));
+  assert.ok(compactInputs.every((input) => !input.includes("specific-evidence-B")));
+  assert.ok(compactInputs.some((input) => input.includes("工具结果已归档")));
   assert.match(JSON.stringify(f.seen.at(-1)!.messages), /历史摘要/);
   const files = await readdir(join(f.dir, "checkpoints"));
   assert.ok(files.some((name) => name.endsWith(".json")));

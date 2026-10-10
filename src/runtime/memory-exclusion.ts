@@ -41,6 +41,8 @@ export function filterArchivedMemoryResult(events: StoredEvent[], event: StoredE
   if (!excluded.size || event.toolName !== "read") return result;
   const visited = new Set<StoredEvent>();
   const affected = (source: StoredEvent): boolean => {
+    if (source.requestId && excluded.has(source.requestId) ||
+      excluded.has(eventIdentity(source, events.indexOf(source)))) return true;
     if (visited.has(source)) return true;
     visited.add(source);
     const original = source.result as ToolResult | undefined;

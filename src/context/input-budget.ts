@@ -4,7 +4,9 @@ export function modelInputBudget(model: Model<Api>, ratio?: number, ratios?: Rec
   const selected = ratios?.[`${model.provider}/${model.id}`] ?? ratio ?? 0.86;
   if (!Number.isFinite(model.contextWindow) || model.contextWindow <= 0 || !Number.isFinite(selected) || selected <= 0 || selected >= 1)
     throw new Error("模型窗口或 Projection 预算配置无效");
-  return { budget: Math.floor(model.contextWindow * selected), ratio: selected };
+  const budget = Math.min(Math.floor(model.contextWindow * selected), model.contextWindow - model.maxTokens);
+  if (!Number.isSafeInteger(model.maxTokens) || model.maxTokens <= 0 || budget <= 0) throw new Error("模型输出预留或输入预算无效");
+  return { budget, ratio: selected };
 }
 
 // Count all serialized input components; UTF-8 / 3 is an estimate, not provider usage.

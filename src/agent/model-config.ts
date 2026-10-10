@@ -75,5 +75,5 @@ export function deepseekModel(baseUrl?: string, contextWindow?: number): Model<A
   const original = getModel("deepseek", "deepseek-v4-flash");
   if (!original) throw new Error("pi SDK 未提供 DeepSeek 模型");
   return { ...original, id: "deepseek-flash", name: "deepseek-flash", reasoning: false, input: ["text", "image"],
-    ...(baseUrl ? { baseUrl } : {}), ...(contextWindow === undefined ? {} : { contextWindow }) };
+    ...(baseUrl ? { baseUrl } : {}), ...(contextWindow === undefined ? {} : { contextWindow, maxTokens: Math.min(original.maxTokens, Math.max(1, Math.floor(contextWindow * 0.14))) }) };
 }

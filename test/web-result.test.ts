@@ -113,7 +113,7 @@ test("single long web line can be read without cutting Unicode code points", asy
   assert.equal(collected, text);
 });
 
-test("production Pi forwards live previews, reads decoded body and restores full recent results", async (t) => {
+test("production Pi forwards live previews, appends decoded reads and retains the first recorded web view", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "web-pi-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   t.mock.method(Client.prototype, "connect", async () => {});
@@ -121,6 +121,7 @@ test("production Pi forwards live previews, reads decoded body and restores full
   t.mock.method(Client.prototype, "listTools", async () => ({ tools: ["search", "fetch_content"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }));
   t.mock.method(Client.prototype, "callTool", async () => ({ content: result.content }));
   let calls = 0;
+  let firstWebView: string | undefined;
   const plan = discoveredToolPlan();
   const server = createTestServer(t, async (req, res) => {
     let body = "";
@@ -132,6 +133,7 @@ test("production Pi forwards live previews, reads decoded body and restores full
     if (calls === 1) { const tool = plan.select("web_fetch", { urls: ["https://example.com"] }); delta = { tool_calls: [{ index: 0, id: "web", type: "function", function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] }; }
     else if (calls === 2) {
       const text = String(data.messages.at(-1).content);
+      firstWebView = text;
       assert.match(text, /engineering\nin-progress\nproductivity/);
       const next = JSON.parse(text.match(/read\((\{.*?\})\)/)![1]!);
       delta = { tool_calls: [{ index: 0, id: "body", type: "function", function: { name: "read", arguments: JSON.stringify(next) } }] };
@@ -139,8 +141,12 @@ test("production Pi forwards live previews, reads decoded body and restores full
       if (calls === 3) {
         assert.match(String(data.messages.at(-1).content), /# 文档\n定义：chief-of-staff/);
         assert.doesNotMatch(String(data.messages.at(-1).content), /"part"/);
-      } else assert.ok(data.messages.some((message: { role: string; content: string }) =>
-        message.role === "tool" && message.content === result.content.filter((part) => part.type === "text").map((part) => part.text).join("\n")));
+      } else {
+        assert.ok(data.messages.some((message: { role: string; content: string }) =>
+          message.role === "tool" && message.content === firstWebView));
+        assert.ok(data.messages.some((message: { role: string; content: string }) =>
+          message.role === "tool" && /# 文档\n定义：chief-of-staff/.test(message.content)));
+      }
       delta = { content: JSON.stringify({ type: "final", text: "已核查" }) };
     }
     res.writeHead(200, { "content-type": "text/event-stream" });

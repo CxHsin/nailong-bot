@@ -30,7 +30,7 @@ Telegram Bot 启动时固定 `runtime_identity`，每个新 Run 都记录同一�
 
 ## 上下文范围
 
-排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0003](adr/0003-recent-turn-context.md)，再运行：
+排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0004](adr/0004-continuous-active-context.md) 的连续活动上下文政策（[ADR-0003](adr/0003-recent-turn-context.md) 保留旧兼容入口政策），再运行：
 
 ```powershell
 npm run context:diagnose -- --conversation-id "telegram:private:你的ID"
@@ -39,10 +39,16 @@ npm run context:diagnose -- --conversation-id "你的Conversation" --request-id 
 
 默认选择指定 Conversation 最新用户轮次。指定旧 Run 时，在下次用户输入前截断事实，避免带入未来轮次。窗口参数按实际模型配置填写；默认 128000，输入预算比例为 0.86。本工具无需 API Key，不加载 `.env`，不启动 Bot，不调用模型。
 
-输出只有计数与估算：`historicalTurns`、`selectedMessages`、`initialEstimatedTokens`、`budget`、`exceedsBudget`、`archiveRecoveries`、`simulatedSummaryCalls`。`recordedSummaryCalls` 和 `recordedExecutionStarted` 来自目标 Run 的已记录事实，可区分压缩等待和已经开始的执行。
+输出只有计数、哈希、ID 与估算：`historicalTurns`、`selectedMessages`、`initialEstimatedTokens`、`budget`、`exceedsBudget`、`archiveRecoveries`、`simulatedSummaryCalls`。`recorded` 展示实际记录的活动起点、冻结摘要身份、完整输入预算、水位、尝试、释放量、降级与恢复成本；旧记录缺失字段为 `null`／`unknown`。摘要只输出 digest，正文不输出。`recordedSummaryCalls` 和 `recordedExecutionStarted` 来自目标 Run 的已记录事实，可区分压缩等待和已经开始的执行。
 
-模拟压缩使用固定摘要替身；模拟次数与 token 数不代表真实服务耗时或 usage。估算仅覆盖选定消息，不包含固定提示词、工具定义和本轮新 Akasha 检索内容；采用通用文本投影，不作为专属推理协议验收。
+模拟压缩使用固定摘要替身，派生状态只在临时目录；失败通过 `simulationSucceeded`／`simulationFailure` 明确展示。`comparison` 比较原三轮选择与历史全文策略的反事实消息容量，以及新策略的增量／完整重建 digest、归档恢复和处理事件数；这不是 Provider wire 编码的实机验收。模拟次数与 token 数不代表真实服务耗时或 usage。估算仅覆盖选定消息，不包含固定提示词、工具定义和本轮新 Akasha 检索内容；采用通用文本投影，不作为专属推理协议验收。
 
 生产数据库以只读模式打开。归档只校验、读取；缺失或损坏时诊断失败，不修复文件。派生缓存和模拟检查点只写入系统临时目录，结束后清理。完整对话、归档正文和密钥不会进入诊断输出。
 
 HTTP 集成测试使用 `test/fixtures/http-server.ts` 的 `createTestServer`：回调失败结束请求并在 teardown 报错；响应超过默认五秒也结束并报错。需要较慢模拟时显式传入超时，错误正文只输出固定消息，原始异常由测试 runner 报告。
+
+## 缓存与容量验收
+
+`/kvcache` 保留按输入 token 加权的执行总计，并单独显示每轮首个执行调用；摘要／辅助调用另计。完整上下文估算与 Provider usage 不直接相减推断 overhead：编码、图像和缓存字段口径可能不同。密集交互稳态、压缩后的首调与超过实际 TTL 的空闲首调分别比较，模拟 usage 不证明真实命中率。
+
+实现验收采用 Telegram 输入 → Host → 真实 Agent → 本地模拟 Provider，检查实际请求、持久事实和重启，辅以增量／完整重建。长序列覆盖普通追加、稳定工具视图、多次批量压缩、记忆原文区间去重、摘要后精确恢复、Skill 更新与旧版本回放、reset／forget 和模型切换。真实端点缓存、费用、TTFT 与 Telegram 人工排版需要另有实测证据，本次自动化验收不作对应保证。

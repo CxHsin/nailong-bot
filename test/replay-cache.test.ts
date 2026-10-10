@@ -9,6 +9,8 @@ import { conversationLog } from "../src/runtime/conversation-log.js";
 import { assistantText } from "../src/agent/model-message.js";
 import { replayEvents } from "../src/context/projection.js";
 import { createReplayCache } from "../src/context/replay-cache.js";
+import { mkdir } from "node:fs/promises";
+import { sourceDigest } from "../src/runtime/event-digest.js";
 
 test("incremental replay equals full replay, survives restart and invalidates reset, forgetting and corruption", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "replay-cache-")); t.after(() => rm(dir, { recursive: true, force: true }));
@@ -64,7 +66,7 @@ test("incremental replay equals full replay, survives restart and invalidates re
   assert.match(JSON.stringify(historical.units), /OLD IMMUTABLE SKILL INSTRUCTIONS/);
   const restoredResult = historical.units.flatMap((unit) => unit.messages).find((message) => message.role === "toolResult" && message.toolCallId === "new-call");
   assert.ok(restoredResult?.role === "toolResult");
-  assert.deepEqual(restoredResult.content, result.content);
+  assert.deepEqual(restoredResult.content, liveResult?.role === "toolResult" ? liveResult.content : undefined);
   const different = createReplayCache(dir, "c/model/changed-prompt");
   assert.equal((await different.replay(log, "current", model, false)).processedEvents, (await log.read()).length);
   await log.append({ type: "memory_excluded", nodeId: "r4" });
@@ -75,4 +77,38 @@ test("incremental replay equals full replay, survives restart and invalidates re
   const root = join(dir, "context-projections");
   for (const name of await readdir(root)) await writeFile(join(root, name), "broken");
   cache = createReplayCache(dir, "c/model/prompt"); await compare("next");
+});
+
+test("one-time migration uses a validated previous projection's scope and appends its final settlement", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "legacy-active-migration-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const log = conversationLog(createRuntimeLog(dir), "c");
+  const model = getModel("openai", "gpt-4o-mini");
+  for (let index = 0; index < 8; index++) {
+    await log.append({ type: "message", role: "user", requestId: `r${index}`, text: `original${index}` });
+    if (index < 7) {
+      await log.append({ type: "answer_generated", requestId: `r${index}`, text: `settled${index}` });
+      await log.append({ type: "run_succeeded", runId: `r${index}`, result: { kind: "model" } });
+    }
+  }
+  const raw = await log.read();
+  const identity = "c/exact-old-provider-and-config";
+  const key = sourceDigest({ version: 1, policy: "recent-three-skills-v2", identity });
+  const snapshot = { version: 1, key, raw, results: {}, replay: { events: raw, boundary: "previous-validated-scope", diagnostics: [],
+    current: { role: "user", timestamp: 0, content: "original7" }, units: [
+      { requestId: "r6", messages: [{ role: "user", timestamp: 0, content: "original6" }], through: raw.length - 1, safe: true },
+      { requestId: "r7", messages: [{ role: "user", timestamp: 0, content: "original7" }], through: raw.length, safe: true },
+    ] } };
+  await mkdir(join(dir, "context-projections"));
+  await writeFile(join(dir, "context-projections", `${key}.json`), JSON.stringify({ snapshot, sha256: sourceDigest(snapshot) }));
+  await log.append({ type: "answer_generated", requestId: "r7", text: "FINAL AFTER PREVIOUS SNAPSHOT" });
+  await log.append({ type: "run_succeeded", runId: "r7", result: { kind: "model" } });
+  await log.append({ type: "message", role: "user", requestId: "current", text: "followup" });
+  const actual = await createReplayCache(dir, identity).replay(log, "current", model, false);
+  const text = JSON.stringify(actual.units);
+  assert.match(text, /original6|original7/);
+  assert.match(text, /FINAL AFTER PREVIOUS SNAPSHOT/);
+  assert.doesNotMatch(text, /original0|original1|original2|original3|original4|original5/);
+  assert.equal((await log.read()).find((event) => event.type === "active_context_started")!.migration, "legacy-snapshot");
+  const expected = await replayEvents(log, "current", model, false);
+  assert.deepEqual({ ...actual, processedEvents: undefined }, { ...expected, processedEvents: undefined });
 });

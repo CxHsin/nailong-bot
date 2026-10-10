@@ -191,16 +191,16 @@ test("Host installs only on an explicit request, preserves resources and support
   const send = (text: string) => host.submit({ actor: { id: "owner" }, conversationId: "c", text, metadata: { channel: "telegram" } }).done;
   const url = "https://github.com/owner/repo/tree/main/skills/demo";
   await send(url); assert.equal(downloads, 0); assert.equal(modelCalls, 1);
-  const result = await send(`安装 skill ${url}`); assert.match(String(result.result?.text), /已安装.*demo/);
+  const result = await send(`安装 skill ${url}`); assert.match(String(result.result?.text), /已安装.*demo.*通过 \/demo 调用/);
   const installed = (await log.read()).find((e) => e.type === "skill_installed")!;
   assert.equal(await import("node:fs/promises").then((fs) => fs.readFile(join(String(installed.root), "reference.txt"), "utf8")), "REFERENCE");
-  const count = modelCalls; await send("@demo use it"); assert.equal(modelCalls, count + 1);
+  const count = modelCalls; await send("/demo use it"); assert.equal(modelCalls, count + 1);
   assert.match(String((await send(`安装 skill ${url}`)).result?.text), /已存在|重名/);
   version = "NEW"; broken = true;
   assert.match(String((await send(`更新 skill ${url}`)).result?.text), /失败|元数据/);
   await agent.close(); agent = await createPiAgent(options); t.after(() => agent.close());
   host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  assert.equal((await send("@demo restart")).type, "run_succeeded");
+  assert.equal((await send("/demo restart")).type, "run_succeeded");
   broken = false; assert.match(String((await send(`更新 skill ${url}`)).result?.text), /已更新.*demo/);
   const loaded = (await log.read()).filter((e) => e.type === "skill_loaded");
   assert.ok(loaded.every((e) => String(e.body).includes("OLD instruction")));
@@ -229,9 +229,9 @@ test("Telegram loads explicit skills in order, persists full bodies and replays 
   await send("hello");
   assert.match(JSON.stringify(wire[0].messages[0]), /Teach a lesson/);
   assert.doesNotMatch(JSON.stringify(wire[0]), /END-OLD-SKILL/);
-  const result = await send("@lesson @lesson 教我"); assert.equal(result.type, "run_succeeded");
+  const result = await send("/lesson /lesson 教我"); assert.equal(result.type, "run_succeeded");
   assert.match(JSON.stringify(wire[1]), /END-OLD-SKILL/);
-  assert.match(JSON.stringify(wire[1]), /@lesson @lesson/);
+  assert.match(JSON.stringify(wire[1]), /\/lesson \/lesson/);
   assert.equal((await log.read()).filter((e) => e.type === "skill_loaded").length, 1);
   await agent.close(); await writeFile(path, body.replace("END-OLD-SKILL", "END-NEW-SKILL"));
   agent = await createPiAgent(options); t.after(() => agent.close());
@@ -239,8 +239,16 @@ test("Telegram loads explicit skills in order, persists full bodies and replays 
   await send("continue");
   assert.match(JSON.stringify(wire[2]), /END-OLD-SKILL/);
   assert.doesNotMatch(JSON.stringify(wire[2]), /END-NEW-SKILL/);
+  await send("/lesson use updated instructions");
+  assert.match(JSON.stringify(wire[3]), /END-NEW-SKILL/);
+  const versions = (await log.read()).filter((event) => event.type === "skill_loaded");
+  assert.equal(versions.length, 2);
+  assert.notEqual(versions[0]!.digest, versions[1]!.digest);
+  assert.equal(versions[0]!.source, "personal");
+  assert.equal(versions[0]!.root, join(root, "lesson"));
+  assert.equal(versions[0]!.body, body);
   const before = wire.length;
-  const missing = await send("@unknown 教我");
+  const missing = await send("/unknown 教我");
   assert.match(JSON.stringify(missing), /未知.*skill|未知.*技能/); assert.equal(wire.length, before);
   await send("/reset"); await send("fresh"); assert.doesNotMatch(JSON.stringify(wire.at(-1)), /END-OLD-SKILL|END-NEW-SKILL/);
 });
@@ -282,7 +290,7 @@ test("explicit skill over budget fails before Provider instead of truncating ins
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, contextWindow: 9000, skillSources: [{ name: "source", path: root }] });
   t.after(() => agent.close()); const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  const result = await host.submit({ actor: { id: "owner" }, conversationId: "c", text: "@huge execute", metadata: { channel: "telegram" } }).done;
+  const result = await host.submit({ actor: { id: "owner" }, conversationId: "c", text: "/huge execute", metadata: { channel: "telegram" } }).done;
   assert.match(String(result.result?.text), /skill 加载失败.*预算/); assert.equal(calls, 0);
 });
 
@@ -306,7 +314,7 @@ test("single-file installs reject damaged metadata and unsupported URLs without 
   mode = "missing"; assert.match(String((await send("安装 skill https://example.com/SKILL.md")).result?.text), /HTTP 404/);
   assert.equal((await log.read()).some((e) => e.type === "skill_installed"), false);
   mode = "valid"; assert.match(String((await send("/skill install https://example.com/SKILL.md")).result?.text), /仅含 SKILL.md/);
-  assert.equal(calls, 0); assert.equal((await send("@solo use")).type, "run_succeeded"); assert.equal(calls, 1);
+  assert.equal(calls, 0); const solo = await send("/solo use"); assert.equal(solo.type, "run_succeeded", JSON.stringify(solo)); assert.equal(calls, 1);
 });
 
 test("qualified references resolve ambiguity, deduplicate aliases and load in input order", async (t) => {
@@ -323,8 +331,8 @@ test("qualified references resolve ambiguity, deduplicate aliases and load in in
   const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, skillSources: [{ name: "first", path: first }, { name: "second", path: second }] });
   t.after(() => agent.close()); const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = (text: string) => host.submit({ actor: { id: "owner" }, conversationId: "c", text, metadata: { channel: "telegram" } }).done;
-  assert.match(String((await send("@demo use")).result?.text), /歧义.*@first:demo.*@second:demo/); assert.equal(calls, 0);
-  assert.equal((await send("@second:demo @other @first:other @first:demo execute")).type, "run_succeeded");
+  assert.match(String((await send("/demo use")).result?.text), /歧义.*\/first:demo.*\/second:demo/); assert.equal(calls, 0);
+  assert.equal((await send("/second:demo /other /first:other /first:demo execute")).type, "run_succeeded");
   assert.deepEqual((await log.read()).filter((e) => e.type === "skill_loaded").map((e) => `${e.source}:${e.name}`), ["second:demo", "first:other", "first:demo"]);
 });
 
@@ -347,7 +355,7 @@ test("skill scripts run only through a configured discovered execution tool", as
   const options = { dataDir: dir, promptFile, memoryBootstrap: false, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, skillSources: [{ name: "source", path: root }] };
   const log = await createRuntimeEventLog(dir); let agent = await createPiAgent({ ...options, executionTool: true });
   let host = createAgentHost({ dataDir: dir, promptFile, log, agent });
-  const send = () => host.submit({ actor: { id: "owner" }, conversationId: "c", text: "@scripted run", metadata: { channel: "telegram" } }).done;
+  const send = () => host.submit({ actor: { id: "owner" }, conversationId: "c", text: "/scripted run", metadata: { channel: "telegram" } }).done;
   assert.equal((await send()).result?.text, "script succeeded");
   assert.equal((await log.read()).filter((e) => e.type === "capability_executed" && e.toolName === "bash").length, 1);
   await agent.close(); configured = false; calls = 0; agent = await createPiAgent(options); t.after(() => agent.close()); host = createAgentHost({ dataDir: dir, promptFile, log, agent });

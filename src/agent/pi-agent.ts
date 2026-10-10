@@ -23,12 +23,14 @@ import { createEmbeddingClient, type EmbeddingConfig } from "../memory/embedding
 import { memoryDynamics, type MemoryDynamics } from "../memory/dynamics.js";
 import { recallConfig, type RecallConfig } from "../memory/recall.js";
 import { memoryBudget } from "../application/memory-context.js";
+import { compactionConfig, type CompactionConfig } from "../context/context-budget.js";
 import { modelInputBudget } from "../context/input-budget.js";
 import { createMemoryBootstrap } from "../application/memory-bootstrap.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { createToolCatalog, unavailableWebSearch, type ToolSource } from "./tool-catalog.js";
 import { connectMcp, type McpConfig } from "./mcp-catalog.js";
 import { scanSkills, explicitSkills, skillRead, type SkillSource } from "./skills.js";
+import { agentCommand } from "../application/commands.js";
 import { createSkillStore } from "./skill-store.js";
 import { streamNativeResponses, anthropicSearchPayload } from "./native-tool-search.js";
 
@@ -47,6 +49,7 @@ export async function createPiAgent(options: {
   skillFetch?: typeof fetch;
   contextWindow?: number;
   contextBudgetRatio?: number;
+  compaction?: CompactionConfig;
   modelBudgetRatios?: Record<string, number>;
   memoryBudget?: MemoryBudget;
   embedding?: EmbeddingConfig;
@@ -92,6 +95,7 @@ export async function createPiAgent(options: {
   };
   const apiKey = (request?: Request) => resolveProfile(request).apiKey;
   for (const profile of profiles) memoryBudget(modelInputBudget(profile.model, options.contextBudgetRatio, options.modelBudgetRatios).budget, options.memoryBudget);
+  compactionConfig(options.compaction);
   memoryDynamics(options.memoryDynamics); recallConfig(options.memoryRecall);
   const authStorage = AuthStorage.create(join(options.dataDir, "auth.json"));
   for (const profile of profiles) authStorage.setRuntimeApiKey(profile.model.provider, profile.apiKey);
@@ -104,7 +108,7 @@ export async function createPiAgent(options: {
     models: profiles.map((profile) => ({ alias: profile.alias, name: profile.model.id })),
     async prepareCapabilities(text: string, request: Request) {
       request.skillSnapshot = await scanSkills([...(options.skillSources ?? []), ...await skillStore.sources()]);
-      if (request.channel === "telegram") request.loadedSkillPaths = (await explicitSkills(request.skillSnapshot, text, request)).map((skill) => skill.path);
+      if (request.channel === "telegram" && !agentCommand(text)) request.loadedSkillPaths = (await explicitSkills(request.skillSnapshot, text, request)).map((skill) => skill.path);
     },
     installSkill: (text: string, request: Request) => skillStore.handle(text, request),
     memoryVector: (text: string) => embedding?.cached(text),

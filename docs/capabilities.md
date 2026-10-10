@@ -1,6 +1,6 @@
 # 工具发现、MCP 与 skills
 
-规格与任务：#111、#112、#113、#114。
+规格与任务：#111、#112、#113、#114；连续上下文及 Telegram 命令扩展：#127、#130。
 
 Host 每次 Run 固定当前能力版本。`tool_search`、`read`、`write`、`edit`、`web_search` 是稳定入口；TinyFish 未配置或连接失败时，`web_search` 明确返回不可用。`ls`、`find`、`grep`、记忆工具、`web_fetch` 和外部 MCP 工具通过 `tool_search` 发现。搜索按名称、说明及参数描述确定性排序，返回完整 schema、来源与 digest，默认最多五项，可指定 1–10 项。空结果可以修改查询；同轮已发现的工具可以重复调用。
 
@@ -53,7 +53,7 @@ OpenAI Responses 使用 client-executed `tool_search_call`/`tool_search_output`�
 
 隐式匹配时，模型通过 `read` 读取完整正文。正文分页会提示下一页，最后一页只有在所有分页已读时才标记完整。单行过大时明确失败，可改用 Telegram 显式引用。相对资源路径以已加载 skill 根目录解析；多个可能资源提示歧义，使用完整路径即可定位。网页归档的分页仍由原有 `read` 处理。
 
-Telegram 输入 `@skill名称 请求` 会在模型执行前完整注入正文，保留原请求。例如 `@lesson 帮我学习这一章`。重名时使用 `@personal:lesson`。多个引用按输入顺序加载，同技能的短名和限定名去重。未知或歧义引用返回提示，不调用模型。完整指令超出输入预算时返回失败提示，不静默截断。CLI 可通过自然任务匹配后用 `read` 加载。
+Telegram 在消息或图片 caption 开头输入 `/lesson 帮我学习这一章`，模型执行前加载完整正文，作为普通任务排队并显示进展，保留图片和回复背景。来源限定为 `/personal:lesson`；真实名称支持连字符。首行可连续写多个引用，同技能去重后按顺序加载，无参数也可开始工作流。内置命令优先，同名技能通过来源限定调用，例如 `/personal:help`；`/skill install/update` 保持控制操作。带 `@当前bot` 后缀可执行，其他 Bot 后缀忽略。正文中间的引用、路径和 URL 不触发。未知或歧义引用整体失败，不部分注入，不调用执行模型。旧 `@lesson` 不再作为 Telegram 显式触发，但模型仍可按任务相关性选择技能。完整正文超过预算或资源缺失时明确失败，不静默截断。CLI 继续自然任务匹配后用 `read` 加载。
 
 ## 安装与更新
 
@@ -76,6 +76,6 @@ Telegram 和 CLI 可发送：
 
 `capability_snapshot` 记录 Run 目录身份和不可用来源；`tool_discovered` 记录命中 schema；`capability_dispatched`/`capability_executed` 记录准确执行工具与结果。兼容 `tool_call` 保留实际来源信息，供 Akasha 展示/遗忘过滤和网页归档预览使用。
 
-显式加载回放当时正文，隐式加载回放当时的读取结果，均不重新读取磁盘新正文。近期三轮、reset、forget 和输入预算继续生效。skill 指令不成为 Akasha 学习内容。动态发现不改变注册表缓存身份；真实目录或技能版本变化使相应输入配置失效。Context Projection 缓存版本已更新，旧派生缓存自动重建。
+显式加载回放当时正文，隐式加载回放当时的读取结果，均不重新读取磁盘新正文。Host 的连续 Active Context、reset、forget 和完整输入预算继续生效；旧历史正文不因命令语法变化而重新解析。skill 指令不成为 Akasha 学习内容。动态发现不改变注册表缓存身份；真实目录或技能版本变化使相应输入配置失效。Context Projection 缓存版本已更新，旧派生缓存自动重建。
 
 `test/capabilities.test.ts` 从 Host → 真实 Agent → 本地 Provider/MCP 验证原生与兼容 wire、冲突/离线来源、参数拒绝、同轮重复调用、新轮权限隔离、显式/隐式全文、资源按需读取、预算失败、原子安装更新、重启旧版本、脚本执行及无执行能力。`test/replay-cache.test.ts` 比较含加载事实的完整/增量回放和重启、reset、forget、损坏缓存恢复。现有跨 Channel、模型切换、记忆与网页归档回归继续验证原先边界。

@@ -37,6 +37,7 @@ async function main(): Promise<void> {
     } : undefined,
     modelBudgetRatios: process.env.PROJECTION_BUDGET_RATIOS
       ? JSON.parse(process.env.PROJECTION_BUDGET_RATIOS) : undefined,
+    compaction: process.env.CONTEXT_COMPACTION ? JSON.parse(process.env.CONTEXT_COMPACTION) : undefined,
     memoryBudget: { maxTokens: process.env.MEMORY_MAX_TOKENS ? Number(process.env.MEMORY_MAX_TOKENS) : undefined },
     memoryDynamics: dynamics, memoryRecall: recall,
   });

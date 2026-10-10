@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream, isContextOverflow } from "@mariozech
 import type { Api, Model, Message, Usage, SimpleStreamOptions, Tool } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { Request } from "../application/app-types.js";
-import { createContextProjection } from "../context/context-budget.js";
+import { createContextProjection, type CompactionConfig } from "../context/context-budget.js";
 import { assistantText, stableSystemPrompt } from "./model-message.js";
 import { createToolPathPolicy } from "./tool-path-policy.js";
 import { OUTPUT_PROTOCOL_VERSION, parseStructuredText, previewStructuredText, readOutputFrames, normalizeOutputWhitespace, recoverFinalEnvelope } from "./output-protocol.js";
@@ -30,7 +30,7 @@ function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptio
   } };
 }
 
-export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3"; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
+export async function attachExecution(session: AgentSession, model: Model<Api>, options: { dataDir: string; promptFile: string; contextBudgetRatio?: number; modelBudgetRatios?: Record<string, number>; compaction?: CompactionConfig; memoryBudget?: MemoryBudget; now?: () => Date; outputProtocol?: "json-text-v2" | "plain-text-v3"; visibleTools?: Tool[]; toolCatalogDigest?: string }, botPrompt: string, systemPrompt: string, request?: Request, memory?: ReturnType<typeof createMemoryProjection>) {
   const plain = options.outputProtocol !== "json-text-v2" && !request?.onText;
   const protocolVersion = plain ? PLAIN_TEXT_PROTOCOL : OUTPUT_PROTOCOL_VERSION;
   const checkToolPath = await createToolPathPolicy(options.dataDir, options.promptFile);
@@ -92,7 +92,7 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
   const sourceDigestForReplay = () => createHash("sha256").update(JSON.stringify({ systemPrompt, tools: options.visibleTools ?? session.agent.state.tools, catalog: options.toolCatalogDigest, protocolVersion })).digest("hex");
   const projection = request && createContextProjection({ log: request.log, dataDir: options.dataDir, requestId: request.id,
     conversationId: request.conversationId, structured: !plain,
-    ratio: budgetRatio, ratios: budgetRatios,
+    ratio: budgetRatio, ratios: budgetRatios, compaction: options.compaction,
     cacheIdentity: sourceDigestForReplay(),
     signal: request?.signal,
     onCheckpointValidated: () => request?.onProgress?.({ type: "text", segmentId: `${request.id}:checkpoint`, kind: "status", text: "历史摘要已生成，结构检查通过。", actionState: "completed", finalized: true, formal: false, source: "execution" }),
@@ -130,39 +130,49 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       for (let attempt = 0; attempt < 2; attempt++) {
         const inputBudget = modelInputBudget(selected, budgetRatio, budgetRatios).budget;
         const date: Message = { role: "user", timestamp: 0, content: `运行层当前日期（背景资料）：${(options.now?.() ?? new Date()).toISOString().slice(0, 10)}` };
-        const reserve = snapshot ? 0 : (recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0) +
-          (request?.conversationId ? estimateInput({ messages: [date] }) - estimateInput({ messages: [] }) : 0);
         const phase = (id: string, text: string, actionState: "started" | "completed" | "failed") => request?.onProgress?.({ type: "text", segmentId: `${request.id}:${id}`, kind: "status", text, actionState, finalized: true, formal: false, source: "execution" });
         phase("history", "正在恢复历史上下文……", "started");
         const restoreStarted = performance.now();
-        const result = projection ? await projection.project(selected, context, attempt === 1, reserve) :
+        let selectedMemory: Awaited<ReturnType<typeof composeMemoryLive>> | undefined;
+        let selectMs = 0;
+        const prepare = async (base: import("@mariozechner/pi-ai").Context, sourceIds: string[]): Promise<Message[]> => {
+          if (snapshot) return [];
+          phase("memory-select", "正在筛选候选记忆……", "started");
+          const selectStarted = performance.now();
+          selectedMemory = await composeMemoryLive([base, sourceIds, recalled?.candidates ?? [], recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0, String(user?.text ?? "")],
+            (counts) => phase("memory-select", `已检查 ${counts.checked}/${counts.total} 条候选，选入 ${counts.loaded} 段引用。`, "started"), request?.signal);
+          selectMs = performance.now() - selectStarted;
+          const currentIndex = selectedMemory.context.messages.findLastIndex((message) => message.role === "user");
+          const memoryMessage = selectedMemory.quotes.length ? selectedMemory.context.messages[currentIndex - 1] : undefined;
+          const supplemental = [...(request?.conversationId ? [date] : []), ...(memoryMessage ? [memoryMessage] : [])];
+          if (request?.conversationId) {
+            const appendedReferences = selectedMemory.shown.filter((reference) => !reference.existing);
+            const nextSnapshot = { type: "context_input_snapshot", messages: supplemental, shown: appendedReferences, tokens: selectedMemory.tokens,
+              memoryCoverage: selectedMemory.coverage.filter((entry) => appendedReferences.some((reference) =>
+                reference.nodeId === entry.nodeId && reference.messageId === entry.messageId && reference.offset === entry.offset && reference.end === entry.end)),
+              memoryNodeIds: selectedMemory.quotes.flatMap((quote) => { const reference = quote as { nodeId: string; associationPaths?: string[][] };
+                return [reference.nodeId, ...(reference.associationPaths?.flat() ?? [])]; }) };
+            await request.log.append({ ...nextSnapshot, requestId: request.id });
+            snapshot = { ...nextSnapshot, at: new Date().toISOString() };
+          }
+          phase("memory-select", `筛选完成，实际选入 ${selectedMemory.quotes.length} 段引用。`, "completed");
+          return supplemental;
+        };
+        const result = projection ? await projection.project(selected, context, attempt === 1, 0, prepare) :
           { context, maxTokens: selected.maxTokens, sourceIds: [] as string[] };
         const restoreMs = performance.now() - restoreStarted;
         phase("history", `历史上下文已恢复，${result.context.messages.length} 条消息。`, "completed");
-        phase("memory-select", "正在筛选候选记忆……", "started");
-        const selectStarted = performance.now();
-        let combined = snapshot ? { context: result.context, shown: snapshot.shown as ReturnType<typeof composeMemory>["shown"], tokens: Number(snapshot.tokens), quotes: [] } :
-          await composeMemoryLive([result.context, result.sourceIds, recalled?.candidates ?? [], recalled?.candidates.length ? memoryBudget(inputBudget, options.memoryBudget) : 0, String(user?.text ?? "")], (counts) => phase("memory-select", `已检查 ${counts.checked}/${counts.total} 条候选，选入 ${counts.loaded} 段引用。`, "started"), request?.signal);
-        const selectMs = performance.now() - selectStarted;
-        phase("memory-select", snapshot ? "已复用本轮记忆快照。" : `筛选完成，实际选入 ${combined.quotes.length} 段引用；重复或超预算内容未加入。`, "completed");
+        // Compaction may have removed originals after recall selection. Record
+        // only ranges that survive in the actual Provider input, so a lossy
+        // summary cannot qualify the removed original for memory learning.
+        const visibleMemory = composeMemory(result.context, result.sourceIds, recalled?.candidates ?? [], 0, String(user?.text ?? ""));
+        let combined = { context: result.context, shown: visibleMemory.shown,
+          coverage: visibleMemory.coverage,
+          tokens: selectedMemory?.tokens ?? Number(snapshot?.tokens ?? 0), quotes: selectedMemory?.quotes ?? [] };
         const loadStarted = performance.now();
         phase("context-load", "正在装载上下文与记忆引用……", "started");
         await new Promise<void>((resolve) => setImmediate(resolve));
         if (request?.signal?.aborted) throw new DOMException("上下文装载已取消", "AbortError");
-        if (request?.conversationId && !snapshot) {
-          const currentIndex = combined.context.messages.findLastIndex((message) => message.role === "user");
-          const memoryMessage = combined.quotes.length ? combined.context.messages[currentIndex - 1] : undefined;
-          const supplemental = [date, ...(memoryMessage ? [memoryMessage] : [])];
-          const messages = [...combined.context.messages];
-          messages.splice(memoryMessage ? currentIndex - 1 : currentIndex, 0, date);
-          combined = { ...combined, context: { ...combined.context, messages } };
-          snapshot = { type: "context_input_snapshot", at: new Date().toISOString(), messages: supplemental,
-            shown: combined.shown, tokens: combined.tokens,
-            memoryNodeIds: combined.quotes.flatMap((quote) => { const reference = quote as { nodeId: string; associationPaths?: string[][] };
-              return [reference.nodeId, ...(reference.associationPaths?.flat() ?? [])]; }) };
-          const { at: _at, ...storedSnapshot } = snapshot;
-          await request.log.append({ ...storedSnapshot, requestId: request.id });
-        }
         if (request && combined.quotes.length) phase("memory-ready", `已加载 ${combined.quotes.length} 段记忆引用。`, "completed");
         phase("context-load", `上下文已装载，${combined.context.messages.length} 条消息。`, "completed");
         phase("context-check", "正在核对上下文预算……", "started");
@@ -254,7 +264,8 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         await recordModelUsage(request, modelStepId, "execution", message, initialUsage);
         if (request && recalled?.snapshotId && message.stopReason !== "error" && message.stopReason !== "aborted")
           await request.log.append({ type: "memory_presented", requestId: request.id,
-            modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, tokens: combined.tokens, budget: reserve });
+            modelStepId, snapshotId: recalled.snapshotId, shown: combined.shown, memoryCoverage: combined.coverage,
+            tokens: combined.tokens, budget: memoryBudget(inputBudget, options.memoryBudget) });
         await request?.log.append({ type: "model_message", requestId: request.id, step,
           modelStepId, protocolVersion, message });
         await request?.log.append({ type: "model_step_completed", requestId: request.id,
