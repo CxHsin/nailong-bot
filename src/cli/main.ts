@@ -15,8 +15,7 @@ async function main() {
   const modelConfiguration = modelEnvironment(process.env);
   const log = await createRuntimeEventLog(dataDir);
   const agent = await createPiAgent({ ...await capabilityEnvironment(process.env), dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim() });
-  const host = createAgentHost({ log, dataDir, promptFile, agent,
-    progressSummary: process.env.PROGRESS_SUMMARY_OPTIONS ? JSON.parse(process.env.PROGRESS_SUMMARY_OPTIONS) : undefined });
+  const host = createAgentHost({ log, dataDir, promptFile, agent });
   await host.recoverInterrupted();
   const cli = createCliChannel({ host, actor: { id: process.env.AGENT_ACTOR_ID?.trim() || "cli", kind: "user" }, stdout: (line) => stdout.write(`${line}\n`), stderr: (line) => stderr.write(`${line}\n`),
     onDelivered: (event) => host.recordDelivery(event, { channel: "cli" }) });

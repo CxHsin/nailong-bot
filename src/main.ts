@@ -41,14 +41,13 @@ async function main(): Promise<void> {
   // grammY's Node types use a legacy AbortSignal declaration; its runtime accepts
   // the native signal's aborted/addEventListener/removeEventListener contract.
   const transport = createTelegramRichTransport({
-    sendRich: async (chatId, markdown) => (await bot.api.sendRichMessage(chatId, { markdown })).message_id,
+    sendRich: async (chatId, markdown, signal) => (await bot.api.sendRichMessage(chatId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessage>[3])).message_id,
     draftRich: async (draftId, chatId, markdown, signal) => { await bot.api.sendRichMessageDraft(chatId, draftId, { markdown }, undefined, signal as Parameters<typeof bot.api.sendRichMessageDraft>[4]); },
     editHtml: async (messageId, chatId, html) => { await bot.api.editMessageText(chatId, messageId, html, { parse_mode: "HTML" }); },
-    sendHtml: async (chatId, html) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" })).message_id,
+    sendHtml: async (chatId, html, signal) => (await bot.api.sendMessage(chatId, html, { parse_mode: "HTML" }, signal as Parameters<typeof bot.api.sendMessage>[3])).message_id,
     draftHtml: async (draftId, chatId, html, signal) => { await bot.api.sendMessageDraft(chatId, draftId, html, { parse_mode: "HTML" }, signal as Parameters<typeof bot.api.sendMessageDraft>[4]); },
   });
-  const host = createAgentHost({ log, dataDir, promptFile, agent,
-    progressSummary: process.env.PROGRESS_SUMMARY_OPTIONS ? JSON.parse(process.env.PROGRESS_SUMMARY_OPTIONS) : undefined });
+  const host = createAgentHost({ log, dataDir, promptFile, agent });
   await host.recoverInterrupted();
   const reportFailure = (error?: unknown) => {
     console.error("Telegram 更新处理失败，请检查连接和本地记录。", error instanceof Error ? error.stack ?? error.message : error);

@@ -26,10 +26,25 @@ function transport() {
   const rich = createTelegramRichTransport({ sendRich: async (_chat, text) => { finals.push(text); return 99; },
     draftRich: async () => {}, draftHtml: async () => {},
     sendHtml: async (_chat, text) => { const id = visible.size + 1; visible.set(id, text); return id; },
-    editHtml: async (id, _chat, text) => { edits.push(id); visible.set(id, text); } });
+    editHtml: async (id, _chat, text) => { edits.push(id); visible.set(id, text); } }, { nativeStream: false });
   const { draft: _draft, ...cardOnly } = rich;
   return { rich: cardOnly, visible, edits, finals };
 }
+
+test("production projection streams final deltas before the Run finishes", async () => {
+  const output = transport(); const drafts: string[] = [];
+  const done = event("run_succeeded", { result: { text: "最终答案全文", finalText: "最终答案全文" } });
+  const run: RunHandle = { runId: "stream-final", conversationId: "telegram:42", done: Promise.resolve(done), cancel: async () => true,
+    async *events() {
+      yield progress({ type: "text", segmentId: "answer", kind: "final", text: "最终答案", finalized: false });
+      await delay(40);
+      assert.ok(drafts.some((text) => text.includes("最终答案")), "final deltas must be visible before run_succeeded");
+      yield progress({ type: "text", segmentId: "answer", kind: "final", text: "最终答案全文", finalized: true });
+      yield done;
+    } };
+  await createTelegramHostProjection({ ...output.rich, nativeStream: true, chatId: 42, draftIntervalMs: 5,
+    draft: async (_id, text) => { drafts.push(text); } }).consume(run);
+});
 
 test("retained journal uses one native draft for animated preparation text and persists only on finish", async () => {
   const output = transport(); const drafts: Array<{ id: number; text: string }> = [];

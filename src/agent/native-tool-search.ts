@@ -1,5 +1,6 @@
 import { createAssistantMessageEventStream, type Api, type Model, type Context, type SimpleStreamOptions, type AssistantMessage, type Tool } from "@mariozechner/pi-ai";
 import type { createToolCatalog } from "./tool-catalog.js";
+import { textPhase } from "./text-phase.js";
 
 type Catalog = ReturnType<typeof createToolCatalog>;
 const functionTool = (tool: Tool) => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.parameters, strict: false });
@@ -31,7 +32,8 @@ function responsesInput(context: Context, currentCalls: Set<string>) {
   for (const message of context.messages) {
     if (message.role === "user") input.push({ role: "user", content: typeof message.content === "string" ? message.content : message.content.map((part) => part.type === "text" ? { type: "input_text", text: part.text } : { type: "input_image", image_url: `data:${part.mimeType};base64,${part.data}` }) });
     else if (message.role === "assistant") for (const part of message.content) {
-      if (part.type === "text") input.push({ role: "assistant", content: [{ type: "output_text", text: part.text }] });
+      if (part.type === "text") input.push({ role: "assistant", content: [{ type: "output_text", text: part.text }],
+        ...(textPhase(part) ? { phase: textPhase(part) } : {}) });
       if (part.type === "thinking" && part.thinkingSignature) { try { input.push(JSON.parse(part.thinkingSignature)); } catch {} }
       if (part.type === "toolCall") {
         if (part.name === "tool_search" && currentCalls.has(part.id)) input.push({ type: "tool_search_call", call_id: part.id, execution: "client", status: "completed", arguments: part.arguments });
@@ -88,15 +90,21 @@ export function streamNativeResponses(model: Model<Api>, context: Context, optio
       await options.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers) }, model);
       if (!response.ok) { await response.body?.cancel(); throw new Error(`Provider HTTP ${response.status}`); }
       stream.push({ type: "start", partial: output });
-      const pending = new Map<number, { item: Record<string, any>; args: string; text: string }>();
+      const pending = new Map<number, { item: Record<string, any>; args: string; text: string; contentIndex?: number }>();
       let completed = false;
       for await (const event of events(response)) {
         if (event.type === "response.output_item.added") pending.set(event.output_index, { item: event.item, args: "", text: "" });
         if (event.type === "response.function_call_arguments.delta") { const item = pending.get(event.output_index); if (item) item.args += event.delta; }
         if (event.type === "response.output_text.delta") {
           const item = pending.get(event.output_index); if (item) item.text += event.delta;
-          let index = output.content.findIndex((part) => part.type === "text");
-          if (index < 0) { index = output.content.length; output.content.push({ type: "text", text: "" }); stream.push({ type: "text_start", contentIndex: index, partial: output }); }
+          let index = item?.contentIndex;
+          if (index === undefined) {
+            index = output.content.length;
+            if (item) item.contentIndex = index;
+            output.content.push({ type: "text", text: "", textSignature: JSON.stringify({ v: 1, id: item?.item.id,
+              ...(item?.item.phase ? { phase: item.item.phase } : {}) }) });
+            stream.push({ type: "text_start", contentIndex: index, partial: output });
+          }
           const part = output.content[index]!; if (part.type === "text") part.text += event.delta;
           stream.push({ type: "text_delta", contentIndex: index, delta: event.delta, partial: output });
         }
@@ -114,9 +122,12 @@ export function streamNativeResponses(model: Model<Api>, context: Context, optio
             stream.push({ type: "toolcall_end", contentIndex: output.content.length - 1, toolCall, partial: output });
           }
           if (item.type === "reasoning" && item.encrypted_content) output.content.push({ type: "thinking", thinking: "", thinkingSignature: JSON.stringify(item) });
-          if (item.type === "message" && !pending.get(event.output_index)?.text) {
+          if (item.type === "message") {
             const text = (item.content ?? []).filter((part: any) => part.type === "output_text").map((part: any) => part.text).join("\n");
-            if (text) output.content.push({ type: "text", text });
+            const current = pending.get(event.output_index);
+            const index = current?.contentIndex ?? output.content.length;
+            output.content[index] = { type: "text", text: text || current?.text || "", textSignature: JSON.stringify({ v: 1, id: item.id, ...(item.phase ? { phase: item.phase } : {}) }) };
+            stream.push({ type: "text_end", contentIndex: index, content: (output.content[index] as { text: string }).text, partial: output });
           }
         }
         if (event.type === "response.completed" || event.type === "response.incomplete") {

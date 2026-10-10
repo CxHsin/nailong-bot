@@ -12,7 +12,7 @@ import { createTestServer } from "./fixtures/http-server.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 import type { RunProgress } from "../src/runtime/progress.js";
 
-test("Telegram shows recall progress while embedding is pending and edits the same card through context preparation", { timeout: 12000 }, async (t) => {
+test("Telegram streams preparation while embedding is pending and persists the same Markdown without a card", { timeout: 12000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "memory-preparation-stream-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "answer");
   let release!: () => void;
@@ -62,13 +62,14 @@ test("Telegram shows recall progress while embedding is pending and edits the sa
     for await (const event of run.events()) { if (event.progress) statuses.push(event.progress); yield event; }
   } });
   assert.equal((await run.done).type, "run_succeeded");
-  assert.equal(cards.size, 1);
+  assert.equal(cards.size, 0);
   assert.ok(snapshots.some((html) => html.includes("正在匹配问题的语义")));
-  assert.ok(drafts.length > 0); assert.equal(new Set(drafts).size, 1);
-  const text = cards.get(1)!;
+  assert.ok(drafts.length > 0);
+  const text = finals[0]!;
   assert.match(text, /检索完成：40 条候选记忆/);
   assert.match(text, /历史上下文已恢复|筛选完成|上下文已准备好/);
-  assert.deepEqual(finals, ["最终答复"]);
+  assert.equal(finals.at(-1), "最终答复");
+  assert.doesNotMatch(finals.join(""), /<blockquote|<b>/);
   assert.ok(statuses.some((status) => status.type === "text" && /正在扫描记忆：32\/40/.test(status.text)));
   assert.ok(statuses.some((status) => status.type === "text" && /已检查 16\/40/.test(status.text)));
   assert.ok(statuses.some((status) => status.type === "text" && /正在恢复历史记录：/.test(status.text)));

@@ -9,7 +9,7 @@ const source = "# 标题\n\n**加粗**\n\n| 名称 | 值 |\n| --- | --- |\n| 一
 
 test("live preview escapes text, clips whole Unicode characters and leaves room for all journal pages", () => {
   const transport = createTelegramRichTransport({ sendRich: async () => 1, sendHtml: async () => 1,
-    draftRich: async () => {}, draftHtml: async () => {} });
+    draftRich: async () => {}, draftHtml: async () => {} }, { nativeStream: false });
   const text = "```ts\n" + "const 原始 = '😀';\n".repeat(600) + "```";
   const pages = transport.plan({ id: "p", text, kind: "progress", preview: ["<最新> & 状态\n继续", "😀".repeat(40)] });
   assert.ok(pages.length > 1);
@@ -41,7 +41,7 @@ test("Rich transport sends original Markdown for drafts and final messages", asy
 test("formal progress pages keep folding titles, Unicode and code intact with a full-content fallback", async () => {
   const sent: string[] = [];
   const transport = createTelegramRichTransport({ sendRich: async () => 1, draftRich: async () => {}, draftHtml: async () => {},
-    sendHtml: async (_chat, text) => { if (text.includes("expandable")) throw Object.assign(new Error("unsupported blockquote entity"), { error_code: 400 }); sent.push(text); return sent.length; } });
+    sendHtml: async (_chat, text) => { if (text.includes("expandable")) throw Object.assign(new Error("unsupported blockquote entity"), { error_code: 400 }); sent.push(text); return sent.length; } }, { nativeStream: false });
   const text = "```ts\n" + "const 变量 = '😀';\n".repeat(600) + "```\n\n" + source;
   const pages = transport.plan({ id: "p", text, kind: "progress", source: "progress-model" });
   assert.ok(pages.length > 1);

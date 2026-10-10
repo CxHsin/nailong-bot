@@ -1,9 +1,11 @@
 import { consumeProgressJournal } from "./progress-journal.js";
+import { consumeNativeProgress } from "./native-progress.js";
 import { toolDisplayName } from "../../runtime/tool-display.js";
 import type { HostEvent, RunHandle } from "../../host/host.js";
 import type { DeliveryContent, ContentTransport } from "../../runtime/content-delivery.js";
 
 export type TelegramHostTransport = ContentTransport & {
+  nativeStream?: boolean;
   editPage?: (messageId: number, html: string, chatId: number) => Promise<void>;
   draft?: (draftId: number, text: string, chatId: number, signal?: AbortSignal) => Promise<void>;
   send: (text: string, chatId: number) => Promise<number>;
@@ -21,12 +23,12 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
   draftIntervalMs?: number;
   draftTimeoutMs?: number;
   onDelivered?: (event: HostEvent, messageId: number) => Promise<void>;
-  deliver?: (event: HostEvent, content: DeliveryContent) => Promise<{ complete: boolean; messageId?: number }>;
+  deliver?: (event: HostEvent, content: DeliveryContent, signal?: AbortSignal) => Promise<{ complete: boolean; messageId?: number }>;
 }) {
   let nextDraftId = 1;
   return {
     async consume(handle: RunHandle) {
-      if (options.editPage && options.plan && options.sendPage) return consumeProgressJournal(handle, options, async (event) => {
+      if (options.nativeStream || options.editPage && options.plan && options.sendPage) return (options.nativeStream ? consumeNativeProgress : consumeProgressJournal)(handle, options, async (event) => {
         if (event.type === "run_succeeded" && event.result?.stickerCategory && options.sendSticker) {
           const [id] = await Promise.all([options.sendSticker(String(event.result.stickerCategory), options.chatId),
             ...(event.result.stickerText && event.result.text ? [options.send(String(event.result.text), options.chatId)] : [])]);

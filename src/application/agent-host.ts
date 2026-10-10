@@ -141,7 +141,7 @@ export function createAgentHost(options: AgentHostOptions) {
       await log.append({ type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
       const finalized = (await log.read()).findLast((event) => event.type === "text_finalized" && event.requestId === context.runId && event.contentKind === "final");
       return { text: answer, finalText: final, resultId: context.runId, kind: "model",
-        ...(finalized ? { finalSegmentId: finalized.textSegmentId } : {}),
+        ...(finalized?.text === final ? { finalSegmentId: finalized.textSegmentId } : {}),
         ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
       await log.append({ type: "request_failed", requestId: context.runId, error: String(error) });
@@ -156,9 +156,9 @@ export function createAgentHost(options: AgentHostOptions) {
   return { ...host,
     recoverInterrupted: () => recordInterruptedRuns(options.log),
     async readTimeline(conversationId: string) { return projectTimeline(await conversationLog(options.log, conversationId).read()); },
-    async deliverContent(event: HostEvent, content: DeliveryContent, transport: ContentTransport) {
+    async deliverContent(event: HostEvent, content: DeliveryContent, transport: ContentTransport, signal?: AbortSignal) {
       return deliverContent(conversationLog(options.log, event.conversationId), event.runId,
-        conversationUserId(event.conversationId), content, transport);
+        conversationUserId(event.conversationId), content, transport, signal);
     },
     async recordProgress(event: HostEvent, fact: Record<string, unknown>) {
       await conversationLog(options.log, event.conversationId).append({ type: "telegram_progress_delivery", requestId: event.runId, contextPolicy: "exclude", ...fact });

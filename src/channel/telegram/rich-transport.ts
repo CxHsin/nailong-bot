@@ -1,11 +1,11 @@
 import { formatMarkdownForTelegram } from "../../telegram/telegram-format.js";
-import { planTelegramText, telegramVisibleLength } from "../../telegram/telegram-layout.js";
+import { planTelegramText, planTelegramMarkdown, telegramVisibleLength } from "../../telegram/telegram-layout.js";
 import type { DeliveryContent } from "../../runtime/content-delivery.js";
 
 export type TelegramRichTransportApi = {
-  sendRich: (chatId: number, markdown: string) => Promise<number>;
+  sendRich: (chatId: number, markdown: string, signal?: AbortSignal) => Promise<number>;
   draftRich: (draftId: number, chatId: number, markdown: string, signal?: AbortSignal) => Promise<void>;
-  sendHtml: (chatId: number, html: string) => Promise<number>;
+  sendHtml: (chatId: number, html: string, signal?: AbortSignal) => Promise<number>;
   editHtml?: (messageId: number, chatId: number, html: string) => Promise<void>;
   draftHtml: (draftId: number, chatId: number, html: string, signal?: AbortSignal) => Promise<void>;
 };
@@ -29,8 +29,9 @@ export function isRichApiUnavailable(error: unknown): boolean {
  * Prefer Telegram's native Rich Markdown and fall back to the existing safe HTML
  * renderer only when the Bot API method itself is unavailable.
  */
-export function createTelegramRichTransport(api: TelegramRichTransportApi) {
+export function createTelegramRichTransport(api: TelegramRichTransportApi, options: { nativeStream?: boolean } = {}) {
   let availability: RichAvailability = "unknown";
+  const nativeStream = options.nativeStream !== false;
 
   async function sendHtml(text: string, chatId: number): Promise<number> {
     const chunks = planTelegramText(text);
@@ -45,11 +46,12 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
   }
 
   async function draftHtml(draftId: number, text: string, chatId: number, signal?: AbortSignal): Promise<void> {
-    const rendered = planTelegramText(text)[0] ?? formatMarkdownForTelegram(text);
+    const rendered = planTelegramText(text).at(-1) ?? formatMarkdownForTelegram(text);
     await api.draftHtml(draftId, chatId, rendered, signal);
   }
 
   function plan(content: DeliveryContent): string[] {
+    if (nativeStream) return planTelegramMarkdown(content.text);
     if (content.kind === "final") return planTelegramText(content.text);
     // Native collapsed quotes show the beginning of their text. Keep the preview
     // plain and bounded, reserving its space before paginating the full journal.
@@ -70,7 +72,17 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
     return pages.map((page, index) => `${heading}<blockquote expandable>${index === 0 ? prefix : ""}${page.replace(/<\/?blockquote(?: expandable)?>/g, "")}</blockquote>`);
   }
 
-  async function sendPage(text: string, chatId: number): Promise<number> {
+  async function sendPage(text: string, chatId: number, signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted();
+    if (nativeStream) {
+      if (availability !== "unsupported") {
+        try { const id = await api.sendRich(chatId, text, signal); availability = "supported"; return id; }
+        catch (error) { signal?.throwIfAborted(); if (!isRichApiUnavailable(error)) throw error; availability = "unsupported"; }
+      }
+      const pages = planTelegramText(text);
+      if (pages.length > 1) throw new Error("原生消息的回退分页计划不一致");
+      return api.sendHtml(chatId, pages[0] ?? formatMarkdownForTelegram(text), signal);
+    }
     try { return await api.sendHtml(chatId, text); }
     catch (error) {
       const description = String(field(error, "description") ?? field(error, "message") ?? "");
@@ -80,7 +92,22 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
     }
   }
 
+  async function send(text: string, chatId: number): Promise<number> {
+    if (availability !== "unsupported") {
+      try {
+        const messageId = await api.sendRich(chatId, text);
+        availability = "supported";
+        return messageId;
+      } catch (error) {
+        if (!isRichApiUnavailable(error)) throw error;
+        availability = "unsupported";
+      }
+    }
+    return sendHtml(text, chatId);
+  }
+
   return {
+    nativeStream,
     plan,
     sendPage,
     ...(api.editHtml ? { editPage: async (messageId: number, text: string, chatId: number) => {
@@ -111,25 +138,13 @@ export function createTelegramRichTransport(api: TelegramRichTransportApi) {
           return;
         } catch (error) {
           signal?.throwIfAborted();
-          if (!isRichApiUnavailable(error)) throw error;
-          availability = "unsupported";
+          if (isRichApiUnavailable(error)) availability = "unsupported";
+          else if (field(error, "error_code") !== 400 || !/markdown|parse|entity/i.test(String(field(error, "description") ?? field(error, "message") ?? ""))) throw error;
         }
       }
       signal?.throwIfAborted();
       await draftHtml(draftId, text, chatId, signal);
     },
-    async send(text: string, chatId: number): Promise<number> {
-      if (availability !== "unsupported") {
-        try {
-          const messageId = await api.sendRich(chatId, text);
-          availability = "supported";
-          return messageId;
-        } catch (error) {
-          if (!isRichApiUnavailable(error)) throw error;
-          availability = "unsupported";
-        }
-      }
-      return sendHtml(text, chatId);
-    },
+    send,
   };
 }

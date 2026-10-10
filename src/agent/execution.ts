@@ -15,6 +15,7 @@ import { projectProviderContext, projectNativeContext } from "../context/provide
 import { memoryExclusions, eventIdentity } from "../runtime/memory-facts.js";
 import { PLAIN_TEXT_PROTOCOL } from "./progress-prompt.js";
 import { startObservedProvider } from "./provider-diagnostics.js";
+import { textPhase } from "./text-phase.js";
 
 function providerStreamOptions(options?: SimpleStreamOptions): SimpleStreamOptions {
   return { ...options, cacheRetention: "short", maxRetries: 0, onPayload: async (payload, model) => {
@@ -174,6 +175,13 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         await request?.log.append({ type: "context_phase_timing", requestId: request.id, restoreMs, selectMs, loadMs, contextPolicy: "exclude" });
         const modelStepId = randomUUID();
         const textSegmentId = randomUUID();
+        const textSegments = new Map<number, string>();
+        const settledSegments = new Set<number>();
+        const segmentFor = (index: number) => {
+          let id = textSegments.get(index);
+          if (!id) { id = textSegments.size ? randomUUID() : textSegmentId; textSegments.set(index, id); }
+          return id;
+        };
         activePreview = textSegmentId;
         if (++step > 128) throw new Error("模型超过本轮执行步数上限");
         await request?.log.append({ type: "model_step_started", requestId: request.id, step, modelStepId, purpose: "execution", provider: selected.provider, model: selected.id,
@@ -186,17 +194,22 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         let producedOutput = false;
         let initialUsage: Usage | undefined;
         let lastPreview = "";
+        let lastPreviewId = "";
         let lastPreviewAt = -Infinity;
         let lastValidatedPrefix = "";
         for await (const event of source) {
           if (event.type === "start") initialUsage = event.partial.usage;
           if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") producedOutput = true;
           if (event.type === "text_delta" && request) {
-            const rawPreview = event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+            const part = event.partial.content[event.contentIndex];
+            const previewId = plain ? segmentFor(event.contentIndex) : textSegmentId;
+            if (previewId !== lastPreviewId) { lastPreview = ""; lastPreviewAt = -Infinity; lastPreviewId = previewId; }
+            activePreview = previewId;
+            const rawPreview = plain && part?.type === "text" ? part.text : event.partial.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
             let preview: ReturnType<typeof previewStructuredText>;
             let validatedPrefix = false;
             let prefixChanged = false;
-            if (plain) preview = { type: "progress", text: rawPreview };
+            if (plain) preview = { type: part?.type === "text" && textPhase(part) === "final_answer" ? "final" : "progress", text: rawPreview };
             else try {
               const frames = readOutputFrames(rawPreview);
               const partial = previewStructuredText(frames.rest);
@@ -218,8 +231,19 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
                 protocolVersion: OUTPUT_PROTOCOL_VERSION, provisional: true, validatedPrefix });
               lastPreview = preview.text;
               lastPreviewAt = performance.now();
-              request.onProgress?.({ type: "text", segmentId: textSegmentId, kind: preview.type, text: preview.text, finalized: false });
+              request.onProgress?.({ type: "text", segmentId: previewId, kind: preview.type, text: preview.text, finalized: false });
               await request.onText?.(textSegmentId);
+            }
+          }
+          if (plain && event.type === "text_end") {
+            const part = event.partial.content[event.contentIndex];
+            if (part?.type === "text" && textPhase(part) === "commentary" && part.text.trim()) {
+              const id = segmentFor(event.contentIndex);
+              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+                textSegmentId: id, modelTextIndex: event.contentIndex, contentKind: "progress", text: part.text, protocolVersion, source: "execution" });
+              request?.onProgress?.({ type: "text", segmentId: id, kind: "progress", text: part.text, finalized: true, formal: true, source: "execution" });
+              settledSegments.add(event.contentIndex);
+              if (activePreview === id) activePreview = undefined;
             }
           }
         }
@@ -247,13 +271,21 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
         const toolCalls = message.content.filter((c) => c.type === "toolCall");
         if (plain) {
           if (!raw.trim() && !toolCalls.length) throw new Error("模型没有提交答复或工具调用");
-          if (raw.trim()) {
-            const kind = toolCalls.length ? "progress" : "final";
-            await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
-              textSegmentId, contentKind: kind, text: raw, protocolVersion, source: "execution" });
-            request?.onProgress?.({ type: "text", segmentId: textSegmentId, kind, text: raw, finalized: true, formal: kind !== "final", source: "execution" });
-            if (kind === "final") finalText = raw;
+          const finalParts: string[] = [];
+          for (const [index, part] of message.content.entries()) {
+            if (part.type !== "text" || !part.text.trim()) continue;
+            const phase = textPhase(part);
+            const kind = phase === "commentary" || toolCalls.length ? "progress" : "final";
+            const id = segmentFor(index);
+            if (!settledSegments.has(index)) {
+              await request?.log.append({ type: "text_finalized", requestId: request.id, modelStepId,
+                textSegmentId: id, modelTextIndex: index, contentKind: kind, text: part.text, protocolVersion, source: "execution" });
+              request?.onProgress?.({ type: "text", segmentId: id, kind, text: part.text, finalized: true, formal: kind !== "final", source: "execution" });
+            }
+            if (kind === "final") finalParts.push(part.text);
           }
+          if (finalParts.length) finalText = finalParts.join("\n");
+          else if (!toolCalls.length) await queueFeedback("上一条是公开进展说明，请继续实际操作，或提交最终答复、阻碍或澄清问题。");
           for (const part of toolCalls) await request?.log.append({ type: "tool_call", requestId: request.id,
             toolCallId: part.id, toolName: part.name, args: part.arguments });
           const response = createAssistantMessageEventStream();
