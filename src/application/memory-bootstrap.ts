@@ -9,7 +9,7 @@ import type { createEmbeddingClient } from "../memory/embedding.js";
 import { memoryGraph } from "../memory/graph.js";
 import { MEMORY_ALGORITHM, learningSignal, memoryDynamics, type MemoryDynamics } from "../memory/dynamics.js";
 import { recallConfig, type RecallConfig } from "../memory/recall.js";
-import { replayEvents } from "../context/projection.js";
+import { historicalMemoryContext } from "./historical-memory-context.js";
 import { estimateInput, modelInputBudget } from "../context/input-budget.js";
 import { composeMemory, memoryBudget, type MemoryBudget } from "./memory-context.js";
 import { persistMemoryLearning } from "./memory-learning.js";
@@ -92,7 +92,7 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
         if (!await bindNamespace()) return run(log, userId, beforeRequest, context);
         const replaySource = [...source.slice(0, position + 1), ...controls];
         if (!current.requestId) replaySource[position] = { ...replaySource[position]!, requestId: current.id };
-        const replay = await replayEvents({ ...log, read: async () => replaySource }, current.id, options.model, true);
+        const replay = await historicalMemoryContext(log, replaySource, current.id, options.model);
         let units = replay.units.slice();
         const skeleton = start.context as Pick<Context, "systemPrompt" | "tools">;
         const makeContext = (): Context => ({ ...skeleton, messages: units.flatMap((unit) => unit.messages) });
