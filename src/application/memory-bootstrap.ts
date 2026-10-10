@@ -92,7 +92,8 @@ export function createMemoryBootstrap(options: { dataDir: string; model: Model<A
         if (!await bindNamespace()) return run(log, userId, beforeRequest, context);
         const replaySource = [...source.slice(0, position + 1), ...controls];
         if (!current.requestId) replaySource[position] = { ...replaySource[position]!, requestId: current.id };
-        const replay = await historicalMemoryContext(log, replaySource, current.id, options.model);
+        const replay = await historicalMemoryContext({ recoverArchive: log.recoverArchive, isArchiveRead: log.isArchiveRead },
+          replaySource, current.id, options.model);
         let units = replay.units.slice();
         const skeleton = start.context as Pick<Context, "systemPrompt" | "tools">;
         const makeContext = (): Context => ({ ...skeleton, messages: units.flatMap((unit) => unit.messages) });

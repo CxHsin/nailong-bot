@@ -74,7 +74,7 @@
 
 独立双轴评审覆盖 `678314a` 以来的整体差异。Standards 发现一组 ADR/README/进展文档仍描述已退役执行入口，以及一项重复 Responses SSE 测试编码的判断项；均集中修正并复核。Spec 未发现遗漏、范围扩张或错误实现，评审者另独立验证原始事实、历史编码、旧交付资格和学习重试 **12/12** 通过。两轴的原始发现和修订证据分别保留在 #150，当前没有未处理发现。
 
-变更均在 `development` 提交和推送，未纳入用户已有未跟踪材料。没有启动或重启生产 Bot，没有部署或合并 `main`。本地 Provider/transport 测试不证明真实 Telegram 客户端视觉效果、远端缓存命中率、KV TTL、费用或性能收益；本轮未执行真实凭据验收。插件和 #151 的原有缺陷留待后续确认。
+变更均在 `development` 提交和推送，未纳入用户已有未跟踪材料。没有启动或重启生产 Bot，没有部署或合并 `main`。本地 Provider/transport 测试不证明真实 Telegram 客户端视觉效果、远端缓存命中率、KV TTL、费用或性能收益；本轮未执行真实凭据验收。插件留待后续确认；#151 的后续防护见下文。
 
 ## 已完成的职责改善
 
@@ -89,7 +89,9 @@
 
 ### 独立记录的原有缺陷
 
-[#151](https://github.com/CxHsin/nailong-bot/issues/151) 在新建测试 SQLite 上复现：历史初始化处理没有活动起点的旧 Conversation 轮次时，会把模拟因果前缀的活动起点写入真实日志，随后真实前缀校验失败。原实现和提取后的实现表现一致。修复尚未获得维护者确认，本轮保留原行为；这不是已验证成立的恢复保证，也不代表检查过生产数据。
+[#151](https://github.com/CxHsin/nailong-bot/issues/151) 在新建测试 SQLite 上复现：历史初始化处理没有活动起点的旧 Conversation 轮次时，会把模拟因果前缀的活动起点写入真实日志，随后真实前缀校验失败。原实现和提取后的实现表现一致。#143 的兼容重构保留了原行为。
+
+随后经维护者同意，[复盘改进 #153](https://github.com/CxHsin/nailong-bot/issues/153) 收窄历史编码入口至归档读取能力，临时起点只用于解释模拟范围，真实起点仍由在线 Projection 提交。`memory-bootstrap-acceptance.test.ts` 覆盖显式初始化后的输入和重启、保留已有合法在线起点，以及默认启用的后台初始化；三个用例均在修复前失败。既有历史因果学习、资格和冻结视图检查继续保留。此防护阻止新污染，不修复已存在的无效起点，也不代表检查过生产数据。
 
 ## 退役与保留依据（#149）
 
@@ -105,4 +107,4 @@
 | 原始 JSONL/SQLite 导入、upcast、身份/归属、归档、旧 delivery/result/learning 解释 | 实际数据、当前恢复/记忆、诊断及迁移消费者 | 保留原政策。旧夹具保留原身份和缺失归属；历史学习重试显式调用提交算法，fixture.restart 不补执行学习或交付。 |
 | `telegram-input.ts`、`telegram-markdown.ts`、`app-types.ts` 的 Update/Message/Request/DeliveryRejected | 当前 Channel、Agent、Host 和 Rich transport 实际使用 | 保留。目录或名字与旧执行器相近不能作为删除依据。 |
 
-真实 Telegram 验收夹具取得目录所有权后装配当前 Channel/Host/Agent/runtime-v2，调用本地 Provider，暴露明确的 rootLog/scopedLog；默认关闭后台历史初始化，重启只使用当前恢复逻辑。模型输出、实际 wire、持久终态与 delivery 分别断言。纯历史编码/资格、事务和算法检查保留在必要的低层入口。
+真实 Telegram 验收夹具取得目录所有权后装配当前 Channel/Host/Agent/runtime-v2，调用本地 Provider，暴露明确的 rootLog/scopedLog；默认关闭后台历史初始化以隔离其他验收，专门的初始化验收覆盖生产默认开启行为，重启只使用当前恢复逻辑。模型输出、实际 wire、持久终态与 delivery 分别断言。纯历史编码/资格、事务和算法检查保留在必要的低层入口。

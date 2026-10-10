@@ -9,7 +9,8 @@ import { closeFixture } from "./cleanup.js";
 import { createTelegramHostFixture, type TelegramHostFixtureOptions } from "./telegram-host.js";
 import type { RuntimeLog, StoredEvent } from "../../src/runtime/runtime-types.js";
 export type Wire = { messages: Array<{ role: string; content: unknown }> };
-export async function createTelegramProviderFixture(t: TestContext, respond: (res: ServerResponse, wire: Wire[], dir: string) => void | Promise<void>, options: Omit<TelegramHostFixtureOptions, "agentOptions"> = {}) {
+export async function createTelegramProviderFixture(t: TestContext, respond: (res: ServerResponse, wire: Wire[], dir: string) => void | Promise<void>, options: Omit<TelegramHostFixtureOptions, "agentOptions"> = {},
+  agentOptions: Partial<TelegramHostFixtureOptions["agentOptions"]> = {}) {
   const dir = await mkdtemp(join(tmpdir(), "telegram-current-"));
   const promptFile = join(dir, "prompt.md"); await writeFile(promptFile, "Be helpful.");
   const wire: Wire[] = [];
@@ -23,7 +24,7 @@ export async function createTelegramProviderFixture(t: TestContext, respond: (re
   t.after(() => closeFixture({ server, dir, shutdown: () => shutdown() }));
   const f = await createTelegramHostFixture(t, { ...options, agentOptions: { dataDir: dir, promptFile,
     modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions",
-      baseUrl: `http://127.0.0.1:${address.port}`, model: "local", apiKey: "test" }] } } });
+      baseUrl: `http://127.0.0.1:${address.port}`, model: "local", apiKey: "test" }] }, ...agentOptions } });
   shutdown = () => f.close();
   return { f, wire, dir, promptFile };
 }

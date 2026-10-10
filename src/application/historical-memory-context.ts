@@ -5,13 +5,10 @@ import { historyScope, pendingActiveContext } from "../runtime/history-scope.js"
 import { encodeHistory } from "../agent/history-codec.js";
 
 /** Historical initialization chooses its own causal prefix; it has no Projection cache or checkpoint. */
-export async function historicalMemoryContext(log: Pick<RuntimeLog, "append" | "recoverArchive" | "isArchiveRead">,
+export async function historicalMemoryContext(archives: Pick<RuntimeLog, "recoverArchive" | "isArchiveRead">,
   source: StoredEvent[], currentId: string, model: Model<Api>) {
+  // The synthetic prefix needs its own scope, but cannot establish a durable online boundary.
   const pending = pendingActiveContext(source, currentId, randomUUID());
   const scope = historyScope(source, currentId, pending);
-  const encoded = await encodeHistory(scope, currentId, model, true, log);
-  // Preserve the historical caller's existing pending-start append until #151 is
-  // separately approved. Its synthetic-prefix corruption is not fixed by #148.
-  if (pending) await log.append(pending);
-  return encoded;
+  return encodeHistory(scope, currentId, model, true, archives);
 }
