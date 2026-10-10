@@ -29,10 +29,12 @@ import { createMemoryBootstrap } from "../application/memory-bootstrap.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { createToolCatalog, unavailableWebSearch, type ToolSource } from "./tool-catalog.js";
 import { connectMcp, type McpConfig } from "./mcp-catalog.js";
-import { scanSkills, explicitSkills, skillRead, type SkillSource } from "./skills.js";
+import { scanSkills, explicitSkills, resolveExplicitSkills, skillRead, type SkillSource, type SkillSnapshot } from "./skills.js";
 import { agentCommand } from "../application/commands.js";
 import { createSkillStore } from "./skill-store.js";
 import { streamNativeResponses, anthropicSearchPayload } from "./native-tool-search.js";
+import type { SteeringInput } from "../host/host.js";
+import type { UserMessage } from "@mariozechner/pi-ai";
 
 export async function createPiAgent(options: {
   dataDir: string;
@@ -106,9 +108,14 @@ export async function createPiAgent(options: {
   return {
     defaultModel,
     models: profiles.map((profile) => ({ alias: profile.alias, name: profile.model.id })),
+    async validateInput(text: string, channel?: string) {
+      const snapshot = await scanSkills([...(options.skillSources ?? []), ...await skillStore.sources()]);
+      if (!agentCommand(text)) resolveExplicitSkills(snapshot, text, channel);
+      return snapshot;
+    },
     async prepareCapabilities(text: string, request: Request) {
-      request.skillSnapshot = await scanSkills([...(options.skillSources ?? []), ...await skillStore.sources()]);
-      if (request.channel === "telegram" && !agentCommand(text)) request.loadedSkillPaths = (await explicitSkills(request.skillSnapshot, text, request)).map((skill) => skill.path);
+      request.skillSnapshot ??= await scanSkills([...(options.skillSources ?? []), ...await skillStore.sources()]);
+      if (!agentCommand(text)) request.loadedSkillPaths = (await explicitSkills(request.skillSnapshot, text, request)).map((skill) => skill.path);
     },
     installSkill: (text: string, request: Request) => skillStore.handle(text, request),
     memoryVector: (text: string) => embedding?.cached(text),
@@ -134,7 +141,8 @@ export async function createPiAgent(options: {
       const sources: ToolSource[] = [{ source: "local", tools: [createLsToolDefinition(options.dataDir), createFindToolDefinition(options.dataDir), createGrepToolDefinition(options.dataDir), ...(options.executionTool ? [createBashToolDefinition(options.dataDir)] : [])] },
         ...(memory && request ? [{ source: "memory", tools: memoryTools(memory, request.id) }] : []),
         ...(tinyfish ? [{ source: "tinyfish", tools: tinyfish.tools.filter((tool) => tool.name !== "web_search") }] : []), ...connections.map((item) => item.source)];
-      const catalog = createToolCatalog([skillRead(createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)), skills, request),
+      const reader = skillRead(createBoundedRead(options.dataDir, request?.log ?? createRuntimeLog(options.dataDir)), skills, request);
+      const catalog = createToolCatalog([reader,
         // write/edit retain the SDK's ordinary definitions and execution policy.
       ], sources, request);
       const webSearch = tinyfish?.tools.find((tool) => tool.name === "web_search") ?? unavailableWebSearch();
@@ -175,8 +183,55 @@ export async function createPiAgent(options: {
         void bootstrap.start(request.log, userId, request.id, { systemPrompt: session.agent.state.systemPrompt, messages: [], tools: session.agent.state.tools });
       session.agent.toolExecution = "sequential";
       const toolFailure = request ? attachToolRecording(session.agent, request) : () => undefined;
+      session.agent.steeringMode = "all";
+      const pendingSteers = new Map<UserMessage, SteeringInput>();
+      const appliedSteers: SteeringInput[] = [];
+      const closeSteering = request?.bindSteering?.((steer) => {
+        const text = steer.input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
+        const images = steer.input.parts.flatMap((part) => part.type === "image" && part.data ? [{ type: "image" as const, mimeType: part.mimeType, data: part.data }] : []);
+        const message: UserMessage = { role: "user", content: [{ type: "text", text }, ...images], timestamp: Date.now() };
+        pendingSteers.set(message, steer); session.agent.steer(message);
+      });
+      let steeringWrites = Promise.resolve();
+      // SDK subscribers run independently; serialize facts before replaying them.
+      session.agent.subscribe((event) => {
+        if (event.type === "message_end" && event.message.role === "user") {
+          const steer = pendingSteers.get(event.message);
+          if (!steer) return;
+          pendingSteers.delete(event.message);
+          steeringWrites = steeringWrites.then(async () => {
+            if (!await steer.consume()) return;
+            execution.invalidateFinal();
+            session.agent.clearFollowUpQueue();
+            await request?.log.append({ type: "protocol_feedback_superseded", requestId: request.id, reason: "user_steer", contextPolicy: "exclude" });
+            const text = steer.input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n") || "请分析这张图片。";
+            const images = steer.input.parts.flatMap((part) => part.type === "image" && part.data ? [{ type: "image" as const, mimeType: part.mimeType, data: part.data }] : []);
+            await request?.log.append({ type: "message", role: "user", text, originalText: text, requestId: request.id, inputId: steer.id,
+              chatId: userId, messageId: steer.input.metadata?.messageId, inputKind: "steer", ...(images.length ? { images } : {}) });
+            if (request) {
+              const selected = await explicitSkills(steer.input.metadata?.skillSnapshot as SkillSnapshot ?? skills, text, { ...request, inputId: steer.id });
+              reader.registerSkills(selected);
+            }
+            appliedSteers.push(steer);
+          });
+        }
+      });
+      const executionStream = session.agent.streamFn;
+      session.agent.streamFn = async (...args) => {
+        await steeringWrites;
+        return executionStream(...args);
+      };
+      if (request) request.onModelInput = async () => {
+        // The response confirms one payload containing the entire batch. Claim
+        // every input synchronously before any durable write can interleave Stop.
+        await Promise.all(appliedSteers.splice(0).map((steer) => steer.applied()));
+      };
       try {
-        try { await session.prompt(current.text, { images: current.images }); }
+        try {
+          await session.prompt(current.text, { images: current.images });
+          while (pendingSteers.size && !request?.signal?.aborted && !execution.failure()) await session.agent.continue();
+          closeSteering?.();
+        }
         catch (error) { throw toolFailure() ?? execution.failure() ?? error; }
         if (toolFailure()) throw toolFailure();
         if (execution.failure()) throw execution.failure();
@@ -186,7 +241,12 @@ export async function createPiAgent(options: {
         }
         if (execution.finalText() === undefined) throw new Error("模型未提交最终答复，本轮未完成");
         return execution.finalText()!;
-      } finally { request?.signal?.removeEventListener("abort", abort); session.dispose(); }
+      } finally {
+        closeSteering?.();
+        await steeringWrites;
+        for (const steer of appliedSteers) await request?.log.append({ type: "steer_unapplied", inputId: steer.id, requestId: request.id, contextPolicy: "exclude" });
+        request?.signal?.removeEventListener("abort", abort); session.dispose();
+      }
     },
     async close(): Promise<void> { await bootstrap.close(); await embedding?.close(); await tinyfish?.close(); for (const connection of connections) await connection.close(); },
   };

@@ -20,6 +20,18 @@ _Avoid_: chat (unless referring to a channel UI)
 One ordered attempt by the Host to process an input and produce a result or terminal failure.
 _Avoid_: request (except for compatibility with existing runtime events)
 
+**Follow-up**:
+A subsequent user input held until the current work finishes, then processed in its own Run in the same Conversation, in receipt order. Ordinary user messages received during active work are Follow-ups by default.
+_Avoid_: steering input
+
+**Steer**:
+An explicit user input that changes the direction or constraints of an active Run after its current batch of tools completes. Pending Steers are presented together in receipt order at the next execution boundary.
+_Avoid_: follow-up, immediate interruption
+
+**Stop**:
+A user action that stops active work and cancels pending user inputs accepted before it in the same Conversation, including queued commands. Later inputs wait for the stopped work to exit; completed actions and their effects are not rolled back.
+_Avoid_: reset, undo
+
 **Content Part**:
 A typed text or image item in a normalized user or assistant message, independent of any channel SDK.
 _Avoid_: Telegram message payload

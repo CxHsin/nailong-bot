@@ -26,6 +26,17 @@ export function createTelegramHostProjection(options: TelegramHostTransport & {
   let nextDraftId = 1;
   return {
     async consume(handle: RunHandle) {
+      const original = handle;
+      handle = { ...original, events: async function* () {
+        for await (const event of original.events()) {
+          if (event.type !== "input_receipt" && event.type !== "control_completed") { yield event; continue; }
+          if (!event.text) continue;
+          try {
+            if (options.deliver) await options.deliver(event, { id: event.receiptId!, text: event.text, kind: "final", source: "execution" });
+            else await options.send(event.text, options.chatId);
+          } catch { /* Receipt delivery does not alter execution. */ }
+        }
+      } };
       if (options.nativeStream) return consumeNativeProgress(handle, options, async (event) => {
         if (event.type === "run_succeeded" && event.result?.stickerCategory && options.sendSticker) {
           const [id] = await Promise.all([options.sendSticker(String(event.result.stickerCategory), options.chatId),

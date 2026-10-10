@@ -24,9 +24,12 @@ function jsonEvent(event: HostEvent) {
   return { type: event.type, seq: event.sequence, sequence: event.sequence, runId: event.runId, conversationId: event.conversationId,
     ...(event.phase ? { phase: event.phase } : {}), ...(event.source ? { source: event.source } : {}),
     ...(event.text ? { text: event.text } : {}), ...(event.progress ? { progress: event.progress } : {}),
+    ...(event.cancelledInputs !== undefined ? { cancelledInputs: event.cancelledInputs } : {}),
+    ...(event.receiptId ? { receiptId: event.receiptId } : {}), ...(event.reason ? { reason: event.reason } : {}),
     ...(event.result ? { result: event.result } : {}), ...(event.error ? { error: event.error } : {}) };
 }
 function humanEvent(event: HostEvent): string | undefined {
+  if (event.type === "input_receipt" || event.type === "control_completed") return event.text;
   if (event.type === "progress") {
     const progress = event.progress;
     if (!progress) return event.text;
@@ -70,12 +73,10 @@ export function createCliChannel(options: { host: { submit(input: HostInputLike)
   }
   async function chat(lines: AsyncIterable<string> | Iterable<string>, settings: { json?: boolean; conversationId?: string } = {}) {
     const results: Array<Promise<HostEvent>> = [];
-    let queue = Promise.resolve();
     for await (const line of lines) {
-      // Keep reading stdin so a diagnostic can pass pending ordinary work.
-      const result = line.trim() === "/kvcache" ? send(line, settings) : queue.then(() => send(line, settings));
+      // Host owns the only work queue; keep accepting input while it executes.
+      const result = send(line, settings);
       results.push(result);
-      if (line.trim() !== "/kvcache") queue = result.then(() => {}, () => {});
       void result.catch(() => {}); // Preserve rejection for Promise.all without an unhandled turn.
     }
     return Promise.all(results);

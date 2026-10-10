@@ -3,7 +3,7 @@ import { estimateInput, modelInputBudget } from "./input-budget.js";
 import { summaryInput, summarySource, validateSummary } from "./history-summary.js";
 import type { Api, Context, Message, Model } from "@mariozechner/pi-ai";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
-import { replayEvents, type Replay } from "./projection.js";
+import { replayEvents, type Replay, type ReplayUnit } from "./projection.js";
 import { sourceDigest } from "../runtime/event-digest.js";
 import { createCheckpointStore, type Checkpoint } from "./checkpoint.js";
 
@@ -19,9 +19,13 @@ export function compactionConfig(config: CompactionConfig = {}) {
 function checkpointMessage(c: Pick<Checkpoint, "through" | "summary">): Message {
   return { role: "user", timestamp: 0, content: `历史摘要（有损投影，精确事实请核查原始日志；覆盖 ${c.through} 个事件）：\n${c.summary}` };
 }
-function contextMessages(replay: Replay, requestId: string, checkpoint?: Pick<Checkpoint, "through" | "summary">): Message[] {
-  const kept = replay.units.filter((unit) => unit.through > (checkpoint?.through ?? 0) ||
-    unit.requestId === requestId && unit.messages.every((message) => message.role === "user"));
+type CheckpointView = Pick<Checkpoint, "through" | "summary" | "retainedInstructionThrough">;
+function retainedUnit(unit: ReplayUnit, requestId: string, checkpoint?: Pick<Checkpoint, "through" | "retainedInstructionThrough">): boolean {
+  return !!unit.protected || !!checkpoint?.retainedInstructionThrough?.includes(unit.through) || unit.through > (checkpoint?.through ?? 0) ||
+    unit.requestId === requestId && unit.messages.every((message) => message.role === "user");
+}
+function contextMessages(replay: Replay, requestId: string, checkpoint?: CheckpointView): Message[] {
+  const kept = replay.units.filter((unit) => retainedUnit(unit, requestId, checkpoint));
   return [...(checkpoint ? [checkpointMessage(checkpoint)] : []), ...kept.flatMap((unit) => unit.messages)];
 }
 type Summarize = (context: Context, maxTokens: number) => Promise<string>;
@@ -47,14 +51,12 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
         await replayEvents(options.log, options.requestId, model, options.structured ?? true, options.onRestoreProgress, options.signal);
       const replayMs = performance.now() - replayStarted;
       let checkpoint = await store.load(replay.boundary, replay.events);
-      const keptUnits = () => replay.units.filter((u) => u.through > (checkpoint?.through ?? 0) ||
-        u.requestId === options.requestId && u.messages.every((message) => message.role === "user"));
-      const sourceIdsFor = (value: Pick<Checkpoint, "through"> | undefined = checkpoint) => replay.units.filter((u) =>
-        u.through > (value?.through ?? 0) || u.requestId === options.requestId && u.messages.every((message) => message.role === "user"))
+      const keptUnits = () => replay.units.filter((unit) => retainedUnit(unit, options.requestId, checkpoint));
+      const sourceIdsFor = (value: Pick<Checkpoint, "through" | "retainedInstructionThrough"> | undefined = checkpoint) => replay.units.filter((unit) => retainedUnit(unit, options.requestId, value))
         .flatMap((u) => u.sourceIds ?? []);
       const sourceIds = () => sourceIdsFor();
       let supplemental: Message[] = [];
-      const compose = (value: Pick<Checkpoint, "through" | "summary"> | undefined = checkpoint, additions = supplemental): Context => {
+      const compose = (value: CheckpointView | undefined = checkpoint, additions = supplemental): Context => {
         const messages = contextMessages(replay, options.requestId, value);
         const alreadySent = replay.events.some((event) => event.type === "context_input_snapshot" && event.requestId === options.requestId);
         if (additions.length) messages.splice(alreadySent ? messages.length : Math.max(0, messages.indexOf(replay.current)), 0, ...additions);
@@ -88,7 +90,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
           if (!chosen) failure = "no_safe_history";
           else {
             const currentInstructions = replay.units.filter((unit) => unit.requestId === options.requestId && unit.messages.every((message) => message.role === "user"));
-            const fold = replay.units.filter((unit) => unit.through > (checkpoint?.through ?? 0) && unit.through <= chosen.through && !currentInstructions.includes(unit));
+            const fold = replay.units.filter((unit) => (unit.through > (checkpoint?.through ?? 0) || checkpoint?.retainedInstructionThrough?.includes(unit.through)) && unit.through <= chosen.through && !currentInstructions.includes(unit));
             let input = summaryInput(checkpoint?.summary, fold.flatMap((unit) => unit.messages));
             const generate = async (source: Context) => {
               if (options.signal?.aborted) throw new DOMException("历史压缩已取消", "AbortError");
@@ -124,6 +126,7 @@ export function createContextProjection(options: { log: RuntimeLog; dataDir: str
               try {
                 const summary = await generate(input);
                 const value = { boundary: replay.boundary, through: chosen.through,
+                  retainedInstructionThrough: currentInstructions.filter((unit) => unit.through <= chosen.through).map((unit) => unit.through),
                   sourceDigest: sourceDigest(replay.events.slice(0, chosen.through)), summary,
                   lastEventDigest: sourceDigest(replay.events[chosen.through - 1]),
                   summaryStrategy: "structured-text-v1" as const,

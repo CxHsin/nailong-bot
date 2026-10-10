@@ -331,7 +331,7 @@ test("qualified references resolve ambiguity, deduplicate aliases and load in in
   const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, skillSources: [{ name: "first", path: first }, { name: "second", path: second }] });
   t.after(() => agent.close()); const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = (text: string) => host.submit({ actor: { id: "owner" }, conversationId: "c", text, metadata: { channel: "telegram" } }).done;
-  assert.match(String((await send("/demo use")).result?.text), /歧义.*\/first:demo.*\/second:demo/); assert.equal(calls, 0);
+  assert.match(String((await send("/demo use")).text), /歧义.*\/first:demo.*\/second:demo/); assert.equal(calls, 0);
   assert.equal((await send("/second:demo /other /first:other /first:demo execute")).type, "run_succeeded");
   assert.deepEqual((await log.read()).filter((e) => e.type === "skill_loaded").map((e) => `${e.source}:${e.name}`), ["second:demo", "first:other", "first:demo"]);
 });

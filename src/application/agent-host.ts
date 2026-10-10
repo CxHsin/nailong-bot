@@ -10,7 +10,7 @@ import { commitMemoryLearning } from "./memory-learning.js";
 import { cacheReplyContext } from "../runtime/reply-context.js";
 import { deliverContent, type DeliveryContent, type ContentTransport } from "../runtime/content-delivery.js";
 import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOptions, type ProgressSummaryGenerator } from "./progress-summaries.js";
-import { recordInterruptedRuns } from "../runtime/startup-recovery.js";
+import { recordInterruptedRuns, notifyRecovery } from "../runtime/startup-recovery.js";
 import { projectTimeline } from "../runtime/timeline.js";
 import { validModelAlias } from "../agent/model-config.js";
 import { SkillReferenceError } from "../agent/skills.js";
@@ -21,6 +21,7 @@ export { AGENT_COMMANDS } from "./commands.js";
 type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; runtimeIdentity?: BuildIdentity; progressSummary?: ProgressSummaryOptions; agent: {
   answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
   prepareCapabilities?: (text: string, request: Request) => Promise<void>;
+  validateInput?: (text: string, channel?: string) => Promise<import("../agent/skills.js").SkillSnapshot>;
   installSkill?: (text: string, request: Request) => Promise<string | undefined>;
   summarizeProgress?: ProgressSummaryGenerator;
   defaultModel?: string;
@@ -41,7 +42,7 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
   if (name === "skill") return undefined;
   if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
     return { text: `用法：${definition.usage}`, kind: "control" };
-  if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n") + "\n\n技能调用：/skill-name [任务]；重名时用 /source:skill-name。首行可连续引用多个技能，也可不带参数。", kind: "control" };
+  if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n") + "\n\n技能调用：/skill-name [任务]；重名时用 /source:skill-name。首行可连续引用多个技能，也可不带参数。\nCLI：运行中 Ctrl+C 停止当前任务并保留会话；空闲时退出。", kind: "control" };
   if (name === "model") {
     const models = options.agent.models ?? [{ alias: "ds", name: "DeepSeek" }];
     const selected = (await log.read()).findLast((event) => event.type === "model_selected");
@@ -80,6 +81,12 @@ async function control(options: AgentHostOptions, input: HostInput, log: Runtime
 export function createAgentHost(options: AgentHostOptions) {
   progressSummaryOptions(options.progressSummary);
   const host = createHost({ log: options.log,
+    prepare: async (input, steering) => {
+      const text = input.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      if (steering && agentCommand(text)) throw new SkillReferenceError("/steer 后请提供任务内容；控制命令请直接发送。");
+      if (agentCommand(text)) return;
+      if (options.agent.validateInput) input.metadata = { ...input.metadata, skillSnapshot: await options.agent.validateInput(text, String(input.metadata?.channel ?? "cli")) };
+    },
     readOnly: (input) => input.parts.every((part) => part.type === "text") &&
       input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim() === "/kvcache",
     execute: async (input, context) => {
@@ -111,7 +118,7 @@ export function createAgentHost(options: AgentHostOptions) {
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
     const selectedModel = history.findLast((event) => event.type === "model_selected");
     let summaries: ReturnType<typeof startProgressSummaries> | undefined;
-    const request: Request = { modelAlias: typeof selectedModel?.modelAlias === "string" ? selectedModel.modelAlias : options.agent.defaultModel ?? options.agent.models?.[0]?.alias ?? "ds", ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal,
+    const request: Request = { modelAlias: typeof selectedModel?.modelAlias === "string" ? selectedModel.modelAlias : options.agent.defaultModel ?? options.agent.models?.[0]?.alias ?? "ds", ...(fed ? { contextBudgetBoost: true } : {}), id: context.runId, log, conversationId: input.conversationId, signal: context.signal, bindSteering: context.bindSteering,
       onProgress: (progress) => {
         if (progress.type === "text" && progress.source !== "progress-model") summaries?.primaryText(progress.finalized);
         if (progress.type === "text" && progress.kind === "result" && progress.finalized) results.set(progress.segmentId, progress.text);
@@ -122,6 +129,7 @@ export function createAgentHost(options: AgentHostOptions) {
     if (options.agent.summarizeProgress) summaries = startProgressSummaries(request, text, options.agent.summarizeProgress, options.progressSummary);
     try {
       request.channel = typeof input.metadata?.channel === "string" ? input.metadata.channel : undefined;
+      request.skillSnapshot = input.metadata?.skillSnapshot as Request["skillSnapshot"];
       const installation = await options.agent.installSkill?.(text, request);
       if (installation !== undefined) return { text: installation, kind: "control" };
       await options.agent.prepareCapabilities?.(text, request);
@@ -147,6 +155,7 @@ export function createAgentHost(options: AgentHostOptions) {
   } });
   return { ...host,
     recoverInterrupted: () => recordInterruptedRuns(options.log),
+    notifyRecovery: (channel: "cli" | "telegram", send: (text: string, id: string) => Promise<void>) => notifyRecovery(options.log, channel, send),
     async readTimeline(conversationId: string) { return projectTimeline(await conversationLog(options.log, conversationId).read()); },
     async deliverContent(event: HostEvent, content: DeliveryContent, transport: ContentTransport, signal?: AbortSignal) {
       return deliverContent(conversationLog(options.log, event.conversationId), event.runId,

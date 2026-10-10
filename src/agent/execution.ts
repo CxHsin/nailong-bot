@@ -207,6 +207,11 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
           stablePrefixKey: createHash("sha256").update(JSON.stringify({ system: result.context.systemPrompt, tools: result.context.tools })).digest("hex") });
         request?.onProgress?.({ type: "text", segmentId: `${request.id}:input-ready`, kind: "status", text: "上下文已准备好，等待模型输出……", actionState: "started", finalized: true, formal: false, source: "execution" });
         const observed = await startObservedProvider(providerStream, selected, combined.context, providerStreamOptions({ ...streamOptions,
+          onResponse: async (response, model) => {
+            await streamOptions?.onResponse?.(response, model);
+            if (response.status < 200 || response.status >= 300) return;
+            await request?.onModelInput?.();
+          },
           maxTokens: Math.max(1, Math.min(result.maxTokens, selected.contextWindow - estimateInput(combined.context))) }), request, modelStepId, "execution");
         const source = observed.source;
         let producedOutput = false;
@@ -377,5 +382,5 @@ export async function attachExecution(session: AgentSession, model: Model<Api>, 
       return response;
     }
   };
-  return { failure: () => projectionFailure, finalText: () => finalText };
+  return { failure: () => projectionFailure, finalText: () => finalText, invalidateFinal: () => { finalText = undefined; } };
 }

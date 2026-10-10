@@ -6,6 +6,8 @@ import type { Update } from "./app-types.js";
 
 export const AGENT_COMMANDS = [
   { command: "help", description: "查看命令帮助", usage: "/help" },
+  { command: "steer", description: "引导当前任务，工具批次完成后生效", usage: "/steer 内容" },
+  { command: "stop", description: "停止当前任务并取消此前待处理输入", usage: "/stop" },
   { command: "kvcache", description: "查看最近五组运行的缓存详情", usage: "/kvcache" },
   { command: "model", description: "查看或切换当前对话模型", usage: "/model；/model 模型别名" },
   { command: "skill", description: "显式安装或更新技能", usage: "/skill install 链接；/skill update 链接" },
