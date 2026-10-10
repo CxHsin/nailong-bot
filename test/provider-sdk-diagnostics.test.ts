@@ -13,7 +13,7 @@ import { diagnoseRun } from "../src/cli/run-diagnostics.js";
 import { streamNativeResponses } from "../src/agent/native-tool-search.js";
 
 for (const mode of ["sdk", "native"] as const)
-for (const scenario of ["sse-error", "response-failed", "socket-reset", "normal"] as const)
+for (const scenario of ["sse-error", "response-failed", "error-envelope", "unknown-envelope", "missing-code-envelope", "socket-reset", "normal"] as const)
   test(`actual Responses ${mode} diagnostic: ${scenario}`, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "summary-stream-probe-"));
     const server = createTestServer(t, async (req, res) => {
@@ -23,9 +23,11 @@ for (const scenario of ["sse-error", "response-failed", "socket-reset", "normal"
       res.flushHeaders();
       setTimeout(() => {
         if (scenario === "socket-reset") res.destroy();
-        else res.write(`data: ${JSON.stringify(scenario === "sse-error" ?
+        else res.write(`data: ${JSON.stringify(scenario === "error-envelope" || scenario === "unknown-envelope" || scenario === "missing-code-envelope" ?
+          { error: { code: scenario === "missing-code-envelope" ? undefined : scenario === "error-envelope" ? "server_error" : "PRIVATE", message: "PRIVATE TOKEN URL" } } : scenario === "sse-error" ?
           { type: "error", code: "server_error", message: "PRIVATE TOKEN URL" } :
-          { type: "response.failed", response: { error: { code: "server_error", message: "PRIVATE TOKEN URL" } } })}\n\n`);
+          { type: "response.failed", response: { error: { code: "server_error", message: "PRIVATE TOKEN URL" } } })}\n\n` +
+          (scenario === "error-envelope" ? 'data: {"error":{"code":"rate_limit_exceeded","message":"PRIVATE"}}\n\n' : ""));
       }, 30);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -50,9 +52,12 @@ for (const scenario of ["sse-error", "response-failed", "socket-reset", "normal"
     const report = diagnoseRun({ dataDir: dir, runId: "synthetic-run" });
     assert.equal(result.stopReason, scenario === "normal" ? "stop" : "error");
     assert.equal(fact.abortSource, "none");
-    if (scenario === "sse-error" || scenario === "response-failed") {
-      assert.deepEqual(fact.providerError, { source: mode === "sdk" ? "sdk-message" : "stream-event", code: "server_error",
-        eventType: mode === "sdk" ? null : scenario === "sse-error" ? "error" : "response.failed" });
+    if (scenario === "error-envelope" || scenario === "unknown-envelope" || scenario === "missing-code-envelope") {
+      assert.deepEqual(fact.providerError, { source: "stream-event", code: scenario === "error-envelope" ? "server_error" : null, eventType: null });
+      assert.deepEqual(report.modelSteps[0]!.providerError, fact.providerError);
+    } else if (scenario === "sse-error" || scenario === "response-failed") {
+      assert.deepEqual(fact.providerError, { source: "stream-event", code: "server_error",
+        eventType: scenario === "sse-error" ? "error" : "response.failed" });
       assert.deepEqual(report.modelSteps[0]!.providerError, fact.providerError);
       if (mode === "sdk") assert.ok((fact.causes as Array<{ name?: string }>).some((cause) => cause.name === "AbortError"));
     } else assert.equal(fact.providerError, null);
@@ -60,3 +65,32 @@ for (const scenario of ["sse-error", "response-failed", "socket-reset", "normal"
     t.diagnostic(JSON.stringify({ mode, scenario, stopReason: result.stopReason, httpStatus: fact.httpStatus,
       causes: fact.causes, errorCategory: fact.errorCategory, abortSource: fact.abortSource, publicText: fact.firstPublicTextMs !== null }));
   });
+
+test("concurrent actual SDK calls isolate envelope evidence from each other and unrelated fetch", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "provider-isolation-"));
+  const server = createTestServer(t, async (req, res) => {
+    for await (const _ of req) { /* synthetic input */ }
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.flushHeaders();
+    setTimeout(() => res.end(`data: ${JSON.stringify({ error: { code: req.url?.startsWith("/known") ? "server_error" :
+      req.url?.startsWith("/other") ? "rate_limit_exceeded" : "PRIVATE", message: "PRIVATE TOKEN URL" } })}\n\n`), req.url?.startsWith("/known") ? 30 : 5);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`; const log = await createRuntimeEventLog(dir);
+  await Promise.all([...["known", "unknown"].map(async (name) => {
+    const model = configuredModel({ alias: name, api: "openai-responses", model: "gpt-6.1-sol", reasoning: true,
+      baseUrl: `${baseUrl}/${name}`, apiKey: "test" });
+    const observed = await startObservedProvider(streamSimple, model, { messages: [{ role: "user", content: "Synthetic", timestamp: 0 }] },
+      { apiKey: "test", maxRetries: 0, onResponse: async () => { await (await fetch(`${baseUrl}/other`)).text(); } },
+      { id: name, log }, name, "summary");
+    for await (const _ of observed.source) { /* actual SDK */ }
+    await observed.record(await observed.source.result());
+  }), (async () => { await (await fetch(`${baseUrl}/other`)).text(); })()]);
+  const facts = (await log.read()).filter((event) => event.type === "model_transport");
+  assert.equal(facts.length, 2);
+  for (const name of ["known", "unknown"]) assert.deepEqual(facts.find((event) => event.callId === name)?.providerError,
+    { source: "stream-event", code: name === "known" ? "server_error" : null, eventType: null });
+  assert.doesNotMatch(JSON.stringify(facts), /PRIVATE|TOKEN|URL|rate_limit_exceeded/);
+});

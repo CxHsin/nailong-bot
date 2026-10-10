@@ -7,6 +7,16 @@ const eventTypes = new Set(["error", "response.failed"]);
 
 export type ProviderError = { source: "sdk-message" | "exception" | "stream-event"; code: string | null; eventType: string | null };
 
+/** Confirm an error occurrence, retaining only allowlisted fields from its envelope. */
+export function streamProviderFailure(value: unknown): ProviderError | null {
+  if (!value || typeof value !== "object") return null;
+  const event = value as { type?: unknown; code?: unknown; error?: { code?: unknown }; response?: { error?: { code?: unknown } } };
+  const eventType = typeof event.type === "string" && eventTypes.has(event.type) ? event.type : null;
+  if (!eventType && (!event.error || typeof event.error !== "object")) return null;
+  const candidate = event.code ?? event.error?.code ?? event.response?.error?.code;
+  return { source: "stream-event", eventType, code: typeof candidate === "string" && providerCodes.has(candidate) ? candidate : null };
+}
+
 /** SDKs may flatten the original event. Extract only a known code, never reconstruct an event type. */
 export function providerFailure(message: unknown, error?: unknown): ProviderError | null {
   if (error && typeof error === "object") {
@@ -27,7 +37,7 @@ export function safeProviderError(value: unknown): ProviderError | null {
   if (input.source !== "sdk-message" && input.source !== "exception" && input.source !== "stream-event") return null;
   const code = typeof input.code === "string" && providerCodes.has(input.code) ? input.code : null;
   const eventType = input.source !== "sdk-message" && typeof input.eventType === "string" && eventTypes.has(input.eventType) ? input.eventType : null;
-  return code || eventType ? { source: input.source, code, eventType } : null;
+  return code || eventType || input.source === "stream-event" ? { source: input.source, code, eventType } : null;
 }
 
 /** Allow only diagnostic enums, never exception messages, URLs, sockets or headers. */
