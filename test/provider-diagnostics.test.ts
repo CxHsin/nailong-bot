@@ -8,6 +8,18 @@ import { assistantText } from "../src/agent/model-message.js";
 import { startObservedProvider } from "../src/agent/provider-diagnostics.js";
 import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { diagnoseRun } from "../src/cli/run-diagnostics.js";
+import { providerFailure, safeProviderError } from "../src/runtime/transport-diagnostics.js";
+
+test("original Provider errors keep allowlisted evidence independently of cleanup and redact unknown codes", () => {
+  assert.deepEqual(providerFailure("Error Code server_error: PRIVATE"), { source: "sdk-message", code: "server_error", eventType: null });
+  assert.deepEqual(providerFailure(undefined, { type: "response.failed", error: { code: "rate_limit_exceeded", message: "SECRET" } }),
+    { source: "exception", code: "rate_limit_exceeded", eventType: "response.failed" });
+  assert.equal(providerFailure("Error Code SECRET: PRIVATE"), null);
+  assert.equal(providerFailure("PRIVATE server_error: SECRET"), null);
+  assert.equal(safeProviderError({ source: "PRIVATE", code: "server_error" }), null);
+  assert.deepEqual(safeProviderError({ source: "exception", code: "server_error", eventType: "error", message: "SECRET" }),
+    { source: "exception", code: "server_error", eventType: "error" });
+});
 
 const model = getModel("openai", "gpt-4o");
 for (const failure of ["start", "iteration", "result"] as const) test(`Provider ${failure} exceptions retain safe evidence exactly once`, async (t) => {

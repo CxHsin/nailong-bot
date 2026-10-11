@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { eventIdentity } from "./memory-facts.js";
 import type { RuntimeLog, StoredEvent } from "./runtime-types.js";
+import { factOwnerId } from "./facts.js";
 
 /** Legacy ownership is admitted only when a durable identity supports it. */
 export function conversationOwnership(events: StoredEvent[]): Map<string, string> {
   const owners = new Map<string, string>();
   for (const event of events) {
-    const id = event.requestId ?? (typeof event.runId === "string" ? event.runId : undefined);
+    const id = factOwnerId(event);
     const conversation = typeof event.conversationId === "string" ? event.conversationId :
       typeof event.chatId === "number" ? `telegram:private:${event.chatId}` : undefined;
     if (id && conversation) owners.set(id, conversation);
@@ -25,7 +26,7 @@ export function conversationEvents(events: StoredEvent[], conversationId: string
       ? typeof previous.conversationId === "string" ? previous.conversationId :
         typeof previous.chatId === "number" ? `telegram:private:${previous.chatId}` : undefined
       : undefined;
-    const id = event.requestId ?? (typeof event.runId === "string" ? event.runId : undefined);
+    const id = factOwnerId(event);
     const owner = typeof event.conversationId === "string" ? event.conversationId : id ? owners.get(id) :
       typeof event.nodeId === "string" ? owners.get(event.nodeId) :
       typeof event.chatId === "number" ? `telegram:private:${event.chatId}` :

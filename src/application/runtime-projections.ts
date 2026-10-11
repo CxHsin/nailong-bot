@@ -4,22 +4,6 @@ import { filterMemoryEvents } from "../runtime/memory-exclusion.js";
 import { memoryExclusions } from "../runtime/memory-facts.js";
 import { userInputText } from "../runtime/reply-context.js";
 
-/** Derived state only: every value can be rebuilt from the committed event prefix. */
-export function projectRequestState(events: StoredEvent[]) {
-  const open = new Set<string>();
-  const failed = new Set<string>();
-  const delivered = new Set<string>();
-  for (const event of events) {
-    const id = event.requestId;
-    if (!id) continue;
-    if (event.type === "request_started") open.add(id);
-    if (["request_completed", "request_failed", "request_interrupted"].includes(event.type)) open.delete(id);
-    if (event.type === "request_failed") failed.add(id);
-    if (event.type === "delivery_succeeded") delivered.add(id);
-  }
-  return { open, failed, delivered };
-}
-
 /** Compatibility view for simple answer adapters; Pi uses replayEvents instead. */
 export function projectDeliveredChat(events: StoredEvent[]): Message[] {
   const excluded = memoryExclusions(events);
@@ -42,10 +26,4 @@ export function projectDeliveredChat(events: StoredEvent[]): Message[] {
     }
   }
   return messages;
-}
-
-export function projectFinalAnswer(events: StoredEvent[], requestId: string, text: string) {
-  return events.findLast((event) => event.type === "text_finalized" &&
-    event.requestId === requestId && event.contentKind === "final" && event.text === text &&
-    typeof event.textSegmentId === "string");
 }

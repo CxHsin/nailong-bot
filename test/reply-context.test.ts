@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createAgentHost } from "../src/application/agent-host.js";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { initializeTelegramHostChannel } from "../src/channel/telegram/host-channel.js";
 import { normalizeTelegramInput } from "../src/channel/telegram/index.js";
 import { closeFixture } from "./fixtures/cleanup.js";
@@ -23,15 +23,15 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
     const last = payload.messages.at(-1);
     const useTool = last.role === "user" && last.content.includes("这数据似乎并不是实时的？");
     const delta = useTool ? { tool_calls: [{ index: 0, id: "inspect", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] } :
-      { content: JSON.stringify({ type: "final", text: "收到" }) };
+      { content: "收到" };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: useTool ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
+  const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const bot = new Bot("123:test", { client: { fetch: async (url) => new FetchResponse(JSON.stringify({ ok: true,
     result: String(url).endsWith("getMe") ? { id: 123, is_bot: true, first_name: "bot", username: "test_bot" } : true })) } });
   const sent: string[] = [];
@@ -65,7 +65,7 @@ test("Telegram reply to a delivered KV report reaches Provider, survives a tool 
 
 test("reply resolution excludes foreign, undelivered, unknown and non-cache control reports", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "reply-isolation-")); t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createRuntimeLog(dir); const histories: string[] = [];
+  const log = await createRuntimeEventLog(dir); const histories: string[] = [];
   const host = createAgentHost({ dataDir: dir, promptFile: join(dir, "prompt.md"), log, agent: {
     answer: async (messages) => { histories.push(JSON.stringify(messages)); return "answer"; },
   } });

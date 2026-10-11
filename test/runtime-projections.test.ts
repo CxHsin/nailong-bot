@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectDeliveredChat, projectRequestState } from "../src/application/runtime-projections.js";
-import { projectTelegramSegment } from "../src/telegram/telegram-events.js";
+import { projectDeliveredChat } from "../src/application/runtime-projections.js";
+import { segmentDelivery } from "../src/runtime/delivery-facts.js";
 import { replayToolResultView, toolResultView } from "../src/context/tool-result-projection.js";
 import type { StoredEvent, ToolResult } from "../src/runtime/runtime-types.js";
 
 const at = "2026-01-01T00:00:00Z";
 const event = (value: { type: string; [key: string]: unknown }): StoredEvent => ({ ...value, at });
 
-test("request, chat, and Telegram views rebuild from committed events", () => {
+test("legacy delivered chat and receipt views rebuild from committed facts", () => {
   const events = [
     event({ type: "request_started", requestId: "a" }),
     event({ type: "message", requestId: "a", role: "user", text: "hello" }),
@@ -21,10 +21,9 @@ test("request, chat, and Telegram views rebuild from committed events", () => {
     event({ type: "delivery_succeeded", requestId: "a" }),
     event({ type: "request_completed", requestId: "a" }),
   ];
-  assert.deepEqual([...projectRequestState(events).open], []);
   assert.deepEqual(projectDeliveredChat(events), [{ role: "user", text: "hello" },
     { role: "assistant", text: "reply" }]);
-  assert.equal(projectTelegramSegment(events, "s").deliveries.length, 1);
+  assert.equal(segmentDelivery(events, "s").complete, false, "a page receipt without a complete plan cannot confirm delivery");
 });
 
 test("recorded tool result view remains stable as it ages", () => {

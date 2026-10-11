@@ -1,3 +1,4 @@
+import { appendRuntimeFact } from "../runtime/facts.js";
 import { createHash } from "node:crypto";
 import { defineTool, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
@@ -43,7 +44,7 @@ export function createToolCatalog(stable: RuntimeTool[], sources: ToolSource[], 
       }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name, "en"));
       const found = ranked.slice(0, args.limit ?? 5).map(({ entry }) => metadata(entry));
       for (const entry of found) discovered.add(entry.name);
-      await request?.log.append({ type: "tool_discovered", requestId: request.id, query: args.query, tools: found });
+      if (request) await appendRuntimeFact(request.log, { type: "tool_discovered", requestId: request.id, query: args.query, tools: found });
       return textResult({ tools: found, ...(found.length ? {} : { hint: "没有匹配工具，请修改查询。" }) });
     } });
   const invoke = async (name: string, args: unknown, id: string, signal: Parameters<ToolDefinition["execute"]>[2], update: Parameters<ToolDefinition["execute"]>[3], context: Parameters<ToolDefinition["execute"]>[4]) => {
@@ -51,9 +52,9 @@ export function createToolCatalog(stable: RuntimeTool[], sources: ToolSource[], 
     if (!entry || !discovered.has(name)) throw new Error(`工具未发现：${name}；先调用 tool_search。`);
     if (!Value.Check(entry.parameters, args)) throw new Error(`工具参数不符合 schema：${name}`);
     const validated = validateToolArguments(entry.tool, { type: "toolCall", id, name, arguments: args as Record<string, unknown> });
-    await request?.log.append({ type: "capability_dispatched", requestId: request.id, toolCallId: id, toolName: name, source: entry.source, digest: entry.digest, args: validated });
+    if (request) await appendRuntimeFact(request.log, { type: "capability_dispatched", requestId: request.id, toolCallId: id, toolName: name, source: entry.source, digest: entry.digest, args: validated });
     const result = await entry.tool.execute(id, validated, signal, update, context);
-    await request?.log.append({ type: "capability_executed", requestId: request.id, toolCallId: id, toolName: name, source: entry.source, digest: entry.digest, result });
+    if (request) await appendRuntimeFact(request.log, { type: "capability_executed", requestId: request.id, toolCallId: id, toolName: name, source: entry.source, digest: entry.digest, result });
     return { ...result, details: { sourceToolName: entry.originalName, source: entry.source, sourceDetails: result.details } };
   };
   const call = defineTool({ name: "tool_call", label: "Call discovered tool", description: "Execute a tool previously discovered by tool_search in this Run. Pass its exact returned name and arguments matching its schema.",

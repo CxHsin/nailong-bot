@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createAgentHost } from "../src/application/agent-host.js";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { createTestServer } from "./fixtures/http-server.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 
@@ -21,16 +21,16 @@ test("soft watermark compacts a batch before overflow and keeps the accepted sum
     const payload = JSON.parse(body);
     const summarizing = payload.messages.some((message: { content: string }) => message.content?.includes("HISTORY_COMPACTION"));
     if (summarizing) summaries++; else inputs.push(payload);
-    const text = summarizing ? summary : JSON.stringify({ type: "final", text: "继续执行已确认的报告" });
+    const text = summarizing ? summary : "继续执行已确认的报告";
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const options = { outputProtocol: "json-text-v2" as const, dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 };
+  const options = { dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 };
   let agent = await createPiAgent(options);
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   let host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = async (text: string) => {
     const result = await host.submit({ actor: { id: "owner" }, conversationId: "c", text }).done;
@@ -62,15 +62,15 @@ test("failed compaction keeps original context, uses at most two attempts and co
     const payload = JSON.parse(body);
     const summarizing = payload.messages.some((message: { content: string }) => message.content?.includes("HISTORY_COMPACTION"));
     if (summarizing) summaries++; else inputs.push(body);
-    const text = summarizing ? "invalid incomplete summary" : JSON.stringify({ type: "final", text: "answer" });
+    const text = summarizing ? "invalid incomplete summary" : "answer";
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = (text: string) => host.submit({ actor: { id: "owner" }, conversationId: "c", text }).done;
   assert.equal((await send("ORIGINAL-KEEP-ME " + "a".repeat(70000))).type, "run_succeeded");
@@ -97,14 +97,14 @@ test("a provider overflow after rejected compaction cannot trigger another two a
       res.end(JSON.stringify({ error: { message: "maximum context length exceeded", type: "invalid_request_error" } }));
     } else {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: "answer" }) }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "answer" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
     }
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 60000 });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
+  const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = (text: string) => host.submit({ actor: { id: "owner" }, conversationId: "c", text }).done;
   assert.equal((await send("old " + "a".repeat(70000))).type, "run_succeeded");
   assert.equal((await send("current " + "b".repeat(40000))).type, "run_failed");
@@ -120,16 +120,16 @@ test("a configured output allowance reduces the effective hard input budget befo
     let body = ""; for await (const chunk of req) body += chunk;
     const summarizing = body.includes("HISTORY_COMPACTION");
     if (summarizing) summaries++;
-    const text = summarizing ? summary : JSON.stringify({ type: "final", text: "answer" });
+    const text = summarizing ? summary : "answer";
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, memoryBootstrap: false,
+  const agent = await createPiAgent({ dataDir: dir, promptFile, memoryBootstrap: false,
     modelConfiguration: { defaultModel: "test", models: [{ alias: "test", api: "openai-completions", baseUrl: `http://127.0.0.1:${address.port}`, model: "test", apiKey: "test", contextWindow: 60000, maxTokens: 30000 }] } });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
+  const log = await createRuntimeEventLog(dir); const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = async (text: string) => { const terminal = await host.submit({ actor: { id: "owner" }, conversationId: "c", text }).done; assert.equal(terminal.type, "run_succeeded", terminal.error); };
   await send("old " + "a".repeat(70000));
   await send("new " + "b".repeat(22000));

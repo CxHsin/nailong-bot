@@ -1,81 +1,24 @@
-import { createHost, type HostEvent, type HostInput, type RunResult } from "../host/host.js";
+import { createHost, type HostEvent } from "../host/host.js";
 import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { conversationLog, conversationUserId } from "../runtime/conversation-log.js";
-import { AGENT_COMMANDS, agentCommand, handleCommand } from "./commands.js";
-import { handleMemoryCommand } from "./memory-commands.js";
+import { agentCommand } from "./commands.js";
+import { control } from "./control.js";
+import type { AgentExecution } from "./agent-contract.js";
+import { appendRuntimeFact, settledTextFact } from "../runtime/facts.js";
 import { projectDeliveredChat } from "./runtime-projections.js";
-import type { Message, Request, Update } from "./app-types.js";
-import { cacheStatistics, cacheReportText } from "../runtime/cache-statistics.js";
+import type { Request } from "./app-types.js";
 import { commitMemoryLearning } from "./memory-learning.js";
 import { cacheReplyContext } from "../runtime/reply-context.js";
 import { deliverContent, type DeliveryContent, type ContentTransport } from "../runtime/content-delivery.js";
-import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOptions, type ProgressSummaryGenerator } from "./progress-summaries.js";
+import { startProgressSummaries, progressSummaryOptions, type ProgressSummaryOptions } from "./progress-summaries.js";
 import { recordInterruptedRuns, notifyRecovery } from "../runtime/startup-recovery.js";
 import { projectTimeline } from "../runtime/timeline.js";
-import { validModelAlias } from "../agent/model-config.js";
 import { SkillReferenceError } from "../agent/skills.js";
 import type { BuildIdentity } from "../runtime/build-identity.js";
 
 export { AGENT_COMMANDS } from "./commands.js";
 
-type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; runtimeIdentity?: BuildIdentity; progressSummary?: ProgressSummaryOptions; agent: {
-  answer(messages: Message[], request: Request): Promise<string>; purgeEmbeddingCache?: () => void;
-  prepareCapabilities?: (text: string, request: Request) => Promise<void>;
-  validateInput?: (text: string, channel?: string) => Promise<import("../agent/skills.js").SkillSnapshot>;
-  installSkill?: (text: string, request: Request) => Promise<string | undefined>;
-  summarizeProgress?: ProgressSummaryGenerator;
-  defaultModel?: string;
-  models?: ReadonlyArray<{ alias: string; name: string }>;
-  memoryVector?: (text: string) => number[] | undefined;
-} };
-
-async function control(options: AgentHostOptions, input: HostInput, log: RuntimeLog): Promise<RunResult | undefined> {
-  if (input.parts.some((part) => part.type !== "text")) return undefined;
-  const text = input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim();
-  if (!text.startsWith("/")) return undefined;
-  const match = /^\/([a-zA-Z0-9_]+)(?:\s|$)/.exec(text);
-  const name = match?.[1] ?? text.slice(1).split(/\s/, 1)[0]!;
-  const definition = agentCommand(text);
-  if (!definition && input.metadata?.channel === "telegram") return undefined;
-  await log.append({ type: "command_received", command: name, messageId: input.metadata?.messageId, contextPolicy: "exclude" });
-  if (!definition) return { text: "未知命令，请发送 /help 查看帮助。", kind: "control" };
-  if (name === "skill") return undefined;
-  if (["help", "kvcache", "reset", "feed", "dance"].includes(name) && text !== `/${name}`)
-    return { text: `用法：${definition.usage}`, kind: "control" };
-  if (name === "help") return { text: AGENT_COMMANDS.map((item) => `${item.usage}\n${item.description}`).join("\n\n") + "\n\n技能调用：/skill-name [任务]；重名时用 /source:skill-name。首行可连续引用多个技能，也可不带参数。\nCLI：运行中 Ctrl+C 停止当前任务并保留会话；空闲时退出。", kind: "control" };
-  if (name === "model") {
-    const models = options.agent.models ?? [{ alias: "ds", name: "DeepSeek" }];
-    const selected = (await log.read()).findLast((event) => event.type === "model_selected");
-    const current = typeof selected?.modelAlias === "string" ? selected.modelAlias : options.agent.defaultModel ?? models[0]!.alias;
-    if (text === "/model") return { text: `当前模型：${current}${models.some((item) => item.alias === current) ? "" : "（配置已移除）"}\n可选模型：\n${models.map((item) => `${item.alias}：${item.name}`).join("\n")}\n用法：/model 模型别名`, kind: "control" };
-    const alias = /^\/model\s+(\S+)$/.exec(text)?.[1];
-    if (!validModelAlias(alias)) return { text: `用法：${definition.usage}`, kind: "control" };
-    if (!models.some((item) => item.alias === alias)) return { text: "该模型尚未配置或不存在，请用 /model 查看可选项。当前模型未改变。", kind: "control" };
-    await log.append({ type: "model_selected", modelAlias: alias, contextPolicy: "exclude" });
-    return { text: `已切换为 ${alias}，从下一轮生效。`, kind: "control" };
-  }
-  if (name === "kvcache") {
-    const cache = cacheStatistics(await options.log.read(), input.conversationId);
-    return { text: cacheReportText(cache), cache, kind: "control" };
-  }
-  if (name === "dance") return { text: "奶龙扭起来啦！", stickerCategory: "dance", kind: "control" };
-  if (name === "feed") {
-    await log.append({ type: "context_feed", contextPolicy: "exclude" });
-    return { text: "你喂了奶龙一个奶香小面包，奶龙满足地拍了拍肚皮，现在的上下文精神头提升了 100%！", stickerCategory: "feed", stickerText: true, kind: "control" };
-  }
-  if (name === "reset") {
-    await log.append({ type: "conversation_reset", source: "channel", contextPolicy: "exclude" });
-    return { text: "已开始新上下文，旧记录和累计用量仍保留。", kind: "control" };
-  }
-  let response = "";
-  const send = async (value: string) => { response = value; };
-  const update: Update = { userId: conversationUserId(input.conversationId), chatType: "private", text,
-    messageId: Number(input.metadata?.messageId ?? 0),
-    ...(typeof input.metadata?.replyToMessageId === "number" ? { replyToMessageId: input.metadata.replyToMessageId } : {}) };
-  const handled = name === "prompt" ? await handleCommand(log, { promptFile: options.promptFile, send }, update, text) :
-    await handleMemoryCommand(log, { dataDir: options.dataDir, conversationId: input.conversationId, send, purgeEmbeddingCache: options.agent.purgeEmbeddingCache }, update, text);
-  return { text: handled ? response : `用法：${definition.usage}`, kind: "control" };
-}
+export type AgentHostOptions = { log: RuntimeLog; dataDir: string; promptFile: string; runtimeIdentity?: BuildIdentity; progressSummary?: ProgressSummaryOptions; agent: AgentExecution };
 
 /** Shared production Host: queued model/mutation work and immediate cache diagnostics. */
 export function createAgentHost(options: AgentHostOptions) {
@@ -91,7 +34,7 @@ export function createAgentHost(options: AgentHostOptions) {
       input.parts.map((part) => part.type === "text" ? part.text : "").join("\n").trim() === "/kvcache",
     execute: async (input, context) => {
     const log = conversationLog(options.log, input.conversationId);
-    if (options.runtimeIdentity) await log.append({ type: "runtime_identity", requestId: context.runId, identity: options.runtimeIdentity, contextPolicy: "exclude" });
+    if (options.runtimeIdentity) await appendRuntimeFact(log, { type: "runtime_identity", requestId: context.runId, identity: options.runtimeIdentity, contextPolicy: "exclude" });
     if (input.metadata?.channel === "telegram" && typeof input.metadata.messageId === "number" &&
       (await log.read()).some((event) => event.messageId === input.metadata!.messageId &&
         (["input_received", "command_received"].includes(event.type) || event.type === "message" && event.role === "user")))
@@ -104,17 +47,17 @@ export function createAgentHost(options: AgentHostOptions) {
     const replyToMessageId = input.metadata?.replyToMessageId;
     const replyContext = input.metadata?.channel === "telegram" && typeof replyToMessageId === "number" &&
       Number.isSafeInteger(replyToMessageId) && replyToMessageId > 0 ? cacheReplyContext(await log.read(), replyToMessageId) : undefined;
-    await log.append({ type: "message", role: "user", text, originalText: text, requestId: context.runId,
+    await appendRuntimeFact(log, { type: "message", role: "user", text, originalText: text, requestId: context.runId,
       chatId: conversationUserId(input.conversationId), messageId: input.metadata?.messageId,
       ...(typeof replyToMessageId === "number" ? { replyToMessageId } : {}), ...(replyContext ? { replyContext } : {}),
       ...(images.length ? { images } : {}) });
-    await log.append({ type: "request_started", requestId: context.runId });
+    await appendRuntimeFact(log, { type: "request_started", requestId: context.runId });
     const results = new Map<string, string>();
     const history = await log.read();
     const feedIndex = history.findLastIndex((event) => event.type === "context_feed");
     const usedIndex = history.findLastIndex((event) => event.type === "context_feed_consumed");
     const fed = feedIndex > usedIndex;
-    if (fed) await log.append({ type: "context_feed_consumed", requestId: context.runId, contextPolicy: "exclude" });
+    if (fed) await appendRuntimeFact(log, { type: "context_feed_consumed", requestId: context.runId, contextPolicy: "exclude" });
     const configured = history.findLast((e) => e.type === "bot_prompt_config");
     const selectedModel = history.findLast((event) => event.type === "model_selected");
     let summaries: ReturnType<typeof startProgressSummaries> | undefined;
@@ -138,13 +81,13 @@ export function createAgentHost(options: AgentHostOptions) {
       // A protocol final may omit previously completed results; they must survive the draft.
       const answer = [...results.values(), final].join("\n\n");
       // Preserve the generated final separately from the Channel's assembled presentation.
-      await log.append({ type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
-      const finalized = (await log.read()).findLast((event) => event.type === "text_finalized" && event.requestId === context.runId && event.contentKind === "final");
+      await appendRuntimeFact(log, { type: "answer_generated", requestId: context.runId, text: final, resultId: context.runId });
+      const finalized = (await log.read()).map(settledTextFact).findLast((event) => event?.requestId === context.runId && event.contentKind === "final");
       return { text: answer, finalText: final, resultId: context.runId, kind: "model",
         ...(finalized?.text === final ? { finalSegmentId: finalized.textSegmentId } : {}),
         ...(results.size ? { stageSegmentIds: [...results.keys()] } : {}) };
     } catch (error) {
-      await log.append({ type: "request_failed", requestId: context.runId, error: String(error) });
+      await appendRuntimeFact(log, { type: "request_failed", requestId: context.runId, error: String(error) });
       if (error instanceof SkillReferenceError) return { text: error.message, kind: "control" };
       if (request.loadedSkillPaths?.length && error instanceof Error && /预算/.test(error.message))
         return { text: "skill 加载失败：完整指令超过本次模型输入预算。请缩小技能正文或使用更大的模型窗口。", kind: "control" };
@@ -167,13 +110,13 @@ export function createAgentHost(options: AgentHostOptions) {
     async recordDelivery(event: HostEvent, delivery: { channel: "telegram" | "cli"; telegramMessageId?: number }) {
     if (event.type !== "run_succeeded") return;
     const log = conversationLog(options.log, event.conversationId);
-    await log.append({ type: "delivery_succeeded", runId: event.runId, requestId: event.runId,
+    await appendRuntimeFact(log, { type: "delivery_succeeded", runId: event.runId, requestId: event.runId,
       resultId: String(event.result?.resultId ?? event.runId),
       ...(event.result?.stageSegmentIds ? { stageSegmentIds: event.result.stageSegmentIds } : {}), ...delivery });
     if (event.result?.kind !== "model") return;
-    await log.append({ type: "request_completed", requestId: event.runId });
+    await appendRuntimeFact(log, { type: "request_completed", requestId: event.runId });
     await commitMemoryLearning(log, conversationUserId(event.conversationId), undefined, options.agent.memoryVector).catch(async () => {
-      await log.append({ type: "memory_degraded", requestId: event.runId, reason: "learning_unavailable" }).catch(() => undefined);
+      await appendRuntimeFact(log, { type: "memory_degraded", requestId: event.runId, reason: "learning_unavailable" }).catch(() => undefined);
     });
   } };
 }

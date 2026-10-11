@@ -12,6 +12,12 @@ npm run run:diagnose -- --run-id "待排查Run" --data-dir data
 
 新增 `model_transport` 事实通过 Provider 的响应回调和 Node/Undici 诊断通道记录；错误 cause 仅保留已知名称与错误码。缺失的信息显示 `null` 或空列表，旧记录不会被补写。未使用 Undici 的传输可能没有 cause；这些信息用于定位，不能单独证明具体网络节点故障。摘要调用也关联自己的 call ID。
 
+`providerError` 与传输 `causes` 分开保存。它只保留受限错误码、来源和直接观察到的错误事件类型：`source=stream-event` 表示 Responses 响应流或原生解码器直接观察到错误事件或嵌套 `error` 封套，`source=exception` 表示异常对象提供的信息，`source=sdk-message` 表示从 SDK 固定格式的错误字符串提取了已知错误码。后者的 `eventType` 始终为 null，无法据此区分 `error` 与 `response.failed`。嵌套封套没有已知事件类型时 `eventType=null`；未知或缺失代码也为 null，但保留直接观察到错误的来源。异常正文不落入诊断；只读 CLI 再次校验这些字段。`provider_error` 表示保存了 Provider 错误证据，容量错误仍归 `context_overflow`；旧记录缺失字段显示 null。
+
+为避免 SDK 丢失嵌套错误码，进程安装一次 fetch 委托，只有当前异步调用范围内、目标 Responses 地址的 POST SSE 响应才观察消费中的字节。字节原样转交，保持背压并传播取消，不另行读取或复制整个响应。观察器最多临时保留 64 KiB 的单个事件，超出则跳过该事件并继续观察后续事件；仅保留首次错误的受限字段。它不能覆盖未消费、超限或其他传输方式的事件，也不能恢复历史错误正文或错误码。
+
+排查报告分别说明：本轮在哪个检查处终止、哪些调用异常导致该条件成立，以及实际外部根因是否已被证实。HTTP 200 只证明收到响应头；SDK 处理流内错误后清理连接也可能产生 `AbortError`。核查取消信号、Provider 错误与传输原因后再判断，不能仅凭清理异常称为网络断流。本地对照证明某机制能产生相同记录，不证明真实 Run 必然走过该机制；缺失的历史错误码不能通过升级诊断补回。
+
 新调用还记录以下结构化证据，计时均相对本次模型调用开始：
 
 - `headersMs`：响应头到达；HTTP 200 不代表流已完成。
@@ -30,7 +36,7 @@ Telegram Bot 启动时固定 `runtime_identity`，每个新 Run 都记录同一�
 
 ## 上下文范围
 
-排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0004](adr/0004-continuous-active-context.md) 的连续活动上下文政策（[ADR-0003](adr/0003-recent-turn-context.md) 保留旧兼容入口政策），再运行：
+排查历史恢复、压缩等待或上下文范围时，先核对 [ADR-0004](adr/0004-continuous-active-context.md) 的连续活动上下文政策（[ADR-0003](adr/0003-recent-turn-context.md) 记录历史近期范围，旧执行器已退役），再运行：
 
 ```powershell
 npm run context:diagnose -- --conversation-id "telegram:private:你的ID"

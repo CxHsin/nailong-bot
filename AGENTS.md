@@ -8,6 +8,12 @@
 
 使用默认的五个 triage 标签。See `docs/agents/triage-labels.md`.
 
+### 检索与交接
+
+检索长文档、处理输出截断或交接任务时，读取 [context-handoff.md](docs/agents/context-handoff.md)。
+
+退役 API 或迁移执行入口时，按 [refactor-review.md](docs/agents/refactor-review.md) 核对当前说明、历史记录和验证证据。
+
 ### Domain docs
 
 采用 single-context 布局：根目录 `CONTEXT.md` 和 `docs/adr/`。See `docs/agents/domain.md`.

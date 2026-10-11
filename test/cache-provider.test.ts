@@ -7,13 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPiAgent } from "../src/agent/pi-agent.js";
 import { createAgentHost } from "../src/application/agent-host.js";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
+import { createRuntimeEventLog } from "../src/runtime/event-log.js";
 import { closeFixture } from "./fixtures/cleanup.js";
 
 type Payload = { messages: Array<{ role: string; content: string }>; tools: unknown[]; prompt_cache_key?: string; prompt_cache_retention?: string };
 function final(res: ServerResponse, measured = true) {
   res.writeHead(200, { "content-type": "text/event-stream" });
-  res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "final", text: "answer" }) }, finish_reason: "stop" }],
+  res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "answer" }, finish_reason: "stop" }],
     ...(measured ? { usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 80, prompt_cache_miss_tokens: 20, completion_tokens: 5 } } : {}) })}\n\ndata: [DONE]\n\n`);
 }
 
@@ -28,10 +28,10 @@ test("real Provider requests preserve prefixes across dates, scope Conversations
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   let now = new Date("2026-10-04T00:00:00Z");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
     memoryBootstrap: false, now: () => now });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });
   const send = async (text: string, conversationId = "c1") => {
     const result = await host.submit({ actor: { id: "owner" }, conversationId, text }).done;
@@ -69,16 +69,16 @@ test("real compaction calls retain auxiliary usage and measured zero is distinct
     const payload: Payload = JSON.parse(body);
     const isSummary = payload.messages.some((message) => message.content.includes("HISTORY_COMPACTION"));
     if (isSummary) { summaries++; summaryInputs.push(JSON.parse(payload.messages.at(-1)!.content)); }
-    const text = isSummary ? "## Goal\nContinue.\n## Progress\nEarlier work completed.\n## Constraints\nKeep requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue work.\n## Critical Context\nConsult original logs for exact details." : JSON.stringify({ type: "final", text: "answer" });
+    const text = isSummary ? "## Goal\nContinue.\n## Progress\nEarlier work completed.\n## Constraints\nKeep requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue work.\n## Critical Context\nConsult original logs for exact details." : "answer";
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: text }, finish_reason: "stop" }],
       usage: { prompt_tokens: zero ? 0 : 100, prompt_cache_hit_tokens: zero ? 0 : 80, completion_tokens: zero ? 0 : 5 } })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 32000, compaction: { trigger: 0.4, target: 0.25 } });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false, contextWindow: 32000, compaction: { trigger: 0.4, target: 0.25 } });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   for (let index = 0; index < 6; index++) {
     await log.append({ type: "message", role: "user", text: `old-${index}:` + "x".repeat(4000), conversationId: "c1" });
     await log.append({ type: "message", role: "assistant", text: "answer:" + "y".repeat(4000), conversationId: "c1" });
@@ -112,14 +112,14 @@ test("actual memory prefixes survive new recall and tools, while forgetting remo
     const payload: Payload = JSON.parse(body); seen.push(payload);
     if (payload.messages.at(-1)!.content === "暗号") {
       res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: JSON.stringify({ type: "status", text: "temporary UI status" }), tool_calls: [{ index: 0, id: "stable-call", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
+      res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "stable-call", type: "function", function: { name: "read", arguments: JSON.stringify({ path: promptFile }) } }] }, finish_reason: "tool_calls" }] })}\n\ndata: [DONE]\n\n`);
     } else final(res);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   for (const [id, text] of [["old-secret", "暗号是 SECRET-ALPHA"], ["old-color", "颜色是 BLUE-BETA"]]) {
     await log.append({ type: "message", role: "user", conversationId: "c1", requestId: id, text });
     await log.append({ type: "request_completed", conversationId: "c1", requestId: id });
@@ -163,16 +163,16 @@ test("current input keeps its date and memory snapshot after a long tool chain i
     const text = "## Goal\nContinue.\n## Progress\nEarlier work completed.\n## Constraints\nKeep requirements.\n## Decisions\nPreserve evidence.\n## Next Steps\nContinue work.\n## Critical Context\nConsult original logs for exact details.";
     const delta = isSummary ? { content: text } : tools < 8 ? { tool_calls: [{ index: 0, id: `read-${tools++}`, type: "function",
       function: { name: "read", arguments: JSON.stringify({ path: "source.txt" }) } }] } :
-      { content: JSON.stringify({ type: "final", text: "answer" }) };
+      { content: "answer" };
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: "tool_calls" in delta ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ outputProtocol: "json-text-v2", dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
+  const agent = await createPiAgent({ dataDir: dir, promptFile, deepseekKey: "test", modelBaseUrl: `http://127.0.0.1:${address.port}`,
     memoryBootstrap: false, contextWindow: 16000, compaction: { trigger: 0.75, target: 0.6 }, now: () => new Date("2026-10-04T00:00:00Z") });
   t.after(() => closeFixture({ server, dir, shutdown: () => agent.close() }));
-  const log = createRuntimeLog(dir);
+  const log = await createRuntimeEventLog(dir);
   await log.append({ type: "message", role: "user", conversationId: "c1", requestId: "secret", text: "暗号是 SECRET-ALPHA" });
   await log.append({ type: "request_completed", conversationId: "c1", requestId: "secret" });
   const host = createAgentHost({ dataDir: dir, promptFile, log, agent });

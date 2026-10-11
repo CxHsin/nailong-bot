@@ -3,6 +3,8 @@ import type { RuntimeLog, StoredEvent } from "../runtime/runtime-types.js";
 import { upcastHostEvent, HOST_EVENT_SCHEMA_VERSION } from "./event-envelope.js";
 import { normalizeContentParts, type ContentPart } from "./content-parts.js";
 import type { RunProgress } from "../runtime/progress.js";
+import { appendRuntimeFact, runResultFact } from "../runtime/facts.js";
+import type { RuntimeFactOf } from "../runtime/event-schema.js";
 
 export type Actor = { id: string; kind?: "user" | "system" | "service"; displayName?: string };
 export type HostInput = { actor: Actor; conversationId: string; parts: ContentPart[]; metadata?: Record<string, unknown> };
@@ -79,6 +81,10 @@ type Job = {
   steering?: SteeringInput; ready?: boolean;
 };
 
+type HostAppendFact = {
+  [K in Exclude<HostEventType, "progress">]: Omit<RuntimeFactOf<K>, "runId" | "conversationId" | "at" | "actorId">
+}[Exclude<HostEventType, "progress">] | { type: "progress" } & Partial<HostEvent>;
+
 export function normalizeHostInput(input: HostInputLike): HostInput {
   if (!input || typeof input !== "object") throw new Error("Host input 无效");
   const actor = input.actor;
@@ -106,22 +112,23 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
   });
   queue = restored; readQueue = restored;
   const inputKey = (input: HostInput) => input.metadata?.messageId === undefined ? undefined : JSON.stringify([input.conversationId, input.actor.id, input.metadata.channel, input.metadata.messageId]);
-  const appendNow = async (job: Job, type: HostEventType, extra: Partial<HostEvent> = {}): Promise<HostEvent> => {
-    const event: HostEvent = { type, schemaVersion: HOST_EVENT_SCHEMA_VERSION, runId: job.runId,
-      conversationId: job.input.conversationId, sequence: ++job.sequence, at: new Date().toISOString(), actorId: job.input.actor.id, ...extra };
+  const appendNow = async (job: Job, fact: HostAppendFact): Promise<HostEvent> => {
+    const event = { schemaVersion: HOST_EVENT_SCHEMA_VERSION, runId: job.runId,
+      conversationId: job.input.conversationId, sequence: ++job.sequence, at: new Date().toISOString(), actorId: job.input.actor.id, ...fact };
+    const { type } = event;
     if (type === "input_receipt" || type === "control_completed") event.receiptId = `${job.runId}:receipt:${event.sequence}`;
     if (type === "run_submitted" || type === "control_received") event.inputKey = inputKey(job.input);
     // Host envelopes own their in-run sequence and schema version. The runtime log
     // assigns storage identity fields itself, so never persist those reserved keys.
     const { schemaVersion: _schemaVersion, sequence: _sequence, ...stored } = event;
     // Draft snapshots are ephemeral. Their underlying model/tool facts have their own log records.
-    if (type !== "progress") await options.log.append(stored as unknown as Omit<StoredEvent, "at">);
+    if (stored.type !== "progress") await appendRuntimeFact(options.log, stored);
     job.queue.push(event);
     return event;
   };
-  const append = (job: Job, type: HostEventType, extra: Partial<HostEvent> = {}): Promise<HostEvent> => {
+  const append = (job: Job, fact: HostAppendFact): Promise<HostEvent> => {
     let result!: HostEvent;
-    const turn = job.eventTail.then(async () => { result = await appendNow(job, type, extra); });
+    const turn = job.eventTail.then(async () => { result = await appendNow(job, fact); });
     job.eventTail = turn;
     return turn.then(() => result);
   };
@@ -134,7 +141,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
       const key = inputKey(job.input);
       if (key && (await options.log.read()).some((event) => event.inputKey === key && event.runId !== job.runId)) {
         job.closed = true;
-        const terminal = await append(job, "control_completed", { phase: "duplicate", contextPolicy: "exclude" });
+        const terminal = await append(job, { type: "control_completed", phase: "duplicate", contextPolicy: "exclude" });
         settle(job, terminal); return;
       }
       await options.prepare?.(job.input, steering);
@@ -144,25 +151,25 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     catch (error) {
       if (job.closed) return false;
       job.closed = true;
-      const terminal = await append(job, "control_completed", { phase: "invalid", text: error instanceof Error ? error.message : "输入无效，请重新提交。", contextPolicy: "exclude" });
+      const terminal = await append(job, { type: "control_completed", phase: "invalid", text: error instanceof Error ? error.message : "输入无效，请重新提交。", contextPolicy: "exclude" });
       settle(job, terminal); return false;
     }
   };
   const promoteSteer = async (job: Job) => {
     job.target = undefined;
-    await append(job, "run_submitted", { parts: job.input.parts });
-    await append(job, "input_receipt", { phase: "steer_fallback", text: "当前没有可引导的活动任务，已按普通输入排队。", contextPolicy: "exclude" });
+    await append(job, { type: "run_submitted", parts: job.input.parts });
+    await append(job, { type: "input_receipt", phase: "steer_fallback", text: "当前没有可引导的活动任务，已按普通输入排队。", contextPolicy: "exclude" });
   };
   const run = async (job: Job, submitted: Promise<unknown>) => {
     await submitted;
     if (job.closed) return;
     if (job.cancelled || job.controller.signal.aborted) {
-      const terminal = await append(job, "run_cancelled", { reason: "cancelled_before_start" });
+      const terminal = await append(job, { type: "run_cancelled", reason: "cancelled_before_start" });
       settle(job, terminal); return;
     }
     job.started = true;
     job.steeringOpen = true;
-    await append(job, "run_started");
+    await append(job, { type: "run_started" });
     try {
       const value = await options.execute(job.input, { runId: job.runId, conversationId: job.input.conversationId, signal: job.controller.signal,
         bindSteering: (listener) => {
@@ -170,25 +177,25 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
           for (const pending of jobs.values()) if (pending.target === job && pending.ready && pending.steering && !pending.closed) listener(pending.steering);
           return () => { job.steeringOpen = false; job.listener = undefined; };
         }, emit: (event) => {
-        if (!job.closed) void append(job, event.type, event);
+        if (!job.closed) void append(job, event);
       } });
       if (job.controller.signal.aborted || job.cancelled) {
         job.closed = true;
-        const terminal = await append(job, "run_cancelled", { reason: "cancelled" }); job.resolve(terminal); return;
+        const terminal = await append(job, { type: "run_cancelled", reason: "cancelled" }); job.resolve(terminal); return;
       }
       const result = typeof value === "string" ? { text: value } : value;
       const reusable = result ? { ...result, resultId: result.resultId ?? job.runId } : { resultId: job.runId };
       job.closed = true;
-      const terminal = await append(job, "run_succeeded", { result: reusable }); job.resolve(terminal);
+      const terminal = await append(job, { type: "run_succeeded", result: reusable }); job.resolve(terminal);
     } catch (error) {
       const cancelled = job.controller.signal.aborted || job.cancelled || (error instanceof DOMException && error.name === "AbortError");
       job.closed = true;
       if (!cancelled) {
         const pending = cancelPending(job.input.conversationId, "previous_run_failed");
-        if (pending.count) await append(job, "input_receipt", { phase: "failed_queue", text: `当前任务失败，已取消 ${pending.count} 条待处理输入，请按需重新提交。`, cancelledInputs: pending.count, contextPolicy: "exclude" });
+        if (pending.count) await append(job, { type: "input_receipt", phase: "failed_queue", text: `当前任务失败，已取消 ${pending.count} 条待处理输入，请按需重新提交。`, cancelledInputs: pending.count, contextPolicy: "exclude" });
         await pending.done;
       }
-      const terminal = await append(job, cancelled ? "run_cancelled" : "run_failed", { error: String(error), reason: cancelled ? "cancelled" : "execution" });
+      const terminal = await append(job, { type: cancelled ? "run_cancelled" : "run_failed", error: String(error), reason: cancelled ? "cancelled" : "execution" });
       job.resolve(terminal);
     } finally {
       job.closed = true; job.steeringOpen = false;
@@ -196,7 +203,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
         await steer.submitted;
         if (steer.target !== job || steer.closed) continue;
         steer.closed = true;
-        const terminal = await append(steer, "control_completed", { phase: "steer_cancelled", text: "引导未生效，当前任务已结束，请按需重新提交。", contextPolicy: "exclude" });
+        const terminal = await append(steer, { type: "control_completed", phase: "steer_cancelled", text: "引导未生效，当前任务已结束，请按需重新提交。", contextPolicy: "exclude" });
         settle(steer, terminal);
       }
       job.queue.close(); jobs.delete(job.runId);
@@ -207,7 +214,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     for (const job of pending) { job.closed = true; job.cancelled = true; job.controller.abort(); }
     const done = Promise.all(pending.map(async (job) => {
       await job.submitted;
-      const terminal = await append(job, job.target ? "control_completed" : "run_cancelled", { reason,
+      const terminal = await append(job, { type: job.target ? "control_completed" : "run_cancelled", reason,
         ...(job.target ? { phase: "steer_cancelled", text: "待处理引导已取消。", contextPolicy: "exclude" as const } : {}) });
       settle(job, terminal);
     }));
@@ -242,14 +249,14 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
         const previousSteer = [...jobs.values()].findLast((other) => other.target === target);
         job.target = target;
         jobs.set(runId, job);
-        job.submitted = append(job, "control_received", { phase: "steer", parts: input.parts, contextPolicy: "exclude" }).then(async () => {
+        job.submitted = append(job, { type: "control_received", phase: "steer", parts: input.parts, contextPolicy: "exclude" }).then(async () => {
           // Skill/image preparation may finish out of order; deliver in receipt order.
           await previousSteer?.submitted;
           if (!await prepare(job, true)) return;
           if (!target.steeringOpen || target.closed || target.cancelled) {
             await promoteSteer(job); return;
           }
-          await append(job, "input_receipt", { phase: "steer_waiting", text: "引导已接收，等待当前工具批次完成。", contextPolicy: "exclude" });
+          await append(job, { type: "input_receipt", phase: "steer_waiting", text: "引导已接收，等待当前工具批次完成。", contextPolicy: "exclude" });
           if (job.closed) return;
           if (!target.steeringOpen || target.closed || target.cancelled) {
             await promoteSteer(job); return;
@@ -262,13 +269,13 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
             await job.submitted;
             if (job.closed || job.cancelled || target.cancelled) return false;
             job.steering!.consumed = true;
-            await options.log.append({ type: "steer_consumed", inputId: runId, requestId: target.runId, conversationId: input.conversationId, contextPolicy: "exclude" });
+            await appendRuntimeFact(options.log, { type: "steer_consumed", inputId: runId, requestId: target.runId, conversationId: input.conversationId, contextPolicy: "exclude" });
             return true;
           },
           applied: async () => {
             if (job.closed) return;
             job.closed = true;
-            const terminal = await append(job, "control_completed", { phase: "steer_applied", text: "引导已生效。", contextPolicy: "exclude" });
+            const terminal = await append(job, { type: "control_completed", phase: "steer_applied", text: "引导已生效。", contextPolicy: "exclude" });
             settle(job, terminal);
           } };
         // Reserve receipt order now. Applied controls close this slot; a Steer
@@ -279,7 +286,7 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     }
     if (steer && !input.parts.length) {
       job.control = true; jobs.set(runId, job);
-      void append(job, "control_completed", { phase: "invalid", text: "用法：/steer 内容（可附图片）", contextPolicy: "exclude" }).then((terminal) => {
+      void append(job, { type: "control_completed", phase: "invalid", text: "用法：/steer 内容（可附图片）", contextPolicy: "exclude" }).then((terminal) => {
         settle(job, terminal);
       });
       return handle;
@@ -293,27 +300,27 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
       void (async () => {
         if (!restoredDone) await restored;
         if (key && restoredKeys.has(key)) {
-          const terminal = await append(job, "control_completed", { phase: "duplicate", contextPolicy: "exclude" });
+          const terminal = await append(job, { type: "control_completed", phase: "duplicate", contextPolicy: "exclude" });
           settle(job, terminal); return;
         }
         const pending = valid ? cancelPending(input.conversationId, "stopped_before_start", candidates) : { count: 0, done: Promise.resolve() };
         if (valid && active && !active.closed) { active.cancelled = true; active.controller.abort(); }
-        job.submitted = append(job, "control_received", { phase: "stop", parts: input.parts, contextPolicy: "exclude" });
+        job.submitted = append(job, { type: "control_received", phase: "stop", parts: input.parts, contextPolicy: "exclude" });
         await job.submitted;
-        if (valid && active) await append(job, "input_receipt", { phase: "stopping", text: "正在停止当前任务。", contextPolicy: "exclude" });
+        if (valid && active) await append(job, { type: "input_receipt", phase: "stopping", text: "正在停止当前任务。", contextPolicy: "exclude" });
         await pending.done;
         if (valid && active) await active.done;
         const text = !valid ? "用法：/stop" : active ? `已停止，已取消 ${pending.count} 条待处理输入。` : pending.count ? `已取消 ${pending.count} 条待处理输入，当前没有运行中的任务。` : "当前没有运行中或待处理的任务。";
-        const terminal = await append(job, "control_completed", { phase: valid ? active ? "stopped" : "idle" : "invalid", text, cancelledInputs: pending.count, contextPolicy: "exclude" });
+        const terminal = await append(job, { type: "control_completed", phase: valid ? active ? "stopped" : "idle" : "invalid", text, cancelledInputs: pending.count, contextPolicy: "exclude" });
         settle(job, terminal);
       })().catch((error) => { job.reject(error); job.queue.close(); jobs.delete(runId); });
       return handle;
     }
     jobs.set(runId, job);
-    const submitted = append(job, "run_submitted", { parts: structuredClone(input.parts) }).then(async () => {
+    const submitted = append(job, { type: "run_submitted", parts: structuredClone(input.parts) }).then(async () => {
       if (!await prepare(job, steer)) return;
-      if (steer) await append(job, "input_receipt", { phase: "steer_fallback", text: "当前没有可引导的活动任务，已按普通输入处理。", contextPolicy: "exclude" });
-      if (queued) await append(job, "input_receipt", { phase: "queued", text: "已排队，当前任务完成后处理。", contextPolicy: "exclude" });
+      if (steer) await append(job, { type: "input_receipt", phase: "steer_fallback", text: "当前没有可引导的活动任务，已按普通输入处理。", contextPolicy: "exclude" });
+      if (queued) await append(job, { type: "input_receipt", phase: "queued", text: "已排队，当前任务完成后处理。", contextPolicy: "exclude" });
     });
     job.submitted = submitted;
     schedule(job);
@@ -328,17 +335,16 @@ export function createHost(options: { log: RuntimeLog; execute: HostExecutor; re
     if (!conversationId.trim()) return Promise.reject(new Error("conversationId 缺失"));
     queue = queue.then(async () => {
       const job: Job = { input: { actor: { id: "system", kind: "system" }, conversationId, parts: [{ type: "text", text: "/reset" }] }, runId: randomUUID(), queue: new EventQueue(), done: Promise.resolve(undefined as never), resolve: () => {}, reject: () => {}, controller: new AbortController(), sequence: 0, cancelled: false, eventTail: Promise.resolve() };
-      await append(job, "conversation_reset", { source: "channel", visibility: "always", contextPolicy: "exclude" });
+      await append(job, { type: "conversation_reset", source: "channel", visibility: "always", contextPolicy: "exclude" });
       job.queue.close();
     });
     return queue;
   };
   const redeliver = async (resultId: string, deliver: (result: RunResult) => Promise<void>): Promise<RunResult> => {
     const events = (await options.log.read()).map(upcastHostEvent);
-    const event = events.findLast((entry) => entry.type === "run_succeeded" &&
-      entry.result && typeof entry.result === "object" && (entry.result as RunResult).resultId === resultId);
-    if (!event?.result || typeof event.result !== "object") throw new Error("找不到可复用的运行结果");
-    const result = event.result as RunResult;
+    const event = events.map(runResultFact).findLast((entry) => entry?.result.resultId === resultId);
+    if (!event) throw new Error("找不到可复用的运行结果");
+    const result = event.result;
     await deliver(structuredClone(result));
     return result;
   };

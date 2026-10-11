@@ -63,8 +63,10 @@ test("diagnostics rejects malformed stream evidence and redacts extra identity f
     builtAt: "SECRET", token: "SECRET", cwd: "PRIVATE" } });
   await log.append({ type: "model_step_started", requestId: "r", modelStepId: "s" });
   await log.append({ type: "model_transport", requestId: "r", callId: "s", headersMs: -1, firstStreamEventMs: "PRIVATE",
-    firstPublicTextMs: 12, terminalEventMs: 20, normalTerminal: false, abortSource: "PRIVATE", runSignalAborted: "SECRET" });
+    firstPublicTextMs: 12, terminalEventMs: 20, normalTerminal: false, abortSource: "PRIVATE", runSignalAborted: "SECRET",
+    providerError: { source: "sdk-message", code: "SECRET", eventType: "response.failed", message: "PRIVATE" } });
   const report = diagnoseRun({ dataDir: dir, runId: "r" });
+  assert.equal(report.modelSteps[0]!.providerError, null);
   assert.deepEqual(report.runtimeIdentity, { mode: "source", gitSha: "a".repeat(40), trackedDirty: false, builtAt: null });
   assert.equal(report.modelSteps[0]!.headersMs, null); assert.equal(report.modelSteps[0]!.firstStreamEventMs, null);
   assert.equal(report.modelSteps[0]!.firstPublicTextMs, 12); assert.equal(report.modelSteps[0]!.normalTerminal, false);

@@ -1,17 +1,12 @@
 import { archivePlaceholder, shouldPrune } from "../runtime/tool-archive.js";
-import type { ToolArchive, ToolResult } from "../runtime/runtime-types.js";
+import type { ToolArchive, ToolResult, RecordedToolProjection } from "../runtime/runtime-types.js";
 import { webResultPreview } from "../runtime/web-result.js";
 import { toolProvenance } from "../runtime/tool-provenance.js";
 import { sourceDigest } from "../runtime/event-digest.js";
 
 // A durable decision records what the active model step saw. Replay honors it.
 export const TOOL_RESULT_PROJECTION_VERSION = 3;
-export type RecordedToolProjection = {
-  content: ToolResult["content"];
-  details: unknown;
-  sourceDigest: string;
-  digest: string;
-};
+export type { RecordedToolProjection } from "../runtime/runtime-types.js";
 export function toolResultView(toolName: string, result: ToolResult, archive: ToolArchive | undefined, archiveRead: boolean) {
   const source = toolProvenance(toolName, result);
   if (source.source === "tinyfish") toolName = source.name;

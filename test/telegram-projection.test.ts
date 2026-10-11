@@ -1,148 +1,66 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
-import { createSqliteRuntimeLog } from "../src/runtime/sqlite-runtime-log.js";
-import { createTelegramProjection } from "../src/telegram/telegram-projection.js";
-import { formatMarkdownForTelegram } from "../src/telegram/telegram-format.js";
+import { createTelegramProviderFixture as fixture, sendChatCompletion as output, checkWrites as guard } from "./fixtures/telegram-provider.js";
+import { createTelegramRichTransport } from "../src/channel/telegram/rich-transport.js";
+import { DeliveryRejected } from "../src/application/app-types.js";
 
-test("committed snapshots grow one Telegram message and finalize in place", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-projection-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  const visible = new Map<number, string>();
-  let nextId = 100;
-  const projection = createTelegramProjection({ log, chatId: 42,
-    send: async (text) => { const id = ++nextId; visible.set(id, text); return id; },
-    edit: async (id, text) => { visible.set(id, text); },
+import { deliverContent } from "../src/runtime/content-delivery.js";
+import { planTelegramMarkdown } from "../src/telegram/telegram-markdown.js";
+
+test("API success followed by a durable page receipt commit failure remains storage failure and never resends", async (t) => {
+  let fail = true; let attempts = 0;
+  const { f } = await fixture(t, (res) => output(res, "committed-answer"), {
+    wrapLog: (log) => guard(log, (e) => { if (fail && e.type === "telegram_delivery_succeeded") throw new Error("SQLite commit failed"); }),
+    createTransport: (api) => createTelegramRichTransport({ ...api, sendRich: async (chatId, text, signal) => { if (text === "committed-answer") attempts++; return api.sendRich(chatId, text, signal); } }),
   });
-  const first = await log.append({ type: "text_snapshot", requestId: "r1", modelStepId: "step-1",
-    textSegmentId: "text-1", contentKind: "provisional", text: "我先检查" });
-  await projection.reconcile("text-1");
-  assert.deepEqual([...visible.values()], ["我先检查"]);
-  const second = await log.append({ type: "text_snapshot", requestId: "r1", modelStepId: "step-1",
-    textSegmentId: "text-1", contentKind: "provisional", text: "我先检查文件" });
-  await projection.reconcile("text-1");
-  assert.deepEqual([...visible.values()], ["我先检查文件"]);
-  await log.append({ type: "text_finalized", requestId: "r1", modelStepId: "step-1",
-    textSegmentId: "text-1", contentKind: "progress", text: "我先检查文件" });
-  await projection.reconcile("text-1");
-  assert.equal(nextId, 101);
-  const events = await log.read();
-  assert.equal(events.filter((event) => event.type === "telegram_delivery_attempt").length, 2);
-  const success = events.filter((event) => event.type === "telegram_delivery_succeeded");
-  assert.equal(success.length, 2);
-  assert.equal(success[0]?.snapshotEventId, first.eventId);
-  assert.equal(success[1]?.snapshotEventId, second.eventId);
-  assert.ok(success.every((event) => event.telegramMessageId === 101));
+  await f.send("question"); assert.equal(attempts, 1);
+  assert.ok(f.failures.some((e) => String(e).includes("SQLite commit failed")));
+  const facts = await f.rootLog.read(); const final = facts.find((e) => e.type === "text_finalized" && e.text === "committed-answer");
+  assert.ok(final && typeof final.requestId === "string" && typeof final.textSegmentId === "string");
+  assert.equal(facts.filter((e) => e.type === "telegram_delivery_attempt").length, 1);
+  assert.ok(!facts.some((e) => e.type === "telegram_delivery_unknown" || e.type === "delivery_succeeded"));
+  fail = false; await f.restart(); assert.equal(attempts, 1);
+  const result = await deliverContent(f.scopedLog, final.requestId, 42, { id: final.textSegmentId, text: "committed-answer", kind: "final" }, { send: async () => { attempts++; return 999; } });
+  assert.equal(result.outcome, "unknown"); assert.equal(attempts, 1);
 });
 
-test("unknown first send is not repeated after restart, while later text can send", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-unknown-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  let sends = 0;
-  const transport = { send: async (_text: string) => { sends++; throw new Error("timeout"); },
-    edit: async (_id: number, _text: string) => {} };
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text: "可能已送达" });
-  await createTelegramProjection({ log, chatId: 42, ...transport }).reconcile("text-1");
-  await createTelegramProjection({ log, chatId: 42, ...transport }).reconcile("text-1");
-  assert.equal(sends, 1);
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-2",
-    contentKind: "provisional", text: "下一段" });
-  await createTelegramProjection({ log, chatId: 42, ...transport }).reconcile("text-2");
-  assert.equal(sends, 2);
-  assert.equal((await log.read()).filter((event) => event.type === "telegram_delivery_unknown").length, 2);
+test("current immutable Rich plan preserves long code, Unicode, tables, links and list content with durable page order", async (t) => {
+  const emoji = "👨‍👩‍👧‍👦";
+  const body = "### 内容\n\n" + emoji.repeat(600) + "\n\n1. 第一项\n2. 第二项\n\n[来源](https://example.com?a=1&b=2)\n\n| 名称 | 值 |\n| --- | --- |\n| 中文 | A&B<值> |\n\n```text\n" + "<&>".repeat(1800) + "\n```\n\n尾部结论。";
+  const expected = planTelegramMarkdown(body); const { f } = await fixture(t, (res) => output(res, body));
+  await f.send("mixed answer"); assert.deepEqual(f.sent.filter((text) => !text.startsWith("<details>")), expected);
+  const joined = f.sent.filter((text) => !text.startsWith("<details>")).join(""); assert.equal(joined.split(emoji).length - 1, 600);
+  const code = Array.from(joined.matchAll(/```text\n([\s\S]*?)\n```/g), (match) => match[1]).join("");
+  assert.equal(code, "<&>".repeat(1800));
+  for (const text of ["第一项", "第二项", "来源", "A&B<值>", "尾部结论"]) assert.ok(joined.includes(text));
+  assert.ok(f.sent.every((page) => page.length <= 4096 && !page.startsWith("\u200d") && !page.endsWith("\u200d")));
+  const facts = await f.rootLog.read(); const pages = facts.filter((e) => e.type === "telegram_page" && e.contentKind === "final");
+  assert.deepEqual(pages.map((e) => e.text), expected); assert.deepEqual(pages.map((e) => e.partIndex), expected.map((_, i) => i));
+  assert.equal(facts.filter((e) => e.type === "telegram_delivery_succeeded").length, expected.length);
+  assert.ok(facts.some((e) => e.type === "delivery_succeeded"));
+  const immutable = structuredClone(pages); await f.restart(); assert.deepEqual((await f.rootLog.read()).filter((e) => e.type === "telegram_page" && e.contentKind === "final"), immutable);
 });
 
-test("long final text is delivered in ordered parts before it is acknowledged", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-long-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  const text = "🐉".repeat(4100);
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text });
-  await log.append({ type: "text_finalized", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "final", text });
-  const received: string[] = [];
-  let calls = 0;
-  const projection = createTelegramProjection({ log, chatId: 42,
-    send: async (part) => { received.push(part); return ++calls; },
-    edit: async () => {},
-  });
-  await projection.reconcile("text-1");
-  assert.equal(calls, 3);
-  assert.equal(received.join(""), text);
-  assert.ok(received.every((part) => part.length <= 4000));
-  assert.equal(await projection.finalDelivered("text-1"), true);
+test("known Rich rejection honors retry-after on the same page and commits one successful receipt", async (t) => {
+  let rejectedAt = 0; let retriedAt = 0; let attempts = 0;
+  const { f } = await fixture(t, (res) => output(res, "limited-answer"), { createTransport: (api) => createTelegramRichTransport({ ...api, sendRich: async (chatId, text, signal) => {
+    if (text === "limited-answer") { if (++attempts === 1) { rejectedAt = Date.now(); throw new DeliveryRejected("rate limited", 150); } retriedAt = Date.now(); }
+    return api.sendRich(chatId, text, signal);
+  } }) });
+  await f.send("rate limit"); assert.equal(attempts, 2); assert.ok(retriedAt - rejectedAt >= 150);
+  assert.equal(f.sent.filter((text) => text === "limited-answer").length, 1);
+  const facts = await f.rootLog.read(); assert.equal(facts.filter((e) => e.type === "telegram_delivery_failed").length, 1);
+  assert.equal(facts.filter((e) => e.type === "telegram_delivery_succeeded").length, 1);
+  assert.ok(!facts.some((e) => e.type === "telegram_delivery_unknown"));
 });
 
-test("a failed edit preserves durable text and later syncs a known message", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-edit-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  let visible = "";
-  let fail = true;
-  const projection = createTelegramProjection({ log, chatId: 42,
-    send: async (text) => { visible = text; return 50; },
-    edit: async (_id, text) => { if (fail) throw new Error("rejected"); visible = text; },
-    isRejected: () => true,
-  });
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text: "开头" });
-  await projection.reconcile("text-1");
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text: "开头和后续" });
-  await projection.reconcile("text-1");
-  assert.equal(visible, "开头");
-  assert.ok((await log.read()).some((event) => event.type === "telegram_delivery_failed"));
-  fail = false;
-  await projection.reconcile("text-1");
-  assert.equal(visible, "开头和后续");
-  assert.equal((await log.read()).filter((event) => event.type === "telegram_delivery_succeeded").length, 2);
-});
-
-test("a delivery result commit failure remains a storage failure", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-commit-fault-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text: "已写入快照" });
-  let sent = 0;
-  const faulty = { ...log, append: async (event: Parameters<typeof log.append>[0]) => {
-    if (event.type === "telegram_delivery_succeeded") throw new Error("SQLite commit failed");
-    return log.append(event);
-  } };
-  const projection = createTelegramProjection({ log: faulty, chatId: 42,
-    send: async () => { sent++; return 7; }, edit: async () => {},
-  });
-  await assert.rejects(projection.reconcile("text-1"), /SQLite commit failed/);
-  assert.equal(sent, 1);
-  const events = await log.read();
-  assert.equal(events.filter((event) => event.type === "telegram_delivery_attempt").length, 1);
-  assert.equal(events.filter((event) => event.type === "telegram_delivery_unknown").length, 0);
-  await createTelegramProjection({ log, chatId: 42,
-    send: async () => { sent++; return 8; }, edit: async () => {},
-  }).reconcile("text-1");
-  assert.equal(sent, 1, "restart must not blindly repeat an unacknowledged first send");
-});
-
-test("Telegram projection renders Markdown without changing durable source text", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "telegram-markdown-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createSqliteRuntimeLog(dir);
-  const source = "**加粗** 和 [链接](https://example.com)";
-  await log.append({ type: "text_snapshot", requestId: "r1", textSegmentId: "text-1",
-    contentKind: "provisional", text: source });
-  const calls: Array<{ text: string; mode?: string }> = [];
-  const projection = createTelegramProjection({ log, chatId: 42,
-    send: async (text, _chatId, mode) => { calls.push({ text, mode }); return 7; },
-    edit: async () => {},
-  });
-  await projection.reconcile("text-1");
-  assert.deepEqual(calls, [{ text: formatMarkdownForTelegram(source), mode: "HTML" }]);
-  assert.match(calls[0]!.text, /<b>加粗<\/b>/);
-  assert.equal((await log.read()).find((event) => event.type === "text_snapshot")?.text, source);
+test("native nested quote pagination retains all nested text and Unicode within page bounds", () => {
+  const repeated = "长引用内容😀";
+  const body = "> 外层引用\n>\n> > 内层 **加粗**\n> >\n> > - 列表中的引用\n> >   > 更深层内容\n> >\n> > " + repeated.repeat(1200);
+  const pages = planTelegramMarkdown(body);
+  assert.ok(pages.length > 1);
+  assert.ok(pages.every((page) => page.length <= 3500 && !/[\uD800-\uDBFF]$/.test(page)));
+  const joined = pages.join("");
+  for (const text of ["外层引用", "内层 **加粗**", "列表中的引用", "更深层内容"]) assert.ok(joined.includes(text));
+  assert.equal(joined.match(/长引用内容😀/g)?.length, 1200);
 });

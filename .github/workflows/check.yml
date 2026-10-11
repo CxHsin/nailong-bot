@@ -20,6 +20,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run docs:check
       - name: Install file tool dependencies
         run: |
           sudo apt-get update

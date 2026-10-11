@@ -12,9 +12,7 @@ export type Request = { modelAlias?: string; contextBudgetBoost?: boolean; id: s
   onProgress?: (progress: RunProgress) => void;
   signal?: AbortSignal;
   bindSteering?: import("../host/host.js").RunExecutionContext["bindSteering"];
-  onModelInput?: () => Promise<void>;
-  /** Compatibility callback for the old log-backed Telegram application. */
-  onText?: (textSegmentId: string) => Promise<void> };
+  onModelInput?: () => Promise<void> };
 export class DeliveryRejected extends Error {
   constructor(message: string, readonly retryAfterMs?: number) { super(message); }
 }

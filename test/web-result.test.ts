@@ -1,3 +1,4 @@
+import { closeFixture } from "./fixtures/cleanup.js";
 import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -5,9 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createTelegramHostFixture } from "./fixtures/telegram-host.js";
 import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
-import { createApp } from "../src/application/app.js";
 import { createBoundedRead } from "../src/agent/archive-read.js";
 import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 import { webReadPath, webResultPreview, webResultBody } from "../src/runtime/web-result.js";
@@ -115,7 +115,7 @@ test("single long web line can be read without cutting Unicode code points", asy
 
 test("production Pi forwards live previews, appends decoded reads and retains the first recorded web view", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "web-pi-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+
   t.mock.method(Client.prototype, "connect", async () => {});
   t.mock.method(Client.prototype, "close", async () => {});
   t.mock.method(Client.prototype, "listTools", async () => ({ tools: ["search", "fetch_content"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }));
@@ -147,22 +147,29 @@ test("production Pi forwards live previews, appends decoded reads and retains th
         assert.ok(data.messages.some((message: { role: string; content: string }) =>
           message.role === "tool" && /# 文档\n定义：chief-of-staff/.test(message.content)));
       }
-      delta = { content: JSON.stringify({ type: "final", text: "已核查" }) };
+      delta = { content: "已核查" };
     }
     res.writeHead(200, { "content-type": "text/event-stream" });
     res.end(`data: ${JSON.stringify({ id: "fixture", choices: [{ index: 0, delta, finish_reason: delta.tool_calls ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const agent = await createPiAgent({ dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", tinyfishKey: "test",
-    modelBaseUrl: `http://127.0.0.1:${address.port}`, outputProtocol: "json-text-v2", memoryBootstrap: false });
-  t.after(() => agent.close());
-  const replies: string[] = [];
-  const app = createApp({ ownerId: 42, dataDir: dir, answer: agent.answer, send: async (text) => { replies.push(text); } });
-  await app.handle({ userId: 42, chatType: "private", messageId: 1, text: "查定义" });
-  await app.handle({ userId: 42, chatType: "private", messageId: 2, text: "继续" });
+  let shutdown = async () => {};
+  t.after(() => closeFixture({ server, dir, shutdown: () => shutdown() }));
+  const app = await createTelegramHostFixture(t, { agentOptions: { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", tinyfishKey: "test",
+    modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false } });
+
+  shutdown = () => app.close();
+  const replies = app.sent;
+  await app.send("查定义", { messageId: 1 });
+  await app.send("继续", { messageId: 2 });
   assert.equal(calls, 4);
-  assert.deepEqual(replies, ["已核查", "已核查"]);
+  const facts = await app.rootLog.read();
+  const finalRuns = new Set(facts.filter((event) => event.type === "run_succeeded" && (event.result as { finalText?: string })?.finalText === "已核查").map((event) => event.runId));
+  const finalDeliveries = facts.filter((event) => event.type === "delivery_succeeded" && finalRuns.has(event.runId));
+  assert.equal(finalDeliveries.length, 2);
+  for (const fact of finalDeliveries) assert.ok(app.deliveries.some((page) => page.messageId === fact.telegramMessageId && page.text === "已核查"));
+  assert.ok(replies.some((text) => text.includes("运行进展")), "tool progress remains visible alongside final pages");
 });

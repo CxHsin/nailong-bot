@@ -1,17 +1,17 @@
+import { closeFixture } from "./fixtures/cleanup.js";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
-import { createApp } from "../src/application/app.js";
-import { createPiAgent } from "../src/agent/pi-agent.js";
+import { createTelegramHostFixture } from "./fixtures/telegram-host.js";
 import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
 
 for (const tinyfishUnavailable of [false, true]) {
   test(`owner can use local files through real pi when TinyFish is ${tinyfishUnavailable ? "unavailable" : "not configured"}`, { timeout: 60_000 }, async (t) => {
     const dir = await mkdtemp(join(tmpdir(), "pi-local-files-"));
-    t.after(() => rm(dir, { recursive: true, force: true }));
+
     const dataDir = join(dir, "data");
     const note = join(dataDir, "笔记", "idea.md");
     const actions = [
@@ -41,30 +41,29 @@ for (const tinyfishUnavailable of [false, true]) {
         ? { tool_calls: [{ index: 0, id: "save_1", type: "function", function: {
           name: selected!.name, arguments: JSON.stringify(selected!.args),
         } }] }
-        : { content: JSON.stringify({ type: "final", text: `文件操作结果：${last.content}` }) };
+        : { content: `文件操作结果：${last.content}` };
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(`data: ${JSON.stringify({ id: "test", choices: [{ index: 0, delta, finish_reason: action ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    const agent = await createPiAgent({ outputProtocol: "json-text-v2",
-      dataDir, promptFile: "system-prompt.md", deepseekKey: "test",
+    let shutdown = async () => {};
+    t.after(() => closeFixture({ server, dir, shutdown: () => shutdown() }));
+    const app = await createTelegramHostFixture(t, { agentOptions: { dataDir, promptFile: "system-prompt.md", deepseekKey: "test",
       modelBaseUrl: `http://127.0.0.1:${address.port}`,
       ...(tinyfishUnavailable ? { tinyfishKey: "test", tinyfishUrl: `http://127.0.0.1:${address.port}/mcp` } : {}),
-    });
-    t.after(() => agent.close());
-    const replies: string[] = [];
-    const app = createApp({ ownerId: 42, dataDir, answer: agent.answer,
-      send: async (text) => { replies.push(text); },
-    });
-    await app.handle({ userId: 42, chatType: "private", text: "将上述结论保存到本地", messageId: 1 });
+    } });
+
+      shutdown = () => app.close();
+    const replies = app.sent;
+    await app.send("将上述结论保存到本地", { messageId: 1 });
     assert.equal(await readFile(note, "utf8"), "# Idea\n把有趣的结论保留下来。\n");
     assert.match(replies.at(-1) ?? "", /Successfully wrote/);
     assert.deepEqual([...offeredTools].sort(), ["edit", "read", "tool_call", "tool_search", "web_search", "write"]);
     for (const [index, action] of actions.slice(1).entries()) {
-      await app.handle({ userId: 42, chatType: "private", text: action.text, messageId: index + 2 });
+      await app.send(action.text, { messageId: index + 2 });
       assert.match(replies.at(-1) ?? "", action.expected, action.name);
     }
     assert.equal(await readFile(note, "utf8"), "# Idea\n把有趣的结论保留下来，供后续思考。\n");
