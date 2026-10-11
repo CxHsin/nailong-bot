@@ -1,65 +1,37 @@
 # Nailong Bot Agent Context
 
-Nailong Bot is a personal agent whose Host runs conversations and durable runs, while channels such as Telegram and CLI accept input and project progress and delivery back to people.
+Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI share a Host, with main conversation independent of durable Tasks. Current architecture: [ADR-0007](docs/adr/0007-personal-host-native-sessions.md).
 
 ## Language
 
-**Host**:
-The channel-independent runtime that accepts a message input, owns the conversation and run lifecycle, invokes the agent, records runtime facts, and emits ordered run events.
-_Avoid_: Telegram bot, daemon (unless referring to a future deployment shape)
+**Host**: Channel-independent owner of durable inputs, Tasks, scheduling, authorization, recovery, acceptance and Delivery. Business records are direct SQLite state.
 
-**Channel**:
-A user-facing adapter that authenticates an actor, normalizes input, and projects Host events into a channel's interaction model.
-_Avoid_: transport (which may refer only to a low-level API)
+**Channel**: Authenticates input and delivers plain text or files. Owns no agent loop or task state.
 
-**Conversation**:
-A durable cross-channel identity that selects the history and context projection used for a sequence of runs.
-_Avoid_: chat (unless referring to a channel UI)
+**Conversation**: Durable identity selecting a main Pi Session and scoped Akasha sources. Actor identity separately authorizes task operations.
 
-**Run**:
-One ordered attempt by the Host to process an input and produce a result or terminal failure.
-_Avoid_: request (except for compatibility with existing runtime events)
+**Task**: Durable user obligation: goal, current requirements and revision, resources, executor, status and result. Its identity survives attempts and restart. Avoid Run as a synonym.
 
-**Follow-up**:
-A subsequent user input held until the current work finishes, then processed in its own Run in the same Conversation, in receipt order. Ordinary user messages received during active work are Follow-ups by default.
-_Avoid_: steering input
+**Attempt**: One executor invocation belonging to a Task, with actual execution identity and usage.
 
-**Steer**:
-An explicit user input that changes the direction or constraints of an active Run after its current batch of tools completes. Pending Steers are presented together in receipt order at the next execution boundary.
-_Avoid_: follow-up, immediate interruption
+**Session**: Pi-native model exchanges and compaction. Main and task Sessions are separate; Session completion proves neither task completion nor process termination.
 
-**Stop**:
-A user action that stops active work and cancels pending user inputs accepted before it in the same Conversation, including queued commands. Later inputs wait for the stopped work to exit; completed actions and their effects are not rolled back.
-_Avoid_: reset, undo
+**Steer**: A requirement appended to an identified Task. Receipt, acknowledgement and application are distinct. Acceptance uses current revision; existing effects remain.
 
-**Content Part**:
-A typed text or image item in a normalized user or assistant message, independent of any channel SDK.
-_Avoid_: Telegram message payload
+**Stop**: Durable cancellation of an identified Task. Actual termination releases resources; unknown effects remain waiting and occupied. Other independent Tasks remain active.
 
-**Progress Event**:
-An ordered semantic event describing model-visible summary, runtime fact, or run state for channel projection; it is not automatically part of model context.
-_Avoid_: status string
+**Resource**: Canonical workspace/path whose overlap serializes conflicting Tasks. Unknown occupancy is not free.
 
-**Run Summary**:
-A short, read-only explanation produced by an auxiliary model from committed runtime facts during a silent active Run. Its provenance is recorded; valid settled summaries may enter Context Projection, but never Akasha memory content.
-_Avoid_: reasoning, execution result
+**Action Authorization**: Exact action kind, target, parameters and content under a Task revision. A consumed approval cannot dispatch twice; changed scope needs confirmation.
 
-**Settled Text**:
-An assistant text unit committed after a normal model step. Text accompanying tool calls is progress; text ending a step without tool calls is the final answer. Draft deltas are previews rather than Settled Text.
-_Avoid_: delivered message (settlement does not prove delivery)
+**Plan**: Explicit user instruction with time/dependency trigger, timezone, deadline and missed-trigger policy. Consumption and Task creation are atomic.
 
-**Context Projection**:
-The Provider-aware transformation from durable runtime records into the exact model input items for one request.
-_Avoid_: chat history (which includes records that may never be sent to a model)
+**Acceptance**: Independent inspection of actual artifacts and command evidence against current requirements. Idle and executor assertions alone cannot establish success.
 
-**Recent Turn**:
-One user input and its replayable assistant messages and paired tool exchanges.
-_Avoid_: model step, three messages
+**Delivery**: Durable text/file send with sent/rejected/unknown outcome, separate from Task success. Split pages have individual outcomes.
 
-**Active Context**:
-The bounded conversation state available to the model for continuing work, including retained original turns, supporting material and compaction state when present. Its continuity survives a process restart through a durable start boundary, recorded model-visible views and frozen compaction facts; validated snapshots are disposable derived caches. Older details remain recoverable from durable history and Akasha. Exact original coverage, partial original ranges and lossy summary involvement have distinct roles in memory recovery.
-_Avoid_: complete runtime history, server-side KV cache
+**Akasha**: Original-source retrieval, graph associations, exclusion and delivered-turn learning. Owns neither scheduling nor Pi context replay. No stable preference profile.
 
-**Delivery Fact**:
-A durable record of a channel delivery attempt and its known outcome, scoped to a run result and channel target.
-_Avoid_: assistant message (which may exist before delivery)
+**Context Exclusion**: A source no longer enters memory/model input. Historical facts remain; affected Sessions retire and source-dependent obligations stop or pause conservatively.
+
+**Historical Run / Context Projection / Active Context**: Terms for retired event-log execution and retained offline interpretation. Old Runs do not become new Tasks; native Pi Sessions own online continuity.

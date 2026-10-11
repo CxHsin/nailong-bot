@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import type { McpConfig } from "./mcp-catalog.js";
-import type { SkillSource } from "./skills.js";
+export type SkillSource = { name: string; path: string };
 
 export type CapabilityConfig = { mcpServers?: McpConfig[]; skillSources?: SkillSource[]; executionTool?: boolean };
 const schema = Type.Object({

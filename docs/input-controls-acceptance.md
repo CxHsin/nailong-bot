@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Follow-up、Steer 与 Stop 验收
 
 规格 [#136](https://github.com/CxHsin/nailong-bot/issues/136)，实现任务 [#137](https://github.com/CxHsin/nailong-bot/issues/137)。验收日期：2026-10-10；开发分支：development。没有部署或重启生产 Bot。

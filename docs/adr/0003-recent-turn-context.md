@@ -2,6 +2,8 @@
 status: superseded
 ---
 
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](../personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Restore three recent turns for the personal Agent
 
 Superseded for production Host by [ADR-0004](0004-continuous-active-context.md). The legacy createApp adapter was retired in #149 after auditing callers and migrating useful regression coverage. Recent-range interpretation remains for historical data, initialization and offline comparisons; the text below records the previous production policy, not a current execution entry.

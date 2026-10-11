@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](../personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Akashic Agent 的模型进展与 UI 投影调研
 
 调研日期：2026-10-04。目标仓库：[`kachofugetsu09/akashic-agent`](https://github.com/kachofugetsu09/akashic-agent)，固定到提交 [`983a077`](https://github.com/kachofugetsu09/akashic-agent/tree/983a077)。只检查该仓库的 README、源码、测试和设计文档。

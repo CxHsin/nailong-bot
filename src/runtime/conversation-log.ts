@@ -40,10 +40,11 @@ export function conversationUserId(conversationId: string): number {
   return match ? Number(match[1]) : Number.parseInt(createHash("sha256").update(conversationId).digest("hex").slice(0, 12), 16);
 }
 
-export function conversationLog(log: RuntimeLog, conversationId: string): RuntimeLog {
+export function conversationLog<T extends Pick<RuntimeLog, 'read' | 'append'>>(log: T, conversationId: string): T {
+  const optional = log as T & Pick<RuntimeLog, 'appendBatch' | 'readSince'>;
   const decorate = (event: Omit<StoredEvent, "at">) => ({ ...event, conversationId });
   return { ...log, read: async () => conversationEvents(await log.read(), conversationId),
     append: (event) => log.append(decorate(event)),
-    ...(log.appendBatch ? { appendBatch: (events: Array<Omit<StoredEvent, "at">>) => log.appendBatch!(events.map(decorate)) } : {}),
-    ...(log.readSince ? { readSince: async (sequence: number) => conversationEvents(await log.readSince!(sequence), conversationId) } : {}) };
+    ...(optional.appendBatch ? { appendBatch: (events: Array<Omit<StoredEvent, "at">>) => optional.appendBatch!(events.map(decorate)) } : {}),
+    ...(optional.readSince ? { readSince: async (sequence: number) => conversationEvents(await optional.readSince!(sequence), conversationId) } : {}) };
 }

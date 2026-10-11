@@ -15,7 +15,7 @@ export function literalTerms(text: string): string[] {
 }
 export type MemoryMode = "akasha" | "dense";
 export type MemorySearchProgress = { stage: "loading" | "embedding" | "scanning" | "matching" | "associations" | "ranking"; checked?: number; total?: number };
-export function createMemoryProjection(options: { log: RuntimeLog; dataDir: string; userId: number; embedding?: ReturnType<typeof createEmbeddingClient>; dynamics?: Partial<MemoryDynamics>; now?: () => number; recall?: Partial<RecallConfig>; mode?: MemoryMode }) {
+export function createMemoryProjection(options: { log: Pick<RuntimeLog, 'read'>; dataDir: string; userId: number; embedding?: ReturnType<typeof createEmbeddingClient>; dynamics?: Partial<MemoryDynamics>; now?: () => number; recall?: Partial<RecallConfig>; mode?: MemoryMode }) {
   const mode = options.mode ?? "akasha";
   const dynamics = memoryDynamics(options.dynamics);
   let cacheRebuilt = false;
