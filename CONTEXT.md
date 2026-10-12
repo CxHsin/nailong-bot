@@ -10,6 +10,8 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Standing Responsibility**: An ongoing duty explicitly entrusted by the user to the Personal Agent, within an authorized scope. It calls for continued follow-through and selective reporting of meaningful developments or decisions needing the user.
 
+**Memory Context**: Original historical expressions and experiences recalled as relevant background for the current question. Their source, role and time matter; they do not define a fixed user personality or replace current instructions and factual evidence.
+
 **Host**: Channel-independent owner of durable inputs, Tasks, scheduling, authorization, recovery, acceptance and Delivery. Business records are direct SQLite state.
 
 **Channel**: Authenticates input and delivers plain text or files. Owns no agent loop or task state.
