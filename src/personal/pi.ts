@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, realpath, lstat, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, lstat, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   AuthStorage, createAgentSession, DefaultResourceLoader, ModelRegistry, SessionManager, SettingsManager,
@@ -13,6 +13,7 @@ import type { PersonalMemory } from './memory.js';
 import type { CapabilityConfig } from '../agent/capability-config.js';
 import { connectTinyfish } from '../agent/tinyfish.js';
 import { connectMcp } from '../agent/mcp-catalog.js';
+import { nativeCapabilityRuntime, type NativeCapability, type CapabilityScope, type NativeSearchOptions } from '../agent/native-tool-search.js';
 
 export type PersonalPiOptions = ModelOptions & CapabilityConfig & {
   dataDir: string; promptFile: string; memory?: PersonalMemory;
@@ -20,6 +21,8 @@ export type PersonalPiOptions = ModelOptions & CapabilityConfig & {
   limits?: { timeoutMs?: number; maxTokens?: number; maxTurns?: number; maxRetries?: number };
   verify?: (task: Task, result: TaskResult) => Promise<boolean>;
   taskForIdentity?: (identity: Record<string, unknown>) => Task | undefined;
+  capabilityCatalog?: (scope: CapabilityScope) => NativeCapability[] | Promise<NativeCapability[]>;
+  nativeSearch?: NativeSearchOptions;
 };
 
 const reply = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: undefined });
@@ -81,6 +84,15 @@ export async function createPersonalPi(options: PersonalPiOptions) {
     const rememberedModel = manager.getEntries().findLast(entry => entry.type === 'custom' && entry.customType === 'nailong_model_alias');
     const alias = selectedModels.get(id) ?? (rememberedModel?.type === 'custom' && typeof rememberedModel.data === 'string' ? rememberedModel.data : undefined);
     const selected = models.select(alias);
+    const scope = { sessionId: id, cwd, conversationId };
+    const additional = await options.capabilityCatalog?.(scope) ?? [];
+    const native = selected.native ? nativeCapabilityRuntime(scope,
+      tools.filter(tool => ['read', 'write', 'edit', 'bash', 'task_control', 'verify_result'].includes(tool.name) || tool.name.startsWith('memory_')),
+      [...tools.filter(tool => !['read', 'write', 'edit', 'bash', 'task_control', 'verify_result'].includes(tool.name) && !tool.name.startsWith('memory_')).map(tool => ({ tool })), ...additional],
+      { maxTokens: options.limits?.maxTokens, maxRequests: options.limits?.maxTurns, ...options.nativeSearch }) : undefined;
+    const unavailable = defineTool({ name: 'tool_search', label: 'Native discovery unavailable', description: 'Report whether native tool discovery is available for this model.',
+      parameters: Type.Object({ query: Type.String() }), async execute() { throw new Error('当前模型或端点未启用原生工具搜索，专用能力不可用；请配置明确支持的 Responses 或 Anthropic 端点。'); } });
+    const executableTools = native?.tools ?? (additional.length ? [...tools, unavailable] : tools);
     if (alias && (!rememberedModel || rememberedModel.type !== 'custom' || rememberedModel.data !== alias)) manager.appendCustomEntry('nailong_model_alias', alias);
     const loader = new DefaultResourceLoader({ cwd, agentDir: options.dataDir, settingsManager: settings,
       noExtensions: true, noSkills: true, additionalSkillPaths: options.skillSources?.map(source => source.path),
@@ -90,7 +102,10 @@ export async function createPersonalPi(options: PersonalPiOptions) {
     const { session } = await createAgentSession({ cwd, agentDir: options.dataDir, authStorage: auth, modelRegistry: registry,
       model: selected.model, thinkingLevel: selected.model.reasoning ? 'low' : 'off',
       settingsManager: settings, resourceLoader: loader, sessionManager: manager,
-      tools: tools.map(tool => tool.name), customTools: tools });
+      tools: executableTools.map(tool => tool.name), customTools: executableTools });
+    native?.attach(session, registry, settings, model => models.models.some(profile => {
+      const candidate = models.select(profile.alias); return candidate.native && candidate.model.provider === model.provider && candidate.model.id === model.id;
+    }));
     endedSessions.delete(id); active.set(id, session); return session;
   }
 
@@ -383,6 +398,7 @@ export async function createPersonalPi(options: PersonalPiOptions) {
     const directories = sessionId ? [sessionDirectory(sessionId)] : (await readdir(sessionsRoot).catch(() => [] as string[])).map(name => join(sessionsRoot, name));
     for (const directory of directories) {
       await mkdir(directory, { recursive: true });
+      await unlink(join(directory, 'native-pause.json')).catch(error => { if (error.code !== 'ENOENT') throw error; });
       const files = (await readdir(directory)).filter(name => name.endsWith('.jsonl'));
       let prior: string[] = []; try { prior = JSON.parse(await readFile(join(directory, 'retired.json'), 'utf8')).sessionFiles ?? []; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       await writeFile(join(directory, 'retired.json'), JSON.stringify({ reason, at: new Date().toISOString(), sessionFiles: [...new Set([...prior, ...files])] }));

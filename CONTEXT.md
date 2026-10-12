@@ -24,6 +24,8 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Session**: Pi-native model exchanges and compaction. Main and task Sessions are separate; Session completion proves neither task completion nor process termination.
 
+**Native Tool Discovery**: Supported configured Responses/Anthropic profiles use per-Session provider adapters and versioned native history; deferred execution requires a current-context discovery and its own authorization. See [implementation and verification limits](docs/native-tool-search.md).
+
 **Steer**: A requirement appended to an identified Task. Receipt, acknowledgement and application are distinct. Acceptance uses current revision; existing effects remain.
 
 **Stop**: Durable cancellation of an identified Task. Actual termination releases resources; unknown effects remain waiting and occupied. Other independent Tasks remain active.
