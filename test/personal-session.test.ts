@@ -146,13 +146,22 @@ test('Host gates exact commands, resumes files once, and keeps opaque cancellati
   const pi = await createPersonalPi({ dataDir, promptFile, executionTool: true,
     shellPath: process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : '/bin/bash',
     modelConfiguration: { defaultModel: 'local', models: [{ alias: 'local', api: 'openai-completions', baseUrl: `http://127.0.0.1:${address.port}`, model: 'local', apiKey: 'test' }] } });
-  const host = new PersonalHost({ store: new PersonalStore(dataDir), dialogue: pi.dialogue, executor: pi.executor });
+  const host = new PersonalHost({ store: new PersonalStore(dataDir), dialogue: pi.dialogue, executor: { ...pi.executor,
+    async execute(request) {
+      if (request.task.permission?.mode !== 'trusted') {
+        await host.workContext({ conversationId: request.task.conversationId, actorId: request.task.actorId, inputId: 'grant-proposal', text: 'request trusted execution' }, request.task.id).proposePermission({ mode: 'trusted', readRoots: [request.task.cwd!], writeRoots: [request.task.cwd!], network: false, expiresAt: Date.now() + 60_000 });
+        const error = new Error('等待明确可信本机授权'); error.name = 'ExecutorAttentionError'; throw error;
+      }
+      return pi.executor.execute(request);
+    } } });
   try {
     const input = { conversationId: 'c', actorId: '1', inputId: '1', text: '写文件并运行命令' };
     const accepted = await host.submit(input); assert.ok(accepted.taskId, accepted.text);
     await host.waitForIdle();
     assert.equal(host.getTask(accepted.taskId)?.status, 'waiting');
     await assert.rejects(readFile(join(directory, 'work', 'approved.txt')));
+    const grant = host.store.listActions(accepted.taskId).find(action => action.action.kind === 'permission-grant'); assert.ok(grant);
+    await host.submit({ ...input, inputId: 'grant-confirmation', text: `确认动作 ${grant.id}` }); await host.waitForIdle();
     const before = await stat(join(directory, 'work', 'before.txt'));
     const action = host.store.listActions(accepted.taskId).find(action => action.status === 'pending');
     assert.ok(action, JSON.stringify(host.getTask(accepted.taskId)));

@@ -9,6 +9,7 @@ import { createPersonalMemory } from './memory.js';
 import { HerdrExecutor } from './herdr.js';
 import { PersonalPlans } from './plans.js';
 import { VerificationChecks } from './verification.js';
+import { requirePermission, permissionError } from './permissions.js';
 import { freezeArtifacts } from './artifacts.js';
 import { migratePersonalHistory, readHistoricalSource } from './migration.js';
 import type { Delivery, Dialogue, TaskExecutor, Task, Usage } from './types.js';
@@ -48,13 +49,24 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
     });
     pi = await createPersonalPi({ ...capabilities, dataDir, promptFile, modelConfiguration, memory,
       taskForIdentity: identity => store.getTask(String(identity.taskId)),
+      workContext: (task, originId) => host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: originId, text: task.goal }, task.id),
       tinyfishKey: env.TINYFISH_API_KEY?.trim(), shellPath: env.AGENT_SHELL_PATH?.trim(),
       limits: { timeoutMs: positive(env, 'AGENT_MODEL_TIMEOUT_MS', 120_000),
         maxTurns: positive(env, 'AGENT_MAX_TURNS', 40), maxTokens: positive(env, 'AGENT_MAX_TOKENS', 500_000) } });
     const agent = pi;
     let plans!: PersonalPlans;
     const checks = new VerificationChecks(env.AGENT_VERIFICATION_CHECKS ? JSON.parse(env.AGENT_VERIFICATION_CHECKS) : [],
-      { preauthorized: true, timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000) });
+      { timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000),
+        async runCommand(task, command, context) {
+          const current = host.getTask(task.id) ?? task; const grant = requirePermission(current);
+          if (grant.mode !== 'trusted') throw permissionError('独立检查没有满足工作权限的已验证命令后端；未派发，不能绕过受限权限');
+          const work = host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: `verification:${task.revision}`, text: task.goal }, task.id);
+          const callId = `check:${JSON.stringify(command)}`;
+          return work.dispatch(callId, { kind: 'verification-command', target: task.cwd!, parameters: { command: command.command, args: command.args }, content: '已配置的独立检查，在明确授予的可信本机权限内运行' }, async () => {
+            const trusted = new VerificationChecks([command], { preauthorized: true, timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000) });
+            return (await trusted.run(current, context))[0]!;
+          });
+        } });
     async function verifyCurrent(task: Task, evidence: Parameters<typeof agent.verify>[1], signal?: AbortSignal, onUsage?: (usage: Usage) => void) {
       const current = host.getTask(task.id) ?? task;
       if (current.contextExcluded) return { text: '相关来源已排除，旧任务不会继续验收或执行。', verified: false, partial: true };

@@ -200,3 +200,21 @@ for (const phase of ['execution', 'verification'] as const) {
     }
   });
 }
+
+test('production configured verification cannot bypass restricted work execution permission', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nailong-check-permission-')); const cwd = join(directory, 'work');
+  const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help.');
+  const server = createTestServer(t, async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    if (last.role === 'tool') return sendChatCompletion(res, 'done');
+    const main = wire.tools.some((tool: { function: { name: string } }) => tool.function.name === 'task_control');
+    const name = main ? 'task_control' : 'write'; const args = main ? { kind: 'start', goal: 'create checked result', cwd } : { path: 'result.txt', content: '42' };
+    sendChatCompletion(res, '', [{ index: 0, id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions', MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_VERIFICATION_CHECKS: JSON.stringify([{ command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("unsafe-check.txt", "ran")'] }]) });
+  t.after(async () => { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); });
+  const result = await runtime.host.submit({ conversationId: 'c', actorId: 'u', inputId: '1', text: 'create checked result' }); await runtime.host.waitForIdle();
+  assert.equal(await readFile(join(cwd, 'result.txt'), 'utf8'), '42'); await assert.rejects(readFile(join(cwd, 'unsafe-check.txt')), { code: 'ENOENT' });
+  assert.equal(runtime.host.getTask(result.taskId!)?.status, 'waiting'); assert.match(runtime.host.getTask(result.taskId!)?.error ?? '', /不能绕过受限权限/);
+});

@@ -35,9 +35,9 @@ Telegram 使用普通消息和文件；长文分段，不显示流式草稿、�
 
 Host 直接保存 Task/Attempt、输入、授权、计划和 Delivery；Pi 原生 Session 保存模型交换和 compaction。Akasha 专注原话检索、图关联、遗忘及送达后学习，不在工具循环重放历史，不生成稳定偏好档案。
 
-文件任务限指定工作目录，保护运行数据、链接和硬链接。Skills 作为 Pi 原生资源加载，MCP 直接连接，见 [能力配置](docs/capabilities.md)。Shell/MCP 当前按确切目标、参数和内容确认并持久消费批准，任务要求变化使旧批准失效。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
+本体可直接处理授权范围内的文件，默认受限；缺少满足边界的已验证后端时命令受阻。一次工作明确授予可信本机权限后普通命令自主执行，实际继承 Host 权限；删除原件通过受控接口具体确认。原生发现不授予执行权限，MCP 独立检查边界和具体动作。详见 [能力与工作权限](docs/capabilities.md)。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
 
-`AGENT_HERDR_SESSION` 必须指定专用具名会话；`AGENT_HERDR_KIND=codex` 使用 workspace-write/on-request。Claude 缺少 verified policy 时拒绝启动。Host 读取真实成果并检查，idle/done 不算成功。外部网络行为仍依赖执行器可落实的权限边界。
+`AGENT_HERDR_SESSION` 必须指定专用具名会话。herdr 在创建工作区前检查实际权限；没有满足工作边界的已验证策略或明确可信授权时受阻。可信模式下 Codex 使用 workspace-write/on-request，但不将这些参数描述为完整读取隔离。Claude 缺少 verified policy 时拒绝启动。Host 读取真实成果并检查，idle/done 不算成功。
 
 计划只接受用户明确要求，包含目标、时间或前置任务、时区和 missed skip/run/ask 策略。支持查询、修改、暂停、恢复、取消。触发消费与创建 Task 同一事务，重启不重复触发。服务停机期间不执行，重启按错过策略处理。
 

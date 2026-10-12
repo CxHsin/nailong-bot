@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { resolve, sep, dirname, basename, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { PersonalStore } from './store.js';
-import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor } from './types.js';
+import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor, WorkToolContext, PermissionGrant } from './types.js';
 
 export interface PersonalHostOptions { store: PersonalStore; dialogue: Dialogue; executor: TaskExecutor; maxConcurrent?: number; maxDurationMs?: number; maxTokens?: number; maxAttempts?: number; maxDialogueAttempts?: number; recoveryPollMs?: number; now?: () => number; interruptDialogue?(): Promise<void>; handleDecision?(input: PersonalInput, decision: Decision): Promise<PersonalResponse> }
 function physicalResource(path: string): string {
@@ -30,6 +30,39 @@ export class PersonalHost {
   constructor(private readonly options: PersonalHostOptions) { this.store = options.store; this.now = options.now ?? Date.now; }
   getTask(id: string) { return this.store.getTask(id); }
   listTasks(conversationId?: string) { return this.store.listTasks(conversationId); }
+  /** Direct work shares the main Session, but owns a separate durable workspace. */
+  workContext(input: PersonalInput, taskId?: string, eventId?: string): WorkToolContext {
+    taskId ??= input.replyTaskId;
+    let task = taskId ? this.getTask(taskId) : this.listTasks(input.conversationId).find(t => t.direct && t.originInputId === input.inputId && t.actorId === input.actorId && !t.cancelRequested && !t.contextExcluded);
+    if (!task) {
+      if (taskId) throw new Error('工作不存在');
+      task = this.createTask(input, { kind: 'start', goal: input.text });
+      task.direct = true; task.originInputId = input.inputId; task.status = 'waiting'; task.sessionId = this.store.conversationSession(input.conversationId);
+      task.permission = { mode: 'restricted', readRoots: [task.cwd!], writeRoots: [task.cwd!], network: false,
+        expiresAt: this.now() + 86_400_000, revision: task.revision, sourceInputId: input.inputId };
+      this.store.putTask(task);
+    }
+    const id = task.id;
+    const current = () => {
+      const latest = this.getTask(id);
+      if (!latest || latest.actorId !== input.actorId || latest.conversationId !== input.conversationId || latest.cancelRequested || latest.contextExcluded || latest.status === 'cancelled') throw new Error('工作已取消或身份无效');
+      return latest;
+    };
+    return { task, eventId, current, requestAction: action => this.requestAction(id, action),
+      proposePermission: grant => this.requestAction(id, { kind: 'permission-grant', target: id, parameters: { grant, proposedInputId: input.inputId }, content: `确认一次工作权限；可信 Shell 继承 Host 本机权限，不能强制禁止删除文件或外发；受控删除和发送另需明确授权：${JSON.stringify(grant)}` }),
+      dispatch: async <T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T> => {
+        const latest = current(); const dispatchId = `${id}:${eventId ?? input.inputId}:${callId}`;
+        const reserved = this.store.reserveActionDispatch({ id: dispatchId, taskId: id, eventId, revision: latest.revision,
+          action, status: 'dispatching', startedAt: this.now() });
+        if (!reserved.created) {
+          if (reserved.record.status === 'succeeded' && reserved.record.evidence !== undefined) return JSON.parse(reserved.record.evidence) as T;
+          throw new Error('该动作已有派发记录；不能自动重复副作用，需核对已有结果');
+        }
+        try { const result = await execute(); this.store.finishActionDispatch(dispatchId, 'succeeded', JSON.stringify(result ?? null)); return result; }
+        catch (error) { this.store.finishActionDispatch(dispatchId, 'unknown', String(error)); throw error; }
+      }, send: text => this.publishNotification(current(), text, id),
+    };
+  }
   subscribe(listener: (delivery: Delivery) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   delivery(id: string) { return this.store.getDelivery(id); }
   pendingDeliveries(conversationId?: string) { return this.store.listDeliveries(conversationId).filter(d => d.status === 'pending'); }
@@ -51,7 +84,7 @@ export class PersonalHost {
       const previous = this.store.getInput(key); if (previous) return previous;
       if (this.store.inputAttempts(key) >= (this.options.maxDialogueAttempts ?? 3)) throw new Error('输入处理尝试次数已达上限；输入已保存，请检查故障后发送新消息。');
       this.store.beginInput(key);
-      const decision = await this.options.dialogue.decide(input, { tasks: this.listTasks(input.conversationId).filter(task => task.actorId === input.actorId && !task.contextExcluded), sessionId: this.store.conversationSession(input.conversationId), plans: this.store.listPlans<Plan>().filter(p => p.conversationId === input.conversationId && p.actorId === input.actorId && !p.contextExcluded), actions: this.store.listActions().filter(a => { const task = this.getTask(a.taskId); return task?.conversationId === input.conversationId && task.actorId === input.actorId && !task.contextExcluded; }) }).catch(error => { this.store.inputFailure(key, String(error)); throw error; });
+      const decision = await this.options.dialogue.decide(input, { tasks: this.listTasks(input.conversationId).filter(task => task.actorId === input.actorId && !task.contextExcluded), sessionId: this.store.conversationSession(input.conversationId), work: () => this.workContext(input), plans: this.store.listPlans<Plan>().filter(p => p.conversationId === input.conversationId && p.actorId === input.actorId && !p.contextExcluded), actions: this.store.listActions().filter(a => { const task = this.getTask(a.taskId); return task?.conversationId === input.conversationId && task.actorId === input.actorId && !task.contextExcluded; }) }).catch(error => { this.store.inputFailure(key, String(error)); throw error; });
       if (this.closing) throw new Error('Host shutdown; accepted input retained');
       if (decision.kind === 'start') return this.enqueueTask(input, decision);
       const response = await this.apply(input, decision);
@@ -90,6 +123,7 @@ export class PersonalHost {
     const task: Task = { id, conversationId: input.conversationId, actorId: input.actorId, goal: decision.goal,
       resources: [...new Set([...paths, ...projects])],
       executor: decision.executor ?? 'local', cwd, sessionId: randomUUID(), status: 'queued', createdAt: this.now(), updatedAt: this.now(), requirements: [], revision: 0, resourceHeld: false, deadline: decision.deadline };
+    task.permission = { mode: 'restricted', readRoots: [cwd], writeRoots: [cwd], network: false, expiresAt: this.now() + 86_400_000, revision: 0, sourceInputId: input.inputId };
     this.store.putTask(task); return task;
   }
   private async apply(input: PersonalInput, decision: Decision): Promise<PersonalResponse> {
@@ -120,7 +154,7 @@ export class PersonalHost {
     const requirementInput = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
     if (task.requirementInputs?.includes(requirementInput)) return { text: '补充要求已接收；不会重复改向。执行状态可查询。', taskId: task.id };
     (task.requirementInputs ??= []).push(requirementInput);
-    task.requirements.push(requirement); task.revision++; task.updatedAt = this.now(); this.store.putTask(task);
+    task.requirements.push(requirement); task.revision++; if (task.permission) task.permission.revision = task.revision; task.updatedAt = this.now(); this.store.putTask(task);
     const applied = task.status === 'running' ? await this.options.executor.steer?.(task.id, requirement) ?? false : true;
     if (applied) this.appliedRevisions.set(task.id, task.revision);
     return { text: applied ? '补充要求已应用；已有影响未撤销。' : '已接收补充要求，执行者尚未确认应用。', taskId: task.id };
@@ -136,16 +170,26 @@ export class PersonalHost {
       existing.status = 'consumed'; this.store.putAction(existing); return true;
     }
     const record: ActionRecord = { id: randomUUID(), taskId, revision: task.revision, fingerprint, action, status: 'pending', createdAt: this.now() };
+    if (action.kind === 'permission-grant' && typeof action.parameters.proposedInputId === 'string') record.proposedInputId = action.parameters.proposedInputId;
     let delivery!: Delivery;
     this.store.transaction(() => { this.store.putAction(record); delivery = this.makeDelivery(task, `需要确认外部动作 ${record.id}：${action.kind}\n对象：${action.target}\n参数：${JSON.stringify(action.parameters)}\n${action.content}`, task.id); });
     this.notify(delivery); return false;
   }
   authorizeAction(input: PersonalInput, actionId: string, approved: boolean): PersonalResponse {
+    return this.store.transaction(() => {
     const record = this.store.getAction(actionId); const task = record ? this.getTask(record.taskId) : undefined;
     if (!record || !task || task.contextExcluded || task.actorId !== input.actorId || task.conversationId !== input.conversationId || record.revision !== task.revision || record.status !== 'pending') return { text: '确认已失效或不属于此对话，请核对具体动作。' };
+    if (task.cancelRequested || record.proposedInputId === input.inputId) return { text: '权限提案必须等待用户后续明确确认，已取消工作不能扩大权限。' };
     record.status = approved ? 'approved' : 'denied'; this.store.putAction(record);
-    if (approved && task.status === 'waiting' && !task.cancelRequested && !task.resourceHeld && !this.active.has(task.id) && this.store.listAttempts(task.id).length < (this.options.maxAttempts ?? 3)) { task.status = 'queued'; this.store.putTask(task); }
+    if (approved && record.action.kind === 'permission-grant') {
+      const grant = record.action.parameters.grant as Omit<PermissionGrant, 'revision' | 'sourceInputId'>;
+      if (!grant || !['restricted', 'trusted'].includes(grant.mode) || !Array.isArray(grant.readRoots) || !Array.isArray(grant.writeRoots) || ![...grant.readRoots, ...grant.writeRoots].every(path => typeof path === 'string') || typeof grant.network !== 'boolean' || !Number.isFinite(grant.expiresAt) || grant.expiresAt <= this.now()) throw new Error('权限范围无效或已过期');
+      task.permission = { ...grant, readRoots: grant.readRoots.map(physicalResource), writeRoots: grant.writeRoots.map(physicalResource), revision: task.revision, sourceInputId: input.inputId };
+      record.status = 'consumed'; this.store.putAction(record); this.store.putTask(task);
+    }
+    if (approved && !task.direct && task.status === 'waiting' && !task.cancelRequested && !task.resourceHeld && !this.active.has(task.id) && this.store.listAttempts(task.id).length < (this.options.maxAttempts ?? 3)) { task.status = 'queued'; this.store.putTask(task); }
     return { text: approved ? '已确认此项具体动作；目标或参数变化需要重新确认。' : '已拒绝此项动作。', taskId: task.id };
+    });
   }
   private makeDelivery(input: Pick<PersonalInput, 'conversationId' | 'actorId'>, text: string, taskId?: string, artifacts?: string[]): Delivery {
     const delivery: Delivery = { id: randomUUID(), conversationId: input.conversationId, actorId: input.actorId, text, taskId, artifacts,
@@ -242,6 +286,7 @@ export class PersonalHost {
   async recover() {
     for (const delivery of this.store.listDeliveries()) if (delivery.status === 'sending') { delivery.status = 'unknown'; this.store.putDelivery(delivery); }
     for (const task of this.listTasks()) {
+      if (task.direct) continue;
       if (!['running', 'stopping', 'waiting'].includes(task.status) || this.active.has(task.id)) continue;
       const attempt = this.store.listAttempts(task.id).at(-1);
       if (task.contextExcluded) { task.status = task.resourceHeld ? 'waiting' : 'cancelled'; this.store.putTask(task); continue; }

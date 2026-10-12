@@ -10,7 +10,7 @@ import { HerdrExecutor } from '../src/personal/herdr.js';
 test('Host never delivers old idle herdr work as a verified new task', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'personal-herdr-'));
   let name = '';
-  const executor = new HerdrExecutor({ session: 'test', maxDurationMs: 20, pollMs: 1,
+  const executor = new HerdrExecutor({ session: 'test', executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, maxDurationMs: 20, pollMs: 1,
     cli: async args => {
       if (args.includes('create')) return { result: { workspace: { workspace_id: 'w1' }, root_pane: { pane_id: 'w1:p1' } } };
       if (args[1] === 'start') name = args[2]!;
@@ -32,7 +32,7 @@ for (const failure of ['missing artifact', 'failed check', 'wrong workspace'] as
   test(`Host refuses herdr completion with ${failure}`, async () => {
     const directory = await mkdtemp(join(tmpdir(), 'personal-herdr-'));
     let name = ''; let working = false;
-    const executor = new HerdrExecutor({ session: 'test', pollMs: 1,
+    const executor = new HerdrExecutor({ session: 'test', executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, pollMs: 1,
       cli: async args => {
         if (args[1] === 'create') return { result: { workspace: { workspace_id: 'w1' }, root_pane: { pane_id: 'w1:p1' } } };
         if (args[1] === 'start') name = args[2]!;
@@ -58,7 +58,7 @@ test('Host reports cancellation as uncertain when herdr cannot prove external pr
   const directory = await mkdtemp(join(tmpdir(), 'personal-herdr-'));
   let name = ''; let active = false; let observed!: () => void;
   const barrier = new Promise<void>(accept => { observed = accept; });
-  const executor = new HerdrExecutor({ session: 'test', pollMs: 1,
+  const executor = new HerdrExecutor({ session: 'test', executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, pollMs: 1,
     cli: async args => {
       if (args[1] === 'create') return { result: { workspace: { workspace_id: 'w1' }, root_pane: { pane_id: 'w1:p1' } } };
       if (args[1] === 'start') name = args[2]!;
@@ -86,7 +86,7 @@ test('supplemented task waits for herdr to execute and verify the new requiremen
   const begun = new Promise<void>(accept => { started = accept; });
   const gate = new Promise<void>(accept => { release = accept; });
   const output = join(directory, 'result.txt');
-  const executor = new HerdrExecutor({ session: 'test', pollMs: 1,
+  const executor = new HerdrExecutor({ session: 'test', executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, pollMs: 1,
     cli: async args => {
       if (args[1] === 'create') return { result: { workspace: { workspace_id: 'w1' }, root_pane: { pane_id: 'w1:p1' } } };
       if (args[1] === 'start') name = args[2]!;
@@ -115,7 +115,7 @@ test('Host delivers a herdr task only after its real artifact passes the request
   const directory = await mkdtemp(join(tmpdir(), 'personal-herdr-'));
   let name = ''; let working = false;
   const output = join(directory, 'answer.txt');
-  const executor = new HerdrExecutor({ session: 'test', pollMs: 1,
+  const executor = new HerdrExecutor({ session: 'test', executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, pollMs: 1,
     cli: async args => {
       if (args[1] === 'create') return { result: { workspace: { workspace_id: 'w1' }, root_pane: { pane_id: 'w1:p1' } } };
       if (args[1] === 'start') name = args[2]!;
@@ -135,5 +135,17 @@ test('Host delivers a herdr task only after its real artifact passes the request
     assert.equal(host.getTask(accepted.taskId!)?.status, 'completed');
     assert.deepEqual(host.getTask(accepted.taskId!)?.result?.artifacts, [output]);
     assert.ok(host.pendingDeliveries('chat').some(delivery => delivery.artifacts?.includes(output)));
+  } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('restricted herdr task remains blocked before any external workspace is created', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'personal-herdr-permission-'));
+  let calls = 0;
+  const executor = new HerdrExecutor({ session: 'test', cli: async () => { calls++; throw new Error('must not dispatch'); } });
+  const host = new PersonalHost({ store: new PersonalStore(directory), executor,
+    dialogue: { decide: async () => ({ kind: 'start', goal: 'restricted coding', executor: 'herdr', cwd: directory }) } });
+  try {
+    const result = await host.submit({ conversationId: 'chat', actorId: 'owner', inputId: '1', text: 'restricted coding' });
+    await host.waitForIdle(); assert.equal(calls, 0); assert.equal(host.getTask(result.taskId!)?.status, 'waiting');
   } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
 });

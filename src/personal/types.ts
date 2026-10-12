@@ -13,6 +13,21 @@ export interface Task {
   workKind?: 'root' | 'delegation';
   parentTaskId?: string;
   rootTaskId?: string;
+  direct?: boolean;
+  originInputId?: string;
+  permission?: PermissionGrant;
+}
+export interface PermissionGrant {
+  mode: 'restricted' | 'trusted'; readRoots: string[]; writeRoots: string[]; network: boolean;
+  expiresAt: number; revision: number; sourceInputId: string; deleteOriginal?: boolean; externalSend?: boolean;
+}
+export interface WorkToolContext {
+  task: Task; eventId?: string;
+  current(): Task;
+  requestAction(action: ActionSpec): Promise<boolean>;
+  proposePermission(grant: Omit<PermissionGrant, 'revision' | 'sourceInputId'>): Promise<boolean>;
+  dispatch<T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T>;
+  send(text: string): Delivery;
 }
 export interface Attempt {
   id: string; taskId: string; sessionId: string; status: TaskStatus; startedAt: number;
@@ -47,7 +62,7 @@ export interface Plan {
   operationInputs?: string[];
 }
 export interface ActionSpec { kind: string; target: string; parameters: Record<string, unknown>; content: string }
-export interface ActionRecord { id: string; taskId: string; revision: number; fingerprint: string; action: ActionSpec; status: 'pending' | 'approved' | 'denied' | 'consumed'; createdAt: number }
+export interface ActionRecord { id: string; taskId: string; revision: number; fingerprint: string; action: ActionSpec; status: 'pending' | 'approved' | 'denied' | 'consumed'; createdAt: number; proposedInputId?: string }
 export type Decision = { kind: 'reply'; text: string } |
   { kind: 'start'; goal: string; resources?: string[]; executor?: 'local' | 'herdr'; cwd?: string; deadline?: number } |
   { kind: 'query' | 'cancel' | 'steer'; taskId?: string; text?: string } |
@@ -55,7 +70,7 @@ export type Decision = { kind: 'reply'; text: string } |
   { kind: 'schedule'; plan: Omit<Plan, 'id' | 'conversationId' | 'actorId' | 'status' | 'version' | 'lastTrigger' | 'pendingTrigger' | 'createdAt'> } |
   { kind: 'plan'; planId?: string; action: 'pause' | 'cancel' | 'resume' | 'query' | 'change'; dueAt?: number; deadline?: number; goal?: string; intervalMs?: number | null; timezone?: string; missed?: 'skip' | 'run' | 'ask' } |
   { kind: 'redeliver'; taskId?: string; confirmUnknown?: boolean };
-export interface Dialogue { decide(input: PersonalInput, context: { tasks: Task[]; sessionId: string; plans?: Plan[]; actions?: ActionRecord[] }): Promise<Decision> }
+export interface Dialogue { decide(input: PersonalInput, context: { tasks: Task[]; sessionId: string; plans?: Plan[]; actions?: ActionRecord[]; work?: () => WorkToolContext }): Promise<Decision> }
 export interface TaskExecution {
   task: Task; attempt: Attempt; signal: AbortSignal;
   onIdentity(identity: ExecutorIdentity): void; onUsage(usage: Usage): void;
