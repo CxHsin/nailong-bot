@@ -4,6 +4,8 @@
 
 ## 核验结论
 
+2026-10-13 已发布 [设计结论 #166](https://github.com/CxHsin/nailong-bot/issues/166) 和 [实现规格 #167](https://github.com/CxHsin/nailong-bot/issues/167)。后续以规格 Issue 为实现需求依据，本文保留实现前核验基准和证据。
+
 保留 Host、Pi 原生会话、SQLite 任务账本及 Akasha。主要改动是本体直接行动、父子委派和结果续接、原生工具搜索 provider 适配、统一执行权限。无需迁移到 Pi Durable，不重建个人历史，不升级 Akasha v2。
 
 ### 原生工具搜索

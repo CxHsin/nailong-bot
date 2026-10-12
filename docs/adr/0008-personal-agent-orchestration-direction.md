@@ -1,10 +1,10 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Personal Agent 统一组织工作
 
-2026-10-12 方向讨论。本文记录用户逐项确认的目标与仍待决定的边界；尚未形成完整规格或最终架构批准，不表示运行时已经迁移。当前实现仍见 [ADR-0007](0007-personal-host-native-sessions.md)。讨论源：[Grok Bot 架构文章](https://www.joyehuang.me/blog/20261011---alwaysonagents/post)、[Akasha 专项调研](../research/akasha-personal-memory-2026-10-12.md)。
+2026-10-12 方向讨论，2026-10-13 用户调用 to-spec 将已确认设计转为规格。[设计结论 #166](https://github.com/CxHsin/nailong-bot/issues/166)、[规格 #167](https://github.com/CxHsin/nailong-bot/issues/167) 是讨论及实现规格的权威记录。本文接受的是目标方向，不表示运行时已经迁移；当前实现仍见 [ADR-0007](0007-personal-host-native-sessions.md)。讨论源：[Grok Bot 架构文章](https://www.joyehuang.me/blog/20261011---alwaysonagents/post)、[Akasha 专项调研](../research/akasha-personal-memory-2026-10-12.md)。
 
 ## 已确认的方向
 
@@ -88,4 +88,4 @@ ADR-0007 把本地 Pi 与 herdr 定义为平级 Task executor；目标方向要�
 
 产品方向和行为规则已确认，剩余工作是原生工具搜索适配、Windows 执行权限后端、委派恢复及旧数据兼容的技术核验；不再将已确定的规则列为待决定。首轮方案与实际证据见 [落地核验与改动计划](../personal-agent-refactor-plan.md)。
 
-该计划仍需用户对整体理解确认，再发布讨论结论 Issue 和实现规格。当前运行时未迁移，技术方案中待补的实测不能当作已通过证据。
+用户调用 to-spec 后已发布设计结论与实现规格，未再次访谈常规实现细节。当前运行时未迁移，技术方案中待补的实测不能当作已通过证据；合并 main 仍需用户明确同意。
