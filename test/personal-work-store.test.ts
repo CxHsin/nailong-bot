@@ -19,7 +19,7 @@ test('business schema upgrade keeps historical identities and backs up original 
   try {
     store = new PersonalStore(directory);
     assert.deepEqual(store.getTask('old'), { ...oldTask, workKind: 'root', rootTaskId: 'old' });
-    const schema = store.businessSchema(); assert.equal(schema.version, 2); assert.ok(schema.backupPath);
+    const schema = store.businessSchema(); assert.equal(schema.version, 3); assert.ok(schema.backupPath);
     const backup = new DatabaseSync(schema.backupPath, { readOnly: true });
     try { assert.deepEqual(JSON.parse(String(backup.prepare('SELECT body FROM tasks').get()!.body)), oldTask); } finally { backup.close(); }
     store.close(); store = new PersonalStore(directory);

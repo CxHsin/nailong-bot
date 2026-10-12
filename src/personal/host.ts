@@ -3,6 +3,8 @@ import { resolve, sep, dirname, basename, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { PersonalStore } from './store.js';
 import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor, WorkToolContext, PermissionGrant, DelegationSpec, WorkEvent, ContinuationOutcome } from './types.js';
+import { recallIdentity } from './memory-context.js';
+import type { AgreementChange, WorkingAgreement } from './types.js';
 
 export interface PersonalHostOptions { store: PersonalStore; dialogue: Dialogue; executor: TaskExecutor; maxConcurrent?: number; maxDurationMs?: number; maxTokens?: number; maxAttempts?: number; maxDialogueAttempts?: number; maxRootCalls?: number; maxGlobalCalls?: number; maxGlobalTokens?: number; maxRework?: number; recoveryPollMs?: number; now?: () => number; acceptContinuation?(task: Task, result: import('./types.js').TaskResult): Promise<import('./types.js').TaskResult>; interruptDialogue?(): Promise<void>; handleDecision?(input: PersonalInput, decision: Decision): Promise<PersonalResponse> }
 function physicalResource(path: string): string {
@@ -34,6 +36,14 @@ export class PersonalHost {
   listTasks(conversationId?: string) { return this.store.listTasks(conversationId); }
   private workForSession(sessionId: string) { return this.modelWork.get(sessionId) ?? this.listTasks().find(task => !task.direct && (task.sessionId === sessionId || sessionId.startsWith(`verify:${task.id}:`)))?.id; }
   reserveSessionModelCall(sessionId: string) { this.reserveModelCall(this.workForSession(sessionId)); }
+  assertRecallBudget(sessionId: string) {
+    const taskId = this.workForSession(sessionId); const task = taskId ? this.getTask(taskId) : undefined;
+    const rootId = task?.rootTaskId ?? task?.id;
+    for (const id of [`global:${new Date(this.now()).toISOString().slice(0, 10)}`, ...(rootId ? [`root:${rootId}`] : [])]) {
+      const budget = this.store.getBudget(id); const global = id.startsWith('global:');
+      if (budget && (budget.calls >= (global ? this.options.maxGlobalCalls ?? 500 : this.options.maxRootCalls ?? 100) || budget.tokens >= (global ? this.options.maxGlobalTokens ?? 2_000_000 : this.options.maxTokens ?? 500_000))) throw new Error('工作预算已耗尽，未开始新的自动召回');
+    }
+  }
   accountSessionModelUsage(sessionId: string, usage: import('./types.js').Usage) { this.accountModelUsage(this.workForSession(sessionId), usage); }
   reserveModelCall(taskId?: string) { this.updateBudget(taskId, 1, 0); }
   accountModelUsage(taskId: string | undefined, usage: import('./types.js').Usage) { this.updateBudget(taskId, 0, (usage.input ?? 0) + (usage.output ?? 0), usage.costKnown === true, usage.cost); }
@@ -70,6 +80,15 @@ export class PersonalHost {
       return latest;
     };
     return { task, eventId, current, requestAction: action => { current(); return this.requestAction(id, action); },
+      agreements: () => this.agreements(id), proposeAgreement: change => { if (eventId || task!.workKind === 'delegation') throw new Error('后台材料或帮手不能保存用户约定，请由用户明确表达并确认'); return this.proposeAgreement(input, change); },
+      requestContext: (callId, query) => {
+        const child = current(); const parent = child.parentTaskId ? this.getTask(child.parentTaskId) : undefined;
+        if (!parent || parent.cancelRequested || parent.contextExcluded || child.workKind !== 'delegation' || !query.trim() || query.length > 2000) throw new Error('背景请求必须属于有效子委派且说明具体需要');
+        const requestId = `context_request:${child.id}:${callId}`; const priorRequest = this.store.listWorkEvents().find(value => value.id === requestId);
+        if (priorRequest && priorRequest.query !== query) throw new Error('同一背景请求标识不能更换查询');
+        const event = this.store.enqueueWorkEvent({ id: requestId, kind: 'context_request', conversationId: child.conversationId, taskId: child.id, parentTaskId: parent.id, rootTaskId: child.rootTaskId ?? parent.id, attemptId: callId, revision: parent.revision, createdAt: this.now(), state: 'pending', query });
+        child.contextRequestId = event.id; this.store.putTask(child); queueMicrotask(() => this.scheduleContinuations()); return event;
+      },
       proposePermission: grant => { current(); return this.requestAction(id, { kind: 'permission-grant', target: id, parameters: { grant, proposedInputId: input.inputId }, content: `确认一次工作权限；可信 Shell 继承 Host 本机权限，不能强制禁止删除文件或外发；受控删除和发送另需明确授权：${JSON.stringify(grant)}` }); },
       dispatch: async <T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T> => {
         const latest = current(); const dispatchId = `${id}:${eventId ?? input.inputId}:${callId}`;
@@ -116,6 +135,10 @@ export class PersonalHost {
         { kind: 'start', goal: spec.goal, cwd: spec.cwd ?? parent.cwd, resources: spec.resources, executor: spec.purpose === 'coding' ? 'herdr' : 'local', deadline: parent.deadline }, id);
       child.workKind = 'delegation'; child.parentTaskId = parent.id; child.rootTaskId = parent.rootTaskId ?? parent.id;
       child.purpose = spec.purpose; child.parentRevision = parent.revision; child.background = spec.background;
+      if (spec.contextPacket) {
+        if (spec.contextPacket.source !== 'parent_selected' || Buffer.byteLength(JSON.stringify(spec.contextPacket)) > 16000 || spec.contextPacket.agreementIds.some(id => !this.agreements(parent.id).some(rule => rule.id === id))) throw new Error('子背景或必要约定范围无效');
+        child.contextPacket = spec.contextPacket;
+      }
       if (parent.permission) {
       const grant = spec.permission ?? { ...parent.permission, mode: 'restricted' as const, readRoots: parent.permission.readRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], writeRoots: parent.permission.writeRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], network: false, deleteOriginal: false, externalSend: false };
         const within = (path: string, roots: string[]) => roots.some(root => { const actual = physicalResource(path); const base = physicalResource(root); return actual === base || actual.startsWith(base + sep); });
@@ -157,6 +180,14 @@ export class PersonalHost {
       const latest = this.getTask(event.parentTaskId)!;
       const consumed = this.store.completeWorkEvent(event.id, outcome.completion);
       if (consumed.state !== 'consumed' || latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled'].includes(latest.status)) return;
+      if (event.kind === 'context_request') {
+        const child = this.getTask(event.taskId)!;
+        if (!outcome.contextResponse || outcome.reviewedRevision !== latest.revision) { child.error = '背景请求尚未得到本体按最新要求选择的材料'; child.status = 'waiting'; this.store.putTask(child); return; }
+        if (outcome.contextResponse.source !== 'parent_selected' || Buffer.byteLength(JSON.stringify(outcome.contextResponse)) > 16000 || outcome.contextResponse.agreementIds.some(id => !this.agreements(latest.id).some(rule => rule.id === id))) throw new Error('子背景响应范围无效');
+        child.contextPacket = outcome.contextResponse; delete child.contextRequestId;
+        if (!this.active.has(child.id) && !child.resourceHeld) child.status = 'queued';
+        this.store.putTask(child); queueMicrotask(() => this.pump()); return;
+      }
       const stale = latest.revision !== outcome.reviewedRevision;
       if (outcome.result) { latest.result = { ...outcome.result, producedRevision: outcome.reviewedRevision }; if (stale) latest.result.verified = false; }
       const occupiedChild = this.listTasks().some(child => child.rootTaskId === latest.id && child.id !== latest.id && (child.resourceHeld || ['queued', 'running', 'stopping'].includes(child.status)));
@@ -166,7 +197,7 @@ export class PersonalHost {
       if (!stale && (latest.status === 'completed' || ['blocked', 'needs_decision'].includes(outcome.outcome))) {
         const id = `work-notification:${event.id}`; delivery = this.delivery(id);
         if (!delivery) { delivery = { id, conversationId: latest.conversationId, actorId: latest.actorId, taskId: latest.id, text: outcome.text ?? latest.result?.text ?? latest.error!, artifacts: latest.result?.artifacts, artifactDigests: latest.result?.artifactDigests, status: 'pending', createdAt: this.now() };
-          if (latest.status === 'completed' && latest.originInput && latest.originInput.origin !== 'plan') delivery.learning = { id, input: latest.originInput.text, answer: delivery.text, originInputId: latest.originInput.inputId, recallId: latest.originInput.inputId };
+          if (latest.status === 'completed' && latest.originInput && latest.originInput.origin !== 'plan') delivery.learning = { id, input: latest.originInput.text, answer: delivery.text, originInputId: latest.originInput.inputId, inputAt: latest.originInput.receivedAt, recallId: recallIdentity(latest.originInput) };
           this.store.putDelivery(delivery); }
       }
     });
@@ -205,7 +236,7 @@ export class PersonalHost {
   submit(input: PersonalInput): Promise<PersonalResponse> {
     if (this.closing) return Promise.reject(new Error('Host closing'));
     const inputKey = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
-    input = this.store.acceptInput(inputKey, input);
+    input = this.store.acceptInput(inputKey, { ...input, receivedAt: input.receivedAt ?? this.now() });
     const prior = this.conversations.get(input.conversationId) ?? Promise.resolve();
     const current = prior.catch(() => {}).then(async () => {
       const key = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
@@ -227,7 +258,7 @@ export class PersonalHost {
         const existing = response.deliveryId ? this.delivery(response.deliveryId) : undefined;
         if (existing && (existing.conversationId !== input.conversationId || existing.actorId !== input.actorId)) throw new Error('Delivery ownership mismatch');
         const delivery = existing ?? this.makeDelivery(input, response.text, response.taskId);
-        if (decision.kind === 'reply') { delivery.learning = { id: delivery.id, input: input.text, answer: response.text }; this.store.putDelivery(delivery); }
+        if (decision.kind === 'reply' && input.origin !== 'plan') { delivery.learning = { id: delivery.id, input: input.text, answer: response.text, recallId: recallIdentity(input), originInputId: input.inputId, inputAt: input.receivedAt }; this.store.putDelivery(delivery); }
         response.deliveryId = delivery.id; this.store.putInput(key, response);
       });
       this.notify(this.delivery(response.deliveryId!)!); this.pump(); return response;
@@ -321,11 +352,47 @@ export class PersonalHost {
     this.store.transaction(() => { this.store.putAction(record); delivery = this.makeDelivery(task, `需要确认外部动作 ${record.id}：${action.kind}\n对象：${action.target}\n参数：${JSON.stringify(action.parameters)}\n${action.content}`, task.id); });
     this.notify(delivery); return false;
   }
+  agreements(taskId: string) {
+    const task = this.getTask(taskId); if (!task || task.contextExcluded) return [];
+    return this.store.listAgreements().filter(rule => rule.actorId === task.actorId && rule.state === 'active' && (task.workKind !== 'delegation' || task.contextPacket?.agreementIds.includes(rule.id)) && (rule.scope.kind === 'global' || rule.scope.kind === 'work' && rule.scope.id === (task.rootTaskId ?? task.id) || rule.scope.kind === 'project' && rule.scope.id === physicalResource(task.cwd!)));
+  }
+  applicableAgreements(input: PersonalInput) {
+    const task = input.replyTaskId ? this.getTask(input.replyTaskId) : this.listTasks(input.conversationId).find(task => task.direct && task.actorId === input.actorId && task.originInputId === input.inputId && !task.contextExcluded);
+    if (task && task.conversationId === input.conversationId && task.actorId === input.actorId) return this.agreements(task.id);
+    return this.store.listAgreements().filter(rule => rule.actorId === input.actorId && rule.state === 'active' && rule.scope.kind === 'global');
+  }
+  proposeAgreement(input: PersonalInput, change: AgreementChange): PersonalResponse {
+    if (input.origin || !['save', 'edit', 'revoke'].includes(change.operation)) throw new Error('工作约定只接受真实用户输入的明确操作');
+    const task = this.workContext(input).current(); const existing = change.id ? this.store.listAgreements().find(rule => rule.id === change.id && rule.actorId === input.actorId && this.agreements(task.id).some(value => value.id === rule.id)) : undefined;
+    if (change.operation !== 'save' && !existing) throw new Error('约定不存在、已撤销或不属于当前作用域');
+    const scope = change.scope ?? existing?.scope ?? { kind: 'work' as const, id: task.rootTaskId ?? task.id };
+    if (scope.kind === 'work' && scope.id !== (task.rootTaskId ?? task.id) || scope.kind === 'project' && scope.id !== physicalResource(task.cwd!) || !['work', 'project', 'global'].includes(scope.kind)) throw new Error('约定作用域不明确或不属于当前工作，请明确范围');
+    const content = change.content ?? existing?.content ?? ''; if (!content.trim() || content.length > 4000) throw new Error('约定内容必须明确且不超过4000字符');
+    const parameters = { ...change, content, scope, expectedRevision: existing?.revision, proposedInputId: input.inputId, sourceText: input.text };
+    const proposalKey = createHash('sha256').update(JSON.stringify([input.conversationId, input.actorId, input.inputId, parameters])).digest('hex');
+    const priorProposal = this.store.getAction(`agreement-proposal:${proposalKey}`);
+    if (priorProposal) return { text: `${priorProposal.action.content}\n如同意，请明确回复：确认动作 ${priorProposal.id}`, taskId: priorProposal.taskId };
+    const action = { kind: 'working-agreement', target: existing?.id ?? `agreement:${proposalKey}`, parameters, content: `工作约定内容：${content}\n范围：${JSON.stringify(scope)}\n操作：${change.operation}。约定不会增加执行权限。` };
+    const record: ActionRecord = { id: `agreement-proposal:${proposalKey}`, taskId: task.id, revision: task.revision, fingerprint: createHash('sha256').update(JSON.stringify(action)).digest('hex'), action, status: 'pending', createdAt: this.now(), proposedInputId: input.inputId };
+    const text = `${action.content}\n如同意，请明确回复：确认动作 ${record.id}`;
+    this.store.transaction(() => { this.store.putAction(record); this.makeDelivery(task, text, task.id); });
+    return { text, taskId: task.id };
+  }
   authorizeAction(input: PersonalInput, actionId: string, approved: boolean): PersonalResponse {
     return this.store.transaction(() => {
     const record = this.store.getAction(actionId); const task = record ? this.getTask(record.taskId) : undefined;
     if (!record || !task || task.contextExcluded || task.actorId !== input.actorId || task.conversationId !== input.conversationId || record.revision !== task.revision || record.status !== 'pending') return { text: '确认已失效或不属于此对话，请核对具体动作。' };
     if (task.cancelRequested || record.proposedInputId === input.inputId) return { text: '权限提案必须等待用户后续明确确认，已取消工作不能扩大权限。' };
+    if (record.action.kind === 'working-agreement') {
+      if (input.origin || approved && input.text.trim() !== `确认动作 ${record.id}` || !approved && input.text.trim() !== `拒绝动作 ${record.id}`) return { text: `请按所展示的内容和范围明确回复：确认动作 ${record.id}，或拒绝动作 ${record.id}` };
+      if (!approved) { record.status = 'denied'; this.store.putAction(record); return { text: '已拒绝保存此工作约定。', taskId: task.id }; }
+      const change = record.action.parameters as unknown as AgreementChange & { content: string; expectedRevision?: number };
+      const prior = this.store.listAgreements().find(rule => rule.id === record.action.target);
+      if (prior && (prior.actorId !== input.actorId || !this.agreements(task.id).some(rule => rule.id === prior.id) || prior.revision !== change.expectedRevision)) return { text: '约定已变化，请重新查看并确认。' };
+      const agreement: WorkingAgreement = { id: record.action.target, actorId: input.actorId, conversationId: input.conversationId, content: change.content, scope: change.scope!, revision: (prior?.revision ?? 0) + 1, state: change.operation === 'revoke' ? 'revoked' : 'active', sourceInputId: record.proposedInputId!, confirmedInputId: input.inputId, at: this.now(), history: [...(prior?.history ?? []), ...(prior ? [{ content: prior.content, scope: prior.scope, revision: prior.revision, state: prior.state, confirmedInputId: prior.confirmedInputId }] : [])] };
+      this.store.putAgreement(agreement); record.status = 'consumed'; this.store.putAction(record);
+      return { text: `${agreement.state === 'revoked' ? '已撤销' : '已保存'}工作约定：${agreement.content}\n范围：${JSON.stringify(agreement.scope)}；不会增加执行权限。`, taskId: task.id };
+    }
     record.status = approved ? 'approved' : 'denied'; this.store.putAction(record);
     if (approved && record.action.kind === 'permission-grant') {
       const grant = record.action.parameters.grant as Omit<PermissionGrant, 'revision' | 'sourceInputId'>;
@@ -397,6 +464,7 @@ export class PersonalHost {
     } catch (error) {
       task = this.getTask(task.id)!; task.error = String(error); task.status = abort.signal.aborted ? abort.signal.reason instanceof Error && /预算/.test(abort.signal.reason.message) ? 'waiting' : 'cancelled' : 'failed';
       if (error instanceof Error && error.name === 'ExecutorAttentionError') task.status = 'waiting';
+      if (error instanceof Error && error.name === 'ExecutorContextError') { task.status = task.contextRequestId ? 'waiting' : 'queued'; task.resourceHeld = false; this.store.transaction(() => { this.store.putTask(task); attempt.status = 'waiting'; attempt.finishedAt = this.now(); this.store.putAttempt(attempt); }); return; }
       if (error instanceof Error && error.name === 'ExecutorBudgetError') { task.status = 'waiting'; task.error = '执行预算耗尽，保留已有成果。'; }
       if (abort.signal.reason instanceof Error && /预算/.test(abort.signal.reason.message)) task.error = abort.signal.reason.message;
       if (error instanceof Error && error.name === 'ExecutorAttentionError' && this.store.listActions(task.id).some(a => a.status === 'approved' && a.revision === task.revision)) task.status = 'queued';
@@ -432,7 +500,7 @@ export class PersonalHost {
       }
       let delivery!: Delivery;
       if (task.workKind === 'delegation' && task.parentTaskId) { task.result ??= { text: task.error ?? '帮手停止，已有影响保留', verified: false, partial: true, producedRevision: attempt.presentedRevision }; this.store.settleDelegationResult(task, attempt); this.scheduleContinuations(); return; }
-      this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); delivery = this.makeDelivery(task, `${task.goal}\n状态：${task.status}\n${task.result?.text ?? task.error ?? '任务停止；已有影响未撤销。'}`, task.id, task.result?.artifacts); if (task.result && ['completed', 'partial'].includes(task.status)) { delivery.learning = { id: delivery.id, input: task.goal, answer: task.result.text }; this.store.putDelivery(delivery); } });
+      this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); delivery = this.makeDelivery(task, `${task.goal}\n状态：${task.status}\n${task.result?.text ?? task.error ?? '任务停止；已有影响未撤销。'}`, task.id, task.result?.artifacts); if (task.result && task.originInput && task.originInput.origin !== 'plan' && ['completed', 'partial'].includes(task.status)) { delivery.learning = { id: delivery.id, input: task.originInput.text, answer: task.result.text, originInputId: task.originInput.inputId, inputAt: task.originInput.receivedAt, recallId: recallIdentity(task.originInput) }; this.store.putDelivery(delivery); } });
       this.notify(delivery);
     }
   }
@@ -475,6 +543,7 @@ export class PersonalHost {
         this.store.transaction(() => { this.store.putTask(task); if (attempt) { attempt.status = task.status; this.store.putAttempt(attempt); } delivery = this.makeDelivery(task, `${task.goal}\n状态：${task.status}\n${evidence.result!.text}`, task.id, evidence.result!.artifacts); }); this.notify(delivery);
       } else if (evidence.state === 'resumable') {
         task.resourceHeld = false;
+        if (task.contextRequestId) { task.status = 'waiting'; task.error = '等待本体选择补充背景'; this.store.putTask(task); continue; }
         const pending = this.store.listActions(task.id).some(a => a.revision === task.revision && ['pending', 'denied', 'consumed'].includes(a.status));
         if (!pending && !task.error?.includes('预算') && this.store.listAttempts(task.id).length < (this.options.maxAttempts ?? 3)) { task.status = 'queued'; task.error = undefined; }
         else { task.status = 'waiting'; task.error = pending ? '具体动作需要确认或核实，保持等待。' : '执行尝试次数预算耗尽'; }

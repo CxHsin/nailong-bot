@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch, WorkBudget } from './types.js';
+import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch, WorkBudget, WorkingAgreement } from './types.js';
 
 /** Business records are authoritative; SDK sessions contain model exchanges only. */
 export class PersonalStore {
@@ -38,12 +38,12 @@ export class PersonalStore {
   private upgradeBusinessSchema(existingDatabase: boolean) {
     const hasSchema = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_schema'").get();
     const version = hasSchema ? Number(this.db.prepare('SELECT version FROM personal_schema WHERE id=1').get()?.version ?? 0) : 0;
-    if (version > 2) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
-    if (version === 2) return;
+    if (version > 3) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
+    if (version === 3) return;
     let backupPath: string | undefined;
     if (existingDatabase) {
       const backupDirectory = join(this.directory, 'personal-schema-backups'); mkdirSync(backupDirectory, { recursive: true });
-      backupPath = join(backupDirectory, `v${version}-before-v2-${randomUUID()}.sqlite`);
+      backupPath = join(backupDirectory, `v${version}-before-v3-${randomUUID()}.sqlite`);
       // VACUUM INTO includes committed WAL pages in a consistent SQLite snapshot.
       this.db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`);
       const backupFile = openSync(backupPath, 'r+'); try { fsyncSync(backupFile); } finally { closeSync(backupFile); }
@@ -52,13 +52,13 @@ export class PersonalStore {
       finally { backup.close(); }
     }
     this.transaction(() => {
-      this.db.exec('CREATE TABLE IF NOT EXISTS personal_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, backup_path TEXT); CREATE TABLE IF NOT EXISTS work_budgets(id TEXT PRIMARY KEY, body TEXT NOT NULL)');
+      this.db.exec('CREATE TABLE IF NOT EXISTS personal_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, backup_path TEXT); CREATE TABLE IF NOT EXISTS work_budgets(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS working_agreements(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
       const hasTasks = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
       if (hasTasks) for (const task of this.list<Task>('tasks')) {
         task.workKind ??= 'root'; task.rootTaskId ??= task.id;
         this.putTask(task);
       }
-      this.db.prepare('INSERT INTO personal_schema VALUES(1,2,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,backup_path=excluded.backup_path').run(backupPath ?? null);
+      this.db.prepare('INSERT INTO personal_schema VALUES(1,3,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,backup_path=excluded.backup_path').run(backupPath ?? null);
     });
   }
   businessSchema(): { version: number; backupPath?: string } {
@@ -78,6 +78,8 @@ export class PersonalStore {
   }
   private list<T>(table: string): T[] { return this.db.prepare(`SELECT body FROM ${table} ORDER BY rowid`).all().map(row => JSON.parse(String(row.body)) as T); }
   getTask(id: string) { return this.read<Task>('tasks', id); }
+  listAgreements() { return this.list<WorkingAgreement>('working_agreements'); }
+  putAgreement(agreement: WorkingAgreement) { this.db.prepare('INSERT INTO working_agreements VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(agreement.id, JSON.stringify(agreement)); }
   getBudget(id: string) { return this.read<WorkBudget>('work_budgets', id); }
   putBudget(budget: WorkBudget) { this.db.prepare('INSERT INTO work_budgets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(budget.id, JSON.stringify(budget)); }
   listTasks(conversation?: string) { return this.list<Task>('tasks').filter(task => !conversation || task.conversationId === conversation); }

@@ -26,6 +26,8 @@ export interface Task {
   parentRevision?: number;
   background?: string;
   originInput?: PersonalInput;
+  contextPacket?: ContextPacket;
+  contextRequestId?: string;
 }
 export interface PermissionGrant {
   mode: 'restricted' | 'trusted'; readRoots: string[]; writeRoots: string[]; network: boolean;
@@ -43,6 +45,9 @@ export interface WorkToolContext {
   accountModelUsage?(usage: Usage): void;
   materialActions?(): ActionDispatch[];
   controlChild?(callId: string, taskId: string, operation: 'query' | 'steer' | 'cancel', text?: string): Promise<PersonalResponse>;
+  agreements?(): WorkingAgreement[];
+  proposeAgreement?(change: AgreementChange): PersonalResponse;
+  requestContext?(callId: string, query: string): WorkEvent;
 }
 export interface Attempt {
   id: string; taskId: string; sessionId: string; status: TaskStatus; startedAt: number;
@@ -52,11 +57,17 @@ export interface Attempt {
 }
 export interface SessionReceipt { sessionId: string; entryId: string; at: number }
 export interface WorkBudget { id: string; calls: number; tokens: number; rework: number; costKnown: boolean; cost?: number }
-export interface DelegationSpec { goal: string; purpose: 'research' | 'organization' | 'coding'; cwd?: string; resources?: string[]; background?: string; permission?: PermissionGrant; reworkOf?: string }
-export interface ContinuationOutcome { outcome: 'completed' | 'waiting' | 'blocked' | 'needs_decision'; reviewedRevision: number; result?: TaskResult; text?: string; completion: SessionReceipt }
+export interface AgreementScope { kind: 'work' | 'project' | 'global'; id?: string }
+export interface AgreementChange { operation: 'save' | 'edit' | 'revoke'; id?: string; content?: string; scope?: AgreementScope }
+export interface WorkingAgreement { id: string; actorId: string; conversationId: string; content: string; scope: AgreementScope; revision: number; state: 'active' | 'revoked'; sourceInputId: string; confirmedInputId: string; at: number; history: Array<{ content: string; scope: AgreementScope; revision: number; state: 'active' | 'revoked'; confirmedInputId: string }> }
+export interface ContextReference { nodeId: string; messageId: string; offset?: number; limit?: number }
+export interface ContextPacket { version: 1; content: string; spans: import('./memory-context.js').MemorySpan[]; agreementIds: string[]; source: 'parent_selected'; at: number }
+export interface DelegationSpec { goal: string; purpose: 'research' | 'organization' | 'coding'; cwd?: string; resources?: string[]; background?: string; permission?: PermissionGrant; reworkOf?: string; contextPacket?: ContextPacket }
+export interface ContinuationOutcome { outcome: 'completed' | 'waiting' | 'blocked' | 'needs_decision'; reviewedRevision: number; result?: TaskResult; text?: string; completion: SessionReceipt; contextResponse?: ContextPacket }
 export interface ContinuationContext { task: Task; sessionId: string; tasks: Task[]; work(): WorkToolContext; onInjection(receipt: SessionReceipt): void; signal: AbortSignal }
 export interface WorkEvent {
-  id: string; kind: 'delegation_result' | 'requirements_changed' | 'direct_completion'; conversationId: string;
+  id: string; kind: 'delegation_result' | 'requirements_changed' | 'direct_completion' | 'context_request'; conversationId: string;
+  query?: string;
   taskId: string; parentTaskId: string; rootTaskId: string; attemptId: string;
   revision: number; result?: TaskResult; createdAt: number;
   state: 'pending' | 'processing' | 'consumed' | 'blocked' | 'unknown';
@@ -70,6 +81,7 @@ export interface ActionDispatch {
 }
 export interface PersonalInput { conversationId: string; actorId: string; text: string; inputId: string; replyTaskId?: string;
   origin?: 'plan';
+  receivedAt?: number;
   images?: Array<{ type: 'image'; mimeType: string; data: string }>; }
 export interface Plan {
   id: string; conversationId: string; actorId: string; goal: string; cwd?: string;
@@ -112,6 +124,6 @@ export interface Delivery {
   parentId?: string; kind?: 'text' | 'file'; path?: string;
   artifactDigests?: Record<string, string>;
   attempts?: number; learningRecorded?: boolean;
-  learning?: { id: string; input: string; answer: string; recallId?: string; originInputId?: string };
+  learning?: { id: string; input: string; answer: string; recallId?: string; originInputId?: string; inputAt?: number };
 }
 export interface PersonalResponse { text: string; taskId?: string; deliveryId?: string }

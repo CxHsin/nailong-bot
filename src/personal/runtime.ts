@@ -44,6 +44,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       embedding: env.EMBEDDING_BASE_URL && env.EMBEDDING_MODEL && env.EMBEDDING_API_KEY ? {
         baseUrl: env.EMBEDDING_BASE_URL, model: env.EMBEDDING_MODEL, apiKey: env.EMBEDDING_API_KEY,
         timeoutMs: positive(env, 'EMBEDDING_TIMEOUT_MS', 3000),
+        beforeRequest: () => { host.reserveModelCall(); host.accountModelUsage(undefined, { costKnown: false }); },
       } : undefined,
       dynamics: env.MEMORY_DYNAMICS ? JSON.parse(env.MEMORY_DYNAMICS) : undefined,
       recall: env.MEMORY_RECALL ? JSON.parse(env.MEMORY_RECALL) : undefined,
@@ -57,6 +58,8 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       taskForIdentity: identity => store.getTask(String(identity.taskId)),
       workContext: (task, originId) => host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: originId, text: task.goal }, task.id),
       reserveModelCall: sessionId => host.reserveSessionModelCall(sessionId),
+      beforeRecall: sessionId => host.assertRecallBudget(sessionId),
+      agreementsForInput: input => host.applicableAgreements(input),
       accountModelUsage: (sessionId, usage) => host.accountSessionModelUsage(sessionId, usage),
       tinyfishKey: env.TINYFISH_API_KEY?.trim(), shellPath: env.AGENT_SHELL_PATH?.trim(),
       limits: { timeoutMs: positive(env, 'AGENT_MODEL_TIMEOUT_MS', 120_000),
@@ -147,7 +150,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
         if (delivery.parentId || !delivery.learning || delivery.status !== 'sent') return;
         if (delivery.taskId && host.getTask(delivery.taskId)?.contextExcluded) return;
         await memory!.recordDeliveredTurn({ id: delivery.learning.id, actorId: delivery.conversationId,
-          userText: delivery.learning.input, assistantText: delivery.learning.answer, providerMessageId: delivery.providerMessageId });
+          userText: delivery.learning.input, assistantText: delivery.learning.answer, providerMessageId: delivery.providerMessageId, recallId: delivery.learning.recallId, originInputId: delivery.learning.originInputId, inputAt: delivery.learning.inputAt });
       },
       async close() { await host.close({ preserveTasks: true }); await agent.close(); await memory!.close(); },
     };
