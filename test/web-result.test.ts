@@ -1,15 +1,9 @@
-import { closeFixture } from "./fixtures/cleanup.js";
-import { createTestServer } from "./fixtures/http-server.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { createTelegramHostFixture } from "./fixtures/telegram-host.js";
-import { discoveredToolPlan } from "./fixtures/discovered-tools.js";
-import { createBoundedRead } from "../src/agent/archive-read.js";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
 import { webReadPath, webResultPreview, webResultBody } from "../src/runtime/web-result.js";
 import { toolResultView, replayToolResultView } from "../src/context/tool-result-projection.js";
 import type { ToolResult } from "../src/runtime/runtime-types.js";
@@ -49,127 +43,4 @@ test("web preview budget holds for ten Unicode pages and malformed envelopes fal
   assert.ok(Buffer.byteLength(JSON.stringify(content)) <= 7000);
   assert.equal(webResultPreview({ ...result, content: [{ type: "text", text: '{"results":[null]}' }] }, archive), undefined);
   assert.match(JSON.stringify(toolResultView("grep", result, archive, false).content), /JSONL/);
-});
-
-test("web archive read returns complete decoded Unicode body through bounded continuations", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "web-body-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createRuntimeLog(dir);
-  const stored = await log.archive(result);
-  await log.append({ type: "tool_result", requestId: "one", toolCallId: "web", toolName: "web_fetch", result, archive: stored });
-  const read = createBoundedRead(dir, log);
-  const direct = await Reflect.apply(read.execute, read, ["direct", { path: stored.path, limit: 1 }]);
-  assert.match(direct.content[0].text, /页面 1：更新/);
-  assert.doesNotMatch(direct.content[0].text, /"part"/);
-  let args = { path: webReadPath(stored, 1), offset: 1, limit: 3 };
-  let collected = "";
-  let pages = 0;
-  while (pages++ < 200) {
-    const response = await Reflect.apply(read.execute, read, ["read", args]);
-    assert.ok(Buffer.byteLength(JSON.stringify(response)) <= 7500);
-    const text = response.content[0].text;
-    assert.doesNotMatch(text, /"part"|\\n|\\"/);
-    const continuation = text.match(/\n\[继续读取：read\((\{.*\})\)\]$/);
-    collected += continuation ? text.slice(0, continuation.index) : text;
-    if (!continuation) break;
-    args = JSON.parse(continuation[1]!);
-  }
-  assert.ok(pages > 1 && pages < 200);
-  assert.equal(collected, body);
-  let allArgs = { path: stored.path, offset: 1, limit: 120 };
-  let allText = "";
-  for (let i = 0; i < 100; i++) {
-    const response = await Reflect.apply(read.execute, read, ["all", allArgs]);
-    const text = response.content[0].text;
-    const next = text.match(/\n\[继续读取：read\((\{.*\})\)\]$/);
-    allText += next ? text.slice(0, next.index) : text;
-    if (!next) break;
-    allArgs = JSON.parse(next[1]!);
-  }
-  assert.equal(allText, webResultBody(result));
-  await assert.rejects(Reflect.apply(read.execute, read, ["bad", { path: webReadPath(stored, 99) }]), /失效/);
-  await assert.rejects(Reflect.apply(read.execute, read, ["bad", { path: webReadPath({ ...stored, sha256: "0".repeat(64) }, 1) }]), /失效/);
-});
-
-test("single long web line can be read without cutting Unicode code points", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "web-line-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const log = createRuntimeLog(dir);
-  const text = "龙🐉".repeat(3000) + "\n\n尾部\n";
-  const value: ToolResult = { ...result, content: [{ type: "text", text: JSON.stringify({ results: [{ url: "https://example.com", text }] }) }] };
-  const stored = await log.archive(value);
-  await log.append({ type: "tool_result", toolName: "web_fetch", result: value, archive: stored });
-  const read = createBoundedRead(dir, log);
-  let args = { path: webReadPath(stored, 1), offset: 1, limit: 1 };
-  let collected = "";
-  for (let i = 0; i < 100; i++) {
-    const response = await Reflect.apply(read.execute, read, ["read", args]);
-    const output = response.content[0].text;
-    const next = output.match(/\n\[继续读取：read\((\{.*\})\)\]$/);
-    collected += next ? output.slice(0, next.index) : output;
-    if (!next) break;
-    args = JSON.parse(next[1]!);
-  }
-  assert.equal(collected, text);
-});
-
-test("production Pi forwards live previews, appends decoded reads and retains the first recorded web view", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "web-pi-"));
-
-  t.mock.method(Client.prototype, "connect", async () => {});
-  t.mock.method(Client.prototype, "close", async () => {});
-  t.mock.method(Client.prototype, "listTools", async () => ({ tools: ["search", "fetch_content"].map((name) => ({ name, inputSchema: { type: "object", properties: {} } })) }));
-  t.mock.method(Client.prototype, "callTool", async () => ({ content: result.content }));
-  let calls = 0;
-  let firstWebView: string | undefined;
-  const plan = discoveredToolPlan();
-  const server = createTestServer(t, async (req, res) => {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    const data = JSON.parse(body);
-    if (plan.continue(data, res)) return;
-    calls++;
-    let delta;
-    if (calls === 1) { const tool = plan.select("web_fetch", { urls: ["https://example.com"] }); delta = { tool_calls: [{ index: 0, id: "web", type: "function", function: { name: tool.name, arguments: JSON.stringify(tool.args) } }] }; }
-    else if (calls === 2) {
-      const text = String(data.messages.at(-1).content);
-      firstWebView = text;
-      assert.match(text, /engineering\nin-progress\nproductivity/);
-      const next = JSON.parse(text.match(/read\((\{.*?\})\)/)![1]!);
-      delta = { tool_calls: [{ index: 0, id: "body", type: "function", function: { name: "read", arguments: JSON.stringify(next) } }] };
-    } else {
-      if (calls === 3) {
-        assert.match(String(data.messages.at(-1).content), /# 文档\n定义：chief-of-staff/);
-        assert.doesNotMatch(String(data.messages.at(-1).content), /"part"/);
-      } else {
-        assert.ok(data.messages.some((message: { role: string; content: string }) =>
-          message.role === "tool" && message.content === firstWebView));
-        assert.ok(data.messages.some((message: { role: string; content: string }) =>
-          message.role === "tool" && /# 文档\n定义：chief-of-staff/.test(message.content)));
-      }
-      delta = { content: "已核查" };
-    }
-    res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(`data: ${JSON.stringify({ id: "fixture", choices: [{ index: 0, delta, finish_reason: delta.tool_calls ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  let shutdown = async () => {};
-  t.after(() => closeFixture({ server, dir, shutdown: () => shutdown() }));
-  const app = await createTelegramHostFixture(t, { agentOptions: { dataDir: dir, promptFile: "system-prompt.md", deepseekKey: "test", tinyfishKey: "test",
-    modelBaseUrl: `http://127.0.0.1:${address.port}`, memoryBootstrap: false } });
-
-  shutdown = () => app.close();
-  const replies = app.sent;
-  await app.send("查定义", { messageId: 1 });
-  await app.send("继续", { messageId: 2 });
-  assert.equal(calls, 4);
-  const facts = await app.rootLog.read();
-  const finalRuns = new Set(facts.filter((event) => event.type === "run_succeeded" && (event.result as { finalText?: string })?.finalText === "已核查").map((event) => event.runId));
-  const finalDeliveries = facts.filter((event) => event.type === "delivery_succeeded" && finalRuns.has(event.runId));
-  assert.equal(finalDeliveries.length, 2);
-  for (const fact of finalDeliveries) assert.ok(app.deliveries.some((page) => page.messageId === fact.telegramMessageId && page.text === "已核查"));
-  assert.ok(replies.some((text) => text.includes("运行进展")), "tool progress remains visible alongside final pages");
 });

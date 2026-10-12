@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Telegram 流式展示实机验收
 
 本入口测试展示链路，使用固定内容，不调用模型、不启动 polling、不写聊天历史数据库。它复用生产 grammY Rich API adapter、Host projection 和 Markdown 分页；模型公开阶段的行为由 Provider 集成测试验证。

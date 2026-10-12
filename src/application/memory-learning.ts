@@ -3,12 +3,13 @@ import type { RuntimeLog } from "../runtime/runtime-types.js";
 import { MEMORY_ALGORITHM, learningSignal, memoryDynamics, type MemoryDynamics } from "../memory/dynamics.js";
 import { memoryGraph, type MemoryInitialization } from "../memory/graph.js";
 
-const pending = new WeakMap<RuntimeLog, Promise<void>>();
+type MemoryLog = Pick<RuntimeLog, 'read' | 'append'>;
+const pending = new WeakMap<MemoryLog, Promise<void>>();
 export type MemoryLearningRecord = { type: "memory_learned"; requestId: string; userId: number; algorithm: string; origin: "online" | "historical";
   snapshotId: string; settledAt: string; dynamics: MemoryDynamics; deliveredSources: string[];
   activated: Array<{ nodeId: string; score: number; signal: number; shown: Array<{ nodeId: string; messageId: string; offset: number; end: number }> }>;
   [key: string]: unknown };
-export function persistMemoryLearning(log: RuntimeLog, record: MemoryLearningRecord, initializations: MemoryInitialization[]): Promise<void> {
+export function persistMemoryLearning(log: MemoryLog, record: MemoryLearningRecord, initializations: MemoryInitialization[]): Promise<void> {
   const work = (pending.get(log) ?? Promise.resolve()).catch(() => undefined).then(async () => {
     const events = await log.read();
     if (events.some((event) => event.type === "memory_learned" && event.requestId === record.requestId)) return;
@@ -23,7 +24,7 @@ export function persistMemoryLearning(log: RuntimeLog, record: MemoryLearningRec
   });
   pending.set(log, work); return work;
 }
-export function commitMemoryLearning(log: RuntimeLog, userId: number, config?: Partial<MemoryDynamics>, vector?: (text: string) => number[] | undefined): Promise<void> {
+export function commitMemoryLearning(log: MemoryLog, userId: number, config?: Partial<MemoryDynamics>, vector?: (text: string) => number[] | undefined): Promise<void> {
   return (async () => {
     const events = await log.read();
     const committed = new Set(events.filter((event) => event.type === "memory_learned").map((event) => event.requestId));

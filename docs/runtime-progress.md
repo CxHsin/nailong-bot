@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Runtime progress and migration
 
 Production Telegram and CLI use ordinary Markdown assistant output. Responses public message signatures retain `phase: commentary` or `final_answer` and a separate text-unit identity. A completed commentary item settles an independent progress unit, even when there is no tool call; a commentary-only response continues the execution instead of ending the Run. For Providers without a public phase, text alongside tools is progress and a normally completed step without tools is the final answer. The final answer is complete on its own. Historical JSON status/result/final encoding and data readers remain for old records; the legacy application and live JSON parser/writer were retired in #149.

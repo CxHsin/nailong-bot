@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](../personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Context Projection、Prompt Cache 与 Reasoning：Codex、Pi、Maka
 
 调研日期：2026-10-04（Asia/Shanghai）

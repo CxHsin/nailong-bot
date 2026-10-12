@@ -3,7 +3,8 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { TSchema } from "typebox";
-import type { ToolSource } from "./tool-catalog.js";
+import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+type ToolSource = { source: string; tools: ToolDefinition[] };
 
 export type McpConfig = { name: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string>; timeoutMs?: number };
 export async function connectMcp(config: McpConfig) {

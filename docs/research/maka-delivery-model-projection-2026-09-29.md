@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](../personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # Maka：外部 Bot 送达与模型上下文投影
 
 调研日期：2026-09-29。核对 Apache Maka 主线提交 [`ec324da4f578cc111de2a1d2a20444c63432a365`](https://github.com/apache/maka/tree/ec324da4f578cc111de2a1d2a20444c63432a365)。范围是其 Runtime 模型历史投影和桌面端外部 Bot（含 Telegram）入口；以下结论不应外推到所有其他客户端或未公开的部署。

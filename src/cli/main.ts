@@ -1,44 +1,46 @@
-import { createInterface } from "node:readline/promises";
-import { stdin, stdout, stderr } from "node:process";
-import { resolve } from "node:path";
-import { createRuntimeEventLog } from "../runtime/event-log.js";
-import { createPiAgent } from "../agent/pi-agent.js";
-import { modelEnvironment } from "../agent/model-config.js";
-import { createAgentHost } from "../application/agent-host.js";
-import { createCliChannel, parseCliArgs } from "./cli-channel.js";
-import { capabilityEnvironment } from "../agent/capability-config.js";
-import { acquireHostOwnership } from "../runtime/host-ownership.js";
+import { createInterface } from 'node:readline/promises';
+import { stdin, stdout, stderr } from 'node:process';
+import { readFile } from 'node:fs/promises';
+import { createPersonalRuntime } from '../personal/runtime.js';
+import { createPlainChannel, cliInput } from '../personal/channels.js';
+import { parseCliArgs } from './cli-channel.js';
 
 async function main() {
   const args = parseCliArgs(process.argv.slice(2));
-  const dataDir = resolve(process.env.AGENT_DATA_DIR?.trim() || "data");
-  const promptFile = resolve(process.env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md");
-  const modelConfiguration = modelEnvironment(process.env);
-  const ownership = await acquireHostOwnership(dataDir);
+  const actorId = process.env.AGENT_ACTOR_ID?.trim() || 'cli';
+  const conversationId = args.conversationId ?? `cli:${actorId}`;
+  const runtime = await createPersonalRuntime();
+  const channel = createPlainChannel({ host: runtime.host, accepts: id => id === conversationId,
+    sendText: async (text, delivery) => { stdout.write(`${args.json ? JSON.stringify({ type: 'message', ...delivery, text }) : text}\n`); return delivery.id; },
+    sendFile: async (path, delivery) => { stdout.write(`${args.json ? JSON.stringify({ type: 'file', path, taskId: delivery.taskId }) : `文件：${path}`}\n`); return delivery.id; },
+    onDelivered: runtime.onDelivered, reportFailure: error => stderr.write(`${String(error)}\n`) });
+  let tickTail = Promise.resolve();
+  const timer = setInterval(() => { tickTail = tickTail.then(async () => { await runtime.plans.tick(); await channel.recover(); }).catch(error => { stderr.write(`${String(error)}\n`); }); }, 1000);
+  timer.unref();
   try {
-    const log = await createRuntimeEventLog(dataDir);
-    const agent = await createPiAgent({ ...await capabilityEnvironment(process.env), dataDir, promptFile, modelConfiguration, tinyfishKey: process.env.TINYFISH_API_KEY?.trim(),
-      compaction: process.env.CONTEXT_COMPACTION ? JSON.parse(process.env.CONTEXT_COMPACTION) : undefined });
-    try {
-      const host = createAgentHost({ log, dataDir, promptFile, agent });
-      await host.recoverInterrupted();
-      await host.notifyRecovery("cli", async (text, noticeId) => { stdout.write(`${args.json ? JSON.stringify({ type: "recovery_notice", text, noticeId }) : text}\n`); });
-      const cli = createCliChannel({ host, actor: { id: process.env.AGENT_ACTOR_ID?.trim() || "cli", kind: "user" }, stdout: (line) => stdout.write(`${line}\n`), stderr: (line) => stderr.write(`${line}\n`),
-        onDelivered: (event) => host.recordDelivery(event, { channel: "cli" }) });
-      if (args.command === "send") await cli.send(args.text, { json: args.json, conversationId: args.conversationId, imagePath: args.imagePath });
-      else {
-        const reader = createInterface({ input: stdin, output: stdout });
-        const interrupt = () => {
-          const conversationId = args.conversationId ?? `cli:${process.env.AGENT_ACTOR_ID?.trim() || "cli"}`;
-          if (host.isBusy(conversationId)) void cli.send("/stop", { json: args.json, conversationId }).catch(() => {});
-          else reader.close();
-        };
-        process.on("SIGINT", interrupt); reader.on("SIGINT", interrupt);
-        try { await cli.chat((async function* () { for await (const line of reader) yield line; })(), { json: args.json, conversationId: args.conversationId }); }
-        finally { process.off("SIGINT", interrupt); reader.off("SIGINT", interrupt); reader.close(); }
+    await channel.recover();
+    if (args.command === 'send') {
+      const input = cliInput(args.text ?? '', conversationId, actorId);
+      if (args.imagePath) {
+        const bytes = await readFile(args.imagePath);
+        input.images = [{ type: 'image', mimeType: args.imagePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg', data: bytes.toString('base64') }];
       }
-    } finally { await agent.close(); }
-  } finally { ownership.release(); }
+      await channel.receive(input); await runtime.host.waitForIdle();
+    } else {
+      const reader = createInterface({ input: stdin, output: stdout });
+      const pending = new Set<Promise<unknown>>();
+      const interrupt = () => reader.close();
+      reader.on('SIGINT', interrupt);
+      try {
+        for await (const text of reader) {
+          const result = channel.receive(cliInput(text, conversationId, actorId)); pending.add(result);
+          void result.catch(error => stderr.write(`${String(error)}\n`)).finally(() => pending.delete(result));
+        }
+        await Promise.allSettled(pending);
+      } finally { reader.off('SIGINT', interrupt); reader.close(); }
+    }
+    await channel.flush();
+  } finally { clearInterval(timer); await tickTail; await channel.close(); await runtime.close(); }
 }
 
-main().catch((error) => { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; });
+main().catch(error => { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; });

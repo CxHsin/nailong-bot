@@ -1,3 +1,5 @@
+> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](personal-agent-operations.md) 取代。以下旧命令、在线行为和测试结果不能作为新入口的验收证据。
+
 # 整体重构的兼容验收
 
 规格 [#143](https://github.com/CxHsin/nailong-bot/issues/143)；基线盘点 [#144](https://github.com/CxHsin/nailong-bot/issues/144)。本轮保留当前生产行为、配置、数据与技术栈，插件系统留待具体需求明确。此文记录可检查的边界和证据，不替代 Issue 中的规格。
