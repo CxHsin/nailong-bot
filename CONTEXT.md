@@ -6,6 +6,10 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Personal Agent**: A persistent personal counterpart for ongoing conversation and work across the user's activities. Coding is one capability within this role; building another comprehensive coding agent is not the product goal.
 
+**Delegation**: Work entrusted by the Personal Agent to a helper, with results returned to the Personal Agent for continued handling of the user's goal. The Personal Agent handles lightweight work directly and delegates work that requires substantial time or a separate context.
+
+**Standing Responsibility**: An ongoing duty explicitly entrusted by the user to the Personal Agent, within an authorized scope. It calls for continued follow-through and selective reporting of meaningful developments or decisions needing the user.
+
 **Host**: Channel-independent owner of durable inputs, Tasks, scheduling, authorization, recovery, acceptance and Delivery. Business records are direct SQLite state.
 
 **Channel**: Authenticates input and delivers plain text or files. Owns no agent loop or task state.
