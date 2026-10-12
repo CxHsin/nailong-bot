@@ -6,11 +6,11 @@
   "status": "pass",
   "visualReview": "not-requested",
   "provenance": "current",
-  "deliveryReceiptId": "5ea4554d-c141-41fc-b232-1d4a92918467",
+  "deliveryReceiptId": "1a2e23cb-b0bc-4161-b11c-4d3de4ce6419",
   "artifact": {
     "path": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\nailong-runtime.html",
-    "sha256": "b96b251cecaa38729911684d3fc2444aae55e1f382b8efb5bb1caad9cb71ba67",
-    "bytes": 777338
+    "sha256": "f38f9dbca9f038e87e58637fd51bada7f81eb13f23394b5a37ef111d787f59e0",
+    "bytes": 790977
   },
   "state": {
     "detail": "read",
@@ -45,23 +45,23 @@
         "diagramWidth": 1346,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 52,
+          "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 587,
+          "svgPx": 633,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 6.688198757763975,
-        "minimumProjectedNonEdgeTextPx": 7.524223602484472,
-        "minimumProjectedEdgeTextPx": 6.688198757763975,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 6.85859872611465,
+        "minimumProjectedNonEdgeTextPx": 7.715923566878981,
+        "minimumProjectedEdgeTextPx": 6.85859872611465,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -97,23 +97,23 @@
         "diagramWidth": 1506,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 657,
+          "svgPx": 708,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 7.483229813664596,
-        "minimumProjectedNonEdgeTextPx": 8.41863354037267,
-        "minimumProjectedEdgeTextPx": 7.483229813664596,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 7.673885350318471,
+        "minimumProjectedNonEdgeTextPx": 8.63312101910828,
+        "minimumProjectedEdgeTextPx": 7.673885350318471,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -145,27 +145,27 @@
         "readerOverflow": null,
         "readerFit": "intrinsic-height",
         "ok": true,
-        "readerWidth": 1856,
-        "diagramWidth": 1826,
+        "readerWidth": 1805,
+        "diagramWidth": 1775,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 796,
+          "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -201,23 +201,23 @@
         "diagramWidth": 1870,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 68,
+          "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 815,
+          "svgPx": 879,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -306,23 +306,23 @@
         "diagramWidth": 1346,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 52,
+          "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 587,
+          "svgPx": 633,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 6.688198757763975,
-        "minimumProjectedNonEdgeTextPx": 7.524223602484472,
-        "minimumProjectedEdgeTextPx": 6.688198757763975,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 6.85859872611465,
+        "minimumProjectedNonEdgeTextPx": 7.715923566878981,
+        "minimumProjectedEdgeTextPx": 6.85859872611465,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -358,23 +358,23 @@
         "diagramWidth": 1506,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 657,
+          "svgPx": 708,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 7.483229813664596,
-        "minimumProjectedNonEdgeTextPx": 8.41863354037267,
-        "minimumProjectedEdgeTextPx": 7.483229813664596,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 7.673885350318471,
+        "minimumProjectedNonEdgeTextPx": 8.63312101910828,
+        "minimumProjectedEdgeTextPx": 7.673885350318471,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -406,27 +406,27 @@
         "readerOverflow": null,
         "readerFit": "intrinsic-height",
         "ok": true,
-        "readerWidth": 1856,
-        "diagramWidth": 1826,
+        "readerWidth": 1805,
+        "diagramWidth": 1775,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 796,
+          "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -462,23 +462,23 @@
         "diagramWidth": 1870,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 68,
+          "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 815,
+          "svgPx": 879,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -519,23 +519,23 @@
         "diagramWidth": 1346,
         "pageComposition": {
           "bodyPaddingPx": 12,
-          "headerPx": 52,
+          "headerPx": 78,
           "diagramChromePx": 78,
-          "svgPx": 587,
+          "svgPx": 633,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 6.688198757763975,
-        "minimumProjectedNonEdgeTextPx": 7.524223602484472,
-        "minimumProjectedEdgeTextPx": 6.688198757763975,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 6.85859872611465,
+        "minimumProjectedNonEdgeTextPx": 7.715923566878981,
+        "minimumProjectedEdgeTextPx": 6.85859872611465,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -571,23 +571,23 @@
         "diagramWidth": 1506,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 657,
+          "svgPx": 708,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
-        "minimumProjectedNodeTextPx": 7.483229813664596,
-        "minimumProjectedNonEdgeTextPx": 8.41863354037267,
-        "minimumProjectedEdgeTextPx": 7.483229813664596,
-        "minimumProjectedNodeText": "私聊",
+        "viewBoxWidth": 1570,
+        "minimumProjectedNodeTextPx": 7.673885350318471,
+        "minimumProjectedNonEdgeTextPx": 8.63312101910828,
+        "minimumProjectedEdgeTextPx": 7.673885350318471,
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -619,27 +619,27 @@
         "readerOverflow": null,
         "readerFit": "intrinsic-height",
         "ok": true,
-        "readerWidth": 1856,
-        "diagramWidth": 1826,
+        "readerWidth": 1805,
+        "diagramWidth": 1775,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 60,
+          "headerPx": 86,
           "diagramChromePx": 84,
-          "svgPx": 796,
+          "svgPx": 834,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -675,23 +675,23 @@
         "diagramWidth": 1870,
         "pageComposition": {
           "bodyPaddingPx": 64,
-          "headerPx": 68,
+          "headerPx": 94,
           "diagramChromePx": 94,
-          "svgPx": 815,
+          "svgPx": 879,
           "cardsPx": 0,
-          "viewBoxHeight": 702
+          "viewBoxHeight": 738
         },
-        "viewBoxWidth": 1610,
+        "viewBoxWidth": 1570,
         "minimumProjectedNodeTextPx": 8,
         "minimumProjectedNonEdgeTextPx": 9,
         "minimumProjectedEdgeTextPx": 8,
-        "minimumProjectedNodeText": "私聊",
+        "minimumProjectedNodeText": "认证输入",
         "minimumProjectedNodeTextDetail": "edge",
         "minimumProjectedNodeTextOwner": {
           "kind": "edge",
-          "id": "user-api",
+          "id": "input",
           "from": "user",
-          "to": "telegram-api"
+          "to": "channels"
         },
         "minimumRequiredNodeTextPx": 6,
         "readabilityOk": true,
@@ -715,7 +715,7 @@
     "contactSheet": null
   },
   "sidecars": {
-    "directory": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-3",
+    "directory": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261012",
     "receipt": "nailong-runtime.browser-check.json",
     "files": []
   }
