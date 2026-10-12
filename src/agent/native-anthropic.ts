@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
 import { calculateCost, type Api, type Context, type Model, type SimpleStreamOptions } from '@mariozechner/pi-ai';
-import { nativeStream, textContent, type NativeRuntime, type NativeAssistant, type NativeDiscovery } from './native-tool-search.js';
+import { canonical, nativeStream, textContent, type NativeRuntime, type NativeAssistant, type NativeDiscovery } from './native-tool-search.js';
 
 export function streamNativeAnthropic(model: Model<Api>, context: Context, options: SimpleStreamOptions, runtime: NativeRuntime) {
   return nativeStream(model, options, async (output, stream) => {
@@ -35,6 +35,7 @@ export function streamNativeAnthropic(model: Model<Api>, context: Context, optio
     output.nativeToolSearch = { version: 1, protocol: 'anthropic-messages', scope: runtime.scope.sessionId, modelIdentity: runtime.identity(model), pages: [], definitions: {}, recordId: randomUUID() };
     const previousNative = context.messages.findLast(message => message.role === 'assistant' && (message as NativeAssistant).nativeToolSearch) as NativeAssistant | undefined;
     let pauses = previousNative?.nativeToolSearch?.paused && runtime.valid(previousNative.nativeToolSearch, model) ? previousNative.nativeToolSearch.pages.length : 0;
+    const calls = new Map<string, string>();
     if (pauses > (runtime.options.maxPauseContinuations ?? 3)) throw new Error('原生工具搜索 pause_turn 达到续接预算上限');
     while (true) {
       let payload: Record<string, unknown> = { model: model.id, messages: [...messages], tools: catalog, stream: true,
@@ -80,7 +81,15 @@ export function streamNativeAnthropic(model: Model<Api>, context: Context, optio
       await runtime.account(model, pageUsage);
       if (interrupted) throw interrupted;
       if (!terminal || closed.size !== blocks.size || !reason) throw new Error('原生搜索响应断流：缺少结束事件');
-      const ordered = [...blocks].sort(([a], [b]) => a - b).map(([, block]) => block);
+      const ordered = [...blocks].sort(([a], [b]) => a - b).map(([, block]) => block).filter(block => {
+        if (block.type !== 'tool_use' && block.type !== 'server_tool_use') return true;
+        if (!block.id) throw new Error('原生工具调用缺少身份');
+        const signature = canonical([block.type, block.name, block.input ?? {}]);
+        const previous = calls.get(String(block.id));
+        if (previous !== undefined && previous !== signature) throw new Error('原生工具调用身份内容冲突');
+        if (previous !== undefined) return false;
+        calls.set(String(block.id), signature); return true;
+      });
       output.nativeToolSearch.pages.push(ordered);
       for (const block of ordered) {
         if (block.type === 'tool_search_tool_result' && block.content?.type === 'tool_search_tool_search_result') for (const ref of block.content.tool_references ?? []) {

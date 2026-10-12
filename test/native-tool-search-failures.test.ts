@@ -23,15 +23,15 @@ function respond(res: ServerResponse, items: unknown[], options: { terminal?: bo
   if (options.terminal !== false) events.push({ type: 'response.completed', response: { id: 'r', status: 'completed', output: items, usage: { input_tokens: options.inputTokens ?? 10, output_tokens: 5 } } });
   res.end(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''));
 }
-async function fixture(t: TestContext, handler: (wire: any, res: ServerResponse, request: { headers: any }) => void | Promise<void>, customize: Partial<PersonalPiOptions> = {}) {
+async function fixture(t: TestContext, handler: (wire: any, res: ServerResponse, request: { headers: any }) => void | Promise<void>, customize: Partial<PersonalPiOptions> = {}, api: 'openai-responses' | 'anthropic-messages' = 'openai-responses') {
   const dir = await mkdtemp(join(tmpdir(), 'native-failure-')); const promptFile = join(dir, 'prompt.md'); await writeFile(promptFile, 'Be helpful.');
   const effects: string[] = [];
   const tool = defineTool({ name: 'probe', label: 'Probe', description: 'Pure test probe.', parameters: Type.Object({}), async execute(id) { effects.push(id); return { content: [{ type: 'text', text: 'observed' }], details: undefined }; } });
   const server = createTestServer(t, async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; await handler(JSON.parse(body), res, req); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const addr = server.address(); assert.ok(addr && typeof addr !== 'string');
   const options: PersonalPiOptions = { dataDir: dir, promptFile, limits: { timeoutMs: 3000, maxRetries: 0 },
-    modelConfiguration: { defaultModel: 'native', models: [{ alias: 'native', api: 'openai-responses', baseUrl: `http://127.0.0.1:${addr.port}`, model: 'gpt-5.4', apiKey: 'fixture', toolSearch: 'native' }] },
-    capabilityCatalog: () => [{ tool }], ...customize };
+    modelConfiguration: { defaultModel: 'native', models: [{ alias: 'native', api, baseUrl: `http://127.0.0.1:${addr.port}`, model: api === 'anthropic-messages' ? 'claude-sonnet-4-6' : 'gpt-5.4', apiKey: 'fixture', toolSearch: 'native' }] },
+    capabilityCatalog: () => [{ tool, authorize: () => true }], ...customize };
   let pi = await createPersonalPi(options); let host = new PersonalHost({ store: new PersonalStore(dir), dialogue: pi.dialogue, executor: pi.executor });
   t.after(async () => { await host.close(); await pi.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); });
   return { effects, options, get pi() { return pi; }, get host() { return host; },
@@ -43,6 +43,19 @@ test('A deferred call without discovery is rejected before its effect', async t 
   let stage = 0;
   const run = await fixture(t, (_wire, res) => respond(res, [stage++ ? text : call]));
   assert.equal((await run.submit()).text, 'done'); assert.deepEqual(run.effects, []);
+});
+
+test('Responses accounts confirmed usage once when the stream fails after completion', async t => {
+  const usage: number[] = [];
+  const run = await fixture(t, (_wire, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.end([
+      { type: 'response.completed', response: { id: 'r', output: [text], usage: { input_tokens: 10, output_tokens: 5 } } },
+      { type: 'error', message: 'stream failed after confirmed usage' },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''));
+  }, { nativeSearch: { onUsage: event => { usage.push(event.usage.totalTokens); } } });
+  await assert.rejects(run.submit(), /失败/);
+  assert.deepEqual(usage, [15]); assert.deepEqual(run.effects, []);
 });
 
 test('A truncated native search response cannot execute or establish a discovery', async t => {
@@ -58,6 +71,57 @@ test('Incomplete function arguments never dispatch a local capability', async t 
 test('Duplicate native output events execute a discovered call only once', async t => {
   let stage = 0;
   const run = await fixture(t, (_wire, res) => respond(res, [stage++ === 0 ? search : stage === 2 ? call : text], { duplicate: true }));
+  assert.equal((await run.submit()).text, 'done'); assert.deepEqual(run.effects, ['f1']);
+});
+
+test('Responses rejects conflicting logical call ids before dispatch', async t => {
+  let stage = 0;
+  const run = await fixture(t, (_wire, res) => {
+    stage++; respond(res, stage === 1 ? [search] : stage === 2 ? [call, { ...call, id: 'other-item', arguments: '{"unexpected":1}' }] : [text]);
+  });
+  await assert.rejects(run.submit(), /调用身份.*冲突/); assert.deepEqual(run.effects, []);
+});
+
+test('Responses collapses equal logical calls in execution and protocol replay', async t => {
+  let stage = 0;
+  const run = await fixture(t, (wire, res) => {
+    stage++;
+    if (stage === 3) assert.equal(wire.input.filter((item: { type: string; call_id?: string }) => item.type === 'function_call' && item.call_id === 'f1').length, 1);
+    respond(res, stage === 1 ? [search] : stage === 2 ? [call, { ...call, id: 'another-item' }] : [text]);
+  });
+  assert.equal((await run.submit()).text, 'done'); assert.deepEqual(run.effects, ['f1']);
+});
+
+function respondAnthropic(res: ServerResponse, blocks: Array<Record<string, unknown>>, reason: string) {
+  const events: Array<Record<string, unknown>> = [{ type: 'message_start', message: { id: 'm', usage: { input_tokens: 10, output_tokens: 0 } } }];
+  blocks.forEach((block, index) => events.push({ type: 'content_block_start', index, content_block: block }, { type: 'content_block_stop', index }));
+  events.push({ type: 'message_delta', delta: { stop_reason: reason }, usage: { output_tokens: 5 } }, { type: 'message_stop' });
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
+}
+
+test('Anthropic rejects conflicting logical tool ids before dispatch', async t => {
+  let stage = 0;
+  const run = await fixture(t, (_wire, res) => {
+    stage++;
+    respondAnthropic(res, stage === 1 ? [{ type: 'tool_use', id: 'search1', name: 'tool_search', input: { query: 'probe' } }] :
+      stage === 2 ? [{ type: 'tool_use', id: 'f1', name: 'probe', input: {} }, { type: 'tool_use', id: 'f1', name: 'probe', input: { unexpected: 1 } }] :
+        [{ type: 'text', text: 'done' }], stage < 3 ? 'tool_use' : 'end_turn');
+  }, {}, 'anthropic-messages');
+  await assert.rejects(run.submit(), /调用身份.*冲突/); assert.deepEqual(run.effects, []);
+});
+
+test('Anthropic collapses equal logical calls in execution and protocol replay', async t => {
+  let stage = 0;
+  const run = await fixture(t, (wire, res) => {
+    stage++;
+    if (stage === 3) assert.equal(wire.messages.flatMap((message: { role: string; content: unknown }) =>
+      message.role === 'assistant' && Array.isArray(message.content) ? message.content : [])
+      .filter((block: { type: string; id?: string }) => block.type === 'tool_use' && block.id === 'f1').length, 1);
+    const probe = { type: 'tool_use', id: 'f1', name: 'probe', input: {} };
+    respondAnthropic(res, stage === 1 ? [{ type: 'tool_use', id: 'search1', name: 'tool_search', input: { query: 'probe' } }] :
+      stage === 2 ? [probe, { ...probe }] : [{ type: 'text', text: 'done' }], stage < 3 ? 'tool_use' : 'end_turn');
+  }, {}, 'anthropic-messages');
   assert.equal((await run.submit()).text, 'done'); assert.deepEqual(run.effects, ['f1']);
 });
 

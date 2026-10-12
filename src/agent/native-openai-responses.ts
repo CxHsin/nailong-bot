@@ -46,8 +46,8 @@ export function streamNativeResponses(model: Model<Api>, context: Context, optio
     const { data: events, response } = await client.responses.create(payload as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
       { signal: options.signal, timeout: options.timeoutMs, maxRetries: options.maxRetries }).withResponse();
     await options.onResponse?.({ status: response.status, headers: Object.fromEntries(response.headers) }, model);
-    const items = new Map<number, Record<string, unknown>>(); const deltas = new Map<string, number>(); let terminal = false;
-    for await (const raw of events) {
+    const items = new Map<number, Record<string, unknown>>(); const deltas = new Map<string, number>(); let terminal = false; let confirmedUsage = false;
+    try { for await (const raw of events) {
       const event = raw as unknown as Record<string, any>;
       if (event.type === 'response.created') output.responseId = event.response.id;
       if (event.type === 'response.output_text.delta') {
@@ -66,15 +66,25 @@ export function streamNativeResponses(model: Model<Api>, context: Context, optio
         terminal = true; output.responseId = event.response.id;
         output.responseModel = event.response.model;
         const usage = event.response.usage;
-        if (usage) { output.usage.cacheRead = usage.input_tokens_details?.cached_tokens ?? 0; output.usage.input = (usage.input_tokens ?? 0) - output.usage.cacheRead;
+        if (usage) { confirmedUsage = true; output.usage.cacheRead = usage.input_tokens_details?.cached_tokens ?? 0; output.usage.input = (usage.input_tokens ?? 0) - output.usage.cacheRead;
           output.usage.output = usage.output_tokens ?? 0; output.usage.totalTokens = usage.total_tokens ?? (usage.input_tokens ?? 0) + output.usage.output; calculateCost(model, output.usage); }
         if (event.response.output?.length) for (const [index, item] of event.response.output.entries()) items.set(index, item);
         if (event.type === 'response.incomplete') output.stopReason = 'length';
       }
-    }
+    } } finally { if (confirmedUsage) await runtime.account(model, output.usage); }
     if (!terminal) throw new Error('原生搜索响应断流：缺少结束事件');
-    await runtime.account(model, output.usage);
-    const ordered = [...items].sort(([a], [b]) => a - b).map(([, item]) => item);
+    if (!confirmedUsage) await runtime.account(model, output.usage);
+    const calls = new Map<string, string>();
+    const ordered = [...items].sort(([a], [b]) => a - b).map(([, item]) => item).filter(item => {
+      if (item.type !== 'function_call' && !(item.type === 'tool_search_call' && item.execution === 'client')) return true;
+      if (!item.call_id) throw new Error('原生工具调用缺少身份');
+      const args = typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments;
+      const signature = canonical([item.type, item.name, item.execution, item.status, args]);
+      const id = String(item.call_id); const previous = calls.get(id);
+      if (previous !== undefined && previous !== signature) throw new Error('原生工具调用身份内容冲突');
+      if (previous !== undefined) return false;
+      calls.set(id, signature); return true;
+    });
     output.content = [];
     output.nativeToolSearch = { version: 1, protocol: 'openai-responses', scope: runtime.scope.sessionId, modelIdentity: runtime.identity(model), pages: [ordered], definitions: {} };
     const seen = new Set<string>();
