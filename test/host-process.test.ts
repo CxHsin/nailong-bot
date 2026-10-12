@@ -36,7 +36,7 @@ async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' =
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const children: ReturnType<typeof spawn>[] = [];
-  const start = (dataDir = dir) => {
+  const start = (dataDir = join(dir, 'data')) => {
     const child = spawn(process.execPath, ["--import", "tsx", "src/cli/main.ts", "chat", "--json"], {
       cwd: resolve("."), stdio: ["pipe", "pipe", "pipe"], env: { ...process.env,
         AGENT_DATA_DIR: dataDir, AGENT_PROMPT_FILE: promptFile, AGENT_CAPABILITIES_FILE: "", TINYFISH_API_KEY: "",
@@ -67,7 +67,7 @@ async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' =
 test("a second CLI Host cannot recover or change a live Host using the same directory", { timeout: 60000 }, async (t) => {
   const f = await processFixture(t);
   const first = f.start(); first.child.stdin!.write("/help\n"); await first.wait((event) => event.type === "message");
-  const second = f.start(join(f.dir, ".")); second.child.stdin!.end("/help\n");
+  const second = f.start(join(f.dir, 'data', ".")); second.child.stdin!.end("/help\n");
   const [code] = await second.exit;
   assert.equal(code, 1); assert.match(second.errors(), /Host.*占用/);
   assert.equal(second.lines.length, 0);

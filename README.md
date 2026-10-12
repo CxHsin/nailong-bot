@@ -59,4 +59,4 @@ Host 直接保存 Task/Attempt、输入、授权、计划和 Delivery；Pi 原�
 
 `src/personal/` 为当前生产实现，Telegram/CLI 共享 runtime 工厂。旧全局 Run 队列、流式投影和自建在线上下文循环已退役。执行 `npm run typecheck`、`npm test`、`npm run build`、`npm run docs:check`。当前入口回归为 `test/personal-*.test.ts` 和实际 CLI 子进程测试。
 
-真实 Windows/herdr 已验证文件验收、进程树停止与同身份崩溃恢复；真实 Telegram 凭据闭环仍待执行，受控 API 测试不能替代。详细覆盖、配置及回退边界见 [操作说明](docs/personal-agent-operations.md)。
+真实 Windows/herdr 已验证文件验收、进程树停止与同身份崩溃恢复；真实 Telegram 已验证文字入站/模型回复、消息/文件出站与修复后的结构化文件重试。完整交互矩阵仍待执行，详见 [Telegram 实机记录](docs/personal-telegram-acceptance-20261012.md)。覆盖、配置及回退边界见 [操作说明](docs/personal-agent-operations.md)。

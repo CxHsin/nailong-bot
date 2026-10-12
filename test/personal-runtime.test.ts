@@ -9,6 +9,80 @@ import { createPlainChannel } from '../src/personal/channels.js';
 import { sendChatCompletion } from './fixtures/chat-completion.js';
 import { createTestServer } from './fixtures/http-server.js';
 
+test('task and independent verifier cannot read persistence through a parent workspace', { timeout: 15_000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nailong-protected-read-'));
+  const dataDir = join(directory, 'data'); const promptFile = join(directory, 'prompt.md');
+  await writeFile(promptFile, 'Help the user.'); let denied = 0;
+  const server = createTestServer(t, async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    const names = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
+    const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
+    if (names.includes('task_control')) {
+      if (last.role === 'tool') return sendChatCompletion(res, 'submitted');
+      return call('task_control', { kind: 'start', goal: 'inspect private file', cwd: directory });
+    }
+    if (last.role !== 'tool') return call('read', { path: 'data/private.txt' });
+    if (last.tool_call_id === 'call_read') {
+      assert.doesNotMatch(last.content, /PRIVATE_SENTINEL/);
+      assert.match(last.content, /持久数据/); denied++;
+      if (names.includes('verify_result')) return call('verify_result', { verified: false, text: 'protected', artifacts: [], checksRequired: false });
+    }
+    return sendChatCompletion(res, 'protected');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: dataDir, AGENT_PROMPT_FILE: promptFile,
+    MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions',
+    MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_MODEL_TIMEOUT_MS: '10000' });
+  try {
+    await writeFile(join(dataDir, 'private.txt'), 'PRIVATE_SENTINEL');
+    const response = await runtime.host.submit({ conversationId: 'one', actorId: 'one', inputId: '1', text: 'inspect protected file' });
+    await runtime.host.waitForIdle(); assert.equal(denied, 2);
+    assert.equal(runtime.host.getTask(response.taskId!)?.result?.verified, false);
+  } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('default task directory cannot be confused with the main Session persistence directory', { timeout: 15_000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nailong-default-workspace-'));
+  const dataDir = join(directory, 'data'); const promptFile = join(directory, 'prompt.md');
+  await writeFile(promptFile, 'Help the user.'); let rejected = false;
+  const server = createTestServer(t, async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk;
+    const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    const names = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
+    const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
+    if (names.includes('task_control')) {
+      if (last.role !== 'tool') return call('task_control', { kind: 'start', goal: 'create acceptance.txt exactly 42', cwd: dataDir });
+      if (String(last.content).includes('省略 cwd')) { rejected = true; return call('task_control', { kind: 'start', goal: 'create acceptance.txt exactly 42' }); }
+      return sendChatCompletion(res, 'submitted');
+    }
+    if (names.includes('verify_result')) {
+      if (last.role !== 'tool') return call('read', { path: 'acceptance.txt' });
+      if (last.tool_call_id === 'call_read') {
+        assert.match(last.content, /hostFileEvidence/); assert.match(last.content, /"bytes":2/);
+        return call('verify_result', { verified: true, text: 'read actual 42', artifacts: ['acceptance.txt'], checksRequired: false });
+      }
+      return sendChatCompletion(res, 'verified');
+    }
+    if (last.role !== 'tool') return call('write', { path: 'acceptance.txt', content: '42' });
+    return sendChatCompletion(res, 'written');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: dataDir, AGENT_PROMPT_FILE: promptFile,
+    MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions',
+    MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_MODEL_TIMEOUT_MS: '10000' });
+  try {
+    const response = await runtime.host.submit({ conversationId: 'one', actorId: 'one', inputId: '1', text: 'create default task file' });
+    await runtime.host.waitForIdle(); const task = runtime.host.getTask(response.taskId!)!;
+    assert.equal(rejected, true, 'protected cwd must be rejected before accepting the task');
+    assert.equal(task.status, 'completed');
+    assert.equal(await readFile(join(task.cwd!, 'acceptance.txt'), 'utf8'), '42');
+    assert.equal(await readFile(task.result!.artifacts![0]!, 'utf8'), '42');
+  } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('CLI → production Host uses native execution, independently reads the result, and delivers actual file', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nailong-runtime-'));
   const cwd = join(directory, 'work');
