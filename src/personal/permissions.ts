@@ -1,4 +1,5 @@
-import { mkdir, realpath, lstat, link, unlink } from 'node:fs/promises';
+import { mkdir, realpath, lstat, link, unlink, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { defineTool, createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, type ToolDefinition } from '@mariozechner/pi-coding-agent';
 import { Type } from 'typebox';
@@ -63,10 +64,14 @@ export function createWorkTools(get: () => WorkToolContext, options: { dataDir: 
       if (args.operation === 'delete' && !await work.requestAction(action)) throw permissionError('删除原件需要明确确认；未执行');
       return work.dispatch(id, action, async () => {
         await checkFile(work.current(), args.path, true, options.dataDir);
+        const snapshot = async (target: string) => { try { return { path: target, sha256: createHash('sha256').update(await readFile(target)).digest('hex') }; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { path: target, sha256: null }; throw error; } };
+        const paths = [path, ...(destination ? [destination] : [])];
+        const before = args.operation === 'mkdir' ? [] : await Promise.all(paths.map(snapshot));
         if (args.operation === 'mkdir') await mkdir(path, { recursive: true });
         else if (args.operation === 'move') { await checkFile(work.current(), args.destination!, true, options.dataDir); if (!(await lstat(path)).isFile()) throw permissionError('受控移动仅支持普通文件'); await link(path, destination!); await unlink(path); }
         else await unlink(path);
-        return response({ operation: args.operation, path, destination, completed: true });
+        const after = args.operation === 'mkdir' ? [] : await Promise.all(paths.map(snapshot));
+        return response({ operation: args.operation, path, destination, completed: true, materialOperation: { operation: args.operation, before, after } });
       });
     } }));
   tools.push(defineTool({ name: 'bash', label: 'Authorized command', description: 'Run within a verified restricted backend or explicitly confirmed trusted host mode. Trusted Shell inherits Host authority; it cannot enforce no-delete or no-send semantics. For deleting originals or external sending use the controlled interfaces and obtain explicit authorization.',

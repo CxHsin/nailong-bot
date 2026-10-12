@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch } from './types.js';
+import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch, WorkBudget } from './types.js';
 
 /** Business records are authoritative; SDK sessions contain model exchanges only. */
 export class PersonalStore {
@@ -38,12 +38,12 @@ export class PersonalStore {
   private upgradeBusinessSchema(existingDatabase: boolean) {
     const hasSchema = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_schema'").get();
     const version = hasSchema ? Number(this.db.prepare('SELECT version FROM personal_schema WHERE id=1').get()?.version ?? 0) : 0;
-    if (version > 1) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
-    if (version === 1) return;
+    if (version > 2) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
+    if (version === 2) return;
     let backupPath: string | undefined;
     if (existingDatabase) {
       const backupDirectory = join(this.directory, 'personal-schema-backups'); mkdirSync(backupDirectory, { recursive: true });
-      backupPath = join(backupDirectory, `v${version}-before-v1-${randomUUID()}.sqlite`);
+      backupPath = join(backupDirectory, `v${version}-before-v2-${randomUUID()}.sqlite`);
       // VACUUM INTO includes committed WAL pages in a consistent SQLite snapshot.
       this.db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`);
       const backupFile = openSync(backupPath, 'r+'); try { fsyncSync(backupFile); } finally { closeSync(backupFile); }
@@ -52,13 +52,13 @@ export class PersonalStore {
       finally { backup.close(); }
     }
     this.transaction(() => {
-      this.db.exec('CREATE TABLE personal_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, backup_path TEXT)');
+      this.db.exec('CREATE TABLE IF NOT EXISTS personal_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, backup_path TEXT); CREATE TABLE IF NOT EXISTS work_budgets(id TEXT PRIMARY KEY, body TEXT NOT NULL)');
       const hasTasks = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
       if (hasTasks) for (const task of this.list<Task>('tasks')) {
         task.workKind ??= 'root'; task.rootTaskId ??= task.id;
         this.putTask(task);
       }
-      this.db.prepare('INSERT INTO personal_schema VALUES(1,1,?)').run(backupPath ?? null);
+      this.db.prepare('INSERT INTO personal_schema VALUES(1,2,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,backup_path=excluded.backup_path').run(backupPath ?? null);
     });
   }
   businessSchema(): { version: number; backupPath?: string } {
@@ -78,6 +78,8 @@ export class PersonalStore {
   }
   private list<T>(table: string): T[] { return this.db.prepare(`SELECT body FROM ${table} ORDER BY rowid`).all().map(row => JSON.parse(String(row.body)) as T); }
   getTask(id: string) { return this.read<Task>('tasks', id); }
+  getBudget(id: string) { return this.read<WorkBudget>('work_budgets', id); }
+  putBudget(budget: WorkBudget) { this.db.prepare('INSERT INTO work_budgets VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(budget.id, JSON.stringify(budget)); }
   listTasks(conversation?: string) { return this.list<Task>('tasks').filter(task => !conversation || task.conversationId === conversation); }
   putTask(task: Task) { task.workKind ??= task.parentTaskId ? 'delegation' : 'root'; task.rootTaskId ??= task.parentTaskId ? this.getTask(task.parentTaskId)?.rootTaskId ?? task.parentTaskId : task.id; this.db.prepare('INSERT INTO tasks VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(task.id, task.conversationId, JSON.stringify(task)); }
   getAttempt(id: string) { return this.read<Attempt>('attempts', id); }
@@ -85,6 +87,10 @@ export class PersonalStore {
   putAttempt(attempt: Attempt) { this.db.prepare('INSERT INTO attempts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(attempt.id, attempt.taskId, JSON.stringify(attempt)); }
   getWorkEvent(id: string) { return this.read<WorkEvent>('work_events', id); }
   listWorkEvents(conversation?: string) { return this.list<WorkEvent>('work_events').filter(event => !conversation || event.conversationId === conversation); }
+  enqueueWorkEvent(event: WorkEvent): WorkEvent {
+    const existing = this.getWorkEvent(event.id); if (existing) return existing;
+    this.db.prepare('INSERT INTO work_events VALUES(?,?,?,?,?)').run(event.id, event.taskId, event.attemptId, event.kind, JSON.stringify(event)); return event;
+  }
   /** Latest cancellation/requirements win over the executor's starting snapshot. */
   settleDelegationResult(task: Task, attempt: Attempt): WorkEvent {
     return this.transaction(() => {
@@ -98,7 +104,7 @@ export class PersonalStore {
       const result = { ...task.result };
       if (result.producedRevision !== current.revision) result.verified = false;
       current.result = result; current.updatedAt = task.updatedAt;
-      if (!cancelled) { current.status = result.verified && !result.partial ? task.status : 'partial'; current.resourceHeld = task.resourceHeld; }
+      if (!cancelled) { current.status = ['waiting', 'stopping', 'queued'].includes(task.status) ? task.status : result.verified && !result.partial ? task.status : 'partial'; current.resourceHeld = task.resourceHeld; }
       const latestAttempt = this.getAttempt(attempt.id);
       if (latestAttempt && latestAttempt.taskId !== current.id) throw new Error('Attempt 身份冲突');
       const settledAttempt = { ...attempt, ...latestAttempt, status: current.status, finishedAt: attempt.finishedAt };

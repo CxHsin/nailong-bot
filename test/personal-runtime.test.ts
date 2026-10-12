@@ -6,16 +6,21 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { createPersonalRuntime } from '../src/personal/runtime.js';
 import { createPlainChannel } from '../src/personal/channels.js';
-import { sendChatCompletion } from './fixtures/chat-completion.js';
+import { sendChatCompletion, sendMainContinuation } from './fixtures/chat-completion.js';
 import { createTestServer } from './fixtures/http-server.js';
+import type { PersonalHost } from '../src/personal/host.js';
 
-test('task and independent verifier cannot read persistence through a parent workspace', { timeout: 15_000 }, async t => {
+function confirmScope(host: PersonalHost) {
+  for (const action of host.store.listActions().filter(action => action.status === 'pending' && action.action.kind === 'permission-grant')) { const task = host.getTask(action.taskId)!; host.authorizeAction({ conversationId: task.conversationId, actorId: task.actorId, inputId: `explicit-scope-confirmation:${action.id}`, text: 'Confirm this exact scope' }, action.id, true); }
+}
+
+test('research helper cannot read persistence and main receives blocked material', { timeout: 15_000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), 'nailong-protected-read-'));
   const dataDir = join(directory, 'data'); const promptFile = join(directory, 'prompt.md');
   await writeFile(promptFile, 'Help the user.'); let denied = 0;
   const server = createTestServer(t, async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
-    const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return; const last = wire.messages.at(-1);
     const names = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
     const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
     if (names.includes('task_control')) {
@@ -38,7 +43,8 @@ test('task and independent verifier cannot read persistence through a parent wor
   try {
     await writeFile(join(dataDir, 'private.txt'), 'PRIVATE_SENTINEL');
     const response = await runtime.host.submit({ conversationId: 'one', actorId: 'one', inputId: '1', text: 'inspect protected file' });
-    await runtime.host.waitForIdle(); assert.equal(denied, 2);
+    confirmScope(runtime.host);
+    await runtime.host.waitForIdle(); assert.equal(denied, 1, JSON.stringify(runtime.host.listTasks()));
     assert.equal(runtime.host.getTask(response.taskId!)?.result?.verified, false);
   } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
 });
@@ -49,7 +55,7 @@ test('default task directory cannot be confused with the main Session persistenc
   await writeFile(promptFile, 'Help the user.'); let rejected = false;
   const server = createTestServer(t, async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
-    const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return; const last = wire.messages.at(-1);
     const names = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
     const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
     if (names.includes('task_control')) {
@@ -89,7 +95,7 @@ test('CLI → production Host uses native execution, independently reads the res
   const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help the user.');
   const server = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
-    const wire = JSON.parse(body);
+    const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return;
     const names: string[] = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
     const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
     const last = wire.messages.at(-1);
@@ -118,8 +124,9 @@ test('CLI → production Host uses native execution, independently reads the res
     sendFile: async path => { sentFiles.push(await readFile(path, 'utf8')); return '2'; }, onDelivered: runtime.onDelivered });
   try {
     const response = await channel.receive({ conversationId: 'cli:owner', actorId: 'owner', inputId: '1', text: '创建 result.txt，内容为 42' });
+    confirmScope(runtime.host);
     await runtime.host.waitForIdle(); await channel.flush();
-    assert.equal(runtime.host.getTask(response.taskId!)?.status, 'completed');
+    assert.equal(runtime.host.getTask(response.taskId!)?.status, 'completed', JSON.stringify(runtime.host.listTasks()));
     assert.deepEqual(sentFiles, ['42']);
     assert.equal((await runtime.memory.nodes('cli:owner')).length, 1);
   } finally {
@@ -130,7 +137,7 @@ test('CLI → production Host uses native execution, independently reads the res
 });
 
 for (const phase of ['execution', 'verification'] as const) {
-  test(`production Host refuses stale results when requirements change during ${phase}`, { timeout: 15_000 }, async t => {
+  test(`production Host refuses stale research material after helper completion (${phase} fixture)`, { timeout: 15_000 }, async t => {
     const directory = await mkdtemp(join(tmpdir(), 'nailong-revision-'));
     const cwd = join(directory, 'work');
     const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help the user.');
@@ -139,7 +146,7 @@ for (const phase of ['execution', 'verification'] as const) {
     let blocked = false; let verifierSawCurrent = false;
     const server = createTestServer(t, async (req, res) => {
       let body = ''; for await (const chunk of req) body += chunk;
-      const wire = JSON.parse(body);
+      const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return;
       const names: string[] = wire.tools?.map((tool: { function: { name: string } }) => tool.function.name) ?? [];
       const last = wire.messages.at(-1);
       const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: `call_${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
@@ -164,7 +171,7 @@ for (const phase of ['execution', 'verification'] as const) {
         return sendChatCompletion(res, '验收结束');
       }
       if (last.role === 'tool') {
-        if (phase === 'execution' && !blocked) { blocked = true; reachBarrier(); await released; }
+        if (!blocked) { blocked = true; reachBarrier(); await released; }
         return sendChatCompletion(res, '原始内容 42 已写出');
       }
       // A queued steering turn is acknowledged by the actual SDK/model boundary,
@@ -181,16 +188,17 @@ for (const phase of ['execution', 'verification'] as const) {
     try {
       const input = { conversationId: 'cli:owner', actorId: 'owner', inputId: '1', text: '创建 result.txt，内容为 42' };
       const accepted = await channel.receive(input); assert.ok(accepted.taskId);
+      confirmScope(runtime.host);
       await reached;
       await channel.receive({ ...input, inputId: '2', text: `补充任务 ${accepted.taskId}，内容改为 84` });
       releaseBarrier();
       await runtime.host.waitForIdle(); await channel.flush();
       const task = runtime.host.getTask(accepted.taskId)!;
-      assert.equal(task.status, 'partial');
+      assert.equal(task.status, 'waiting');
       assert.equal(task.result?.verified, false);
       assert.equal(await readFile(join(cwd, 'result.txt'), 'utf8'), '42');
       if (phase === 'execution') {
-        assert.equal(verifierSawCurrent, true, 'independent verifier must receive current persisted requirements');
+        assert.equal(runtime.host.store.listWorkEvents()[0]?.state, 'consumed', 'main reviews helper material under latest requirements');
         assert.match(task.result?.text ?? '', /不满足最新要求 84/);
       } else assert.match(task.result?.text ?? '', /验收期间要求发生变化/);
     } finally {
@@ -201,11 +209,11 @@ for (const phase of ['execution', 'verification'] as const) {
   });
 }
 
-test('production configured verification cannot bypass restricted work execution permission', async t => {
+test('production research material uses source acceptance without invoking unrelated coding checks', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'nailong-check-permission-')); const cwd = join(directory, 'work');
   const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help.');
   const server = createTestServer(t, async (req, res) => {
-    let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); const last = wire.messages.at(-1);
+    let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return; const last = wire.messages.at(-1);
     if (last.role === 'tool') return sendChatCompletion(res, 'done');
     const main = wire.tools.some((tool: { function: { name: string } }) => tool.function.name === 'task_control');
     const name = main ? 'task_control' : 'write'; const args = main ? { kind: 'start', goal: 'create checked result', cwd } : { path: 'result.txt', content: '42' };
@@ -214,7 +222,8 @@ test('production configured verification cannot bypass restricted work execution
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
   const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions', MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_VERIFICATION_CHECKS: JSON.stringify([{ command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("unsafe-check.txt", "ran")'] }]) });
   t.after(async () => { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); });
-  const result = await runtime.host.submit({ conversationId: 'c', actorId: 'u', inputId: '1', text: 'create checked result' }); await runtime.host.waitForIdle();
+  const result = await runtime.host.submit({ conversationId: 'c', actorId: 'u', inputId: '1', text: 'create checked result' }); confirmScope(runtime.host); await runtime.host.waitForIdle();
+  assert.ok(runtime.host.listTasks().some(task => task.result?.artifacts?.length), JSON.stringify(runtime.host.listTasks()));
   assert.equal(await readFile(join(cwd, 'result.txt'), 'utf8'), '42'); await assert.rejects(readFile(join(cwd, 'unsafe-check.txt')), { code: 'ENOENT' });
-  assert.equal(runtime.host.getTask(result.taskId!)?.status, 'waiting'); assert.match(runtime.host.getTask(result.taskId!)?.error ?? '', /不能绕过受限权限/);
+  assert.equal(runtime.host.getTask(result.taskId!)?.status, 'completed'); assert.equal(runtime.host.store.listWorkEvents()[0]?.state, 'consumed');
 });

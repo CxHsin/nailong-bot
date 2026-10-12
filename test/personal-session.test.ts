@@ -8,7 +8,7 @@ import { PersonalHost } from '../src/personal/host.js';
 import { PersonalStore } from '../src/personal/store.js';
 import { createPersonalPi } from '../src/personal/pi.js';
 import { createPersonalMemory } from '../src/personal/memory.js';
-import { sendChatCompletion } from './fixtures/chat-completion.js';
+import { sendChatCompletion, sendMainContinuation } from './fixtures/chat-completion.js';
 
 test('Host conversation continues its native Session after reopening', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'personal-session-'));
@@ -111,7 +111,7 @@ test('Host native compaction retains effective user constraints in later convers
   }
 });
 
-test('Host gates exact commands, resumes files once, and keeps opaque cancellation uncertain', async () => {
+test('Host gates exact commands, resumes files once, and keeps opaque cancellation uncertain', { timeout: 15000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), 'personal-command-'));
   const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Be helpful.');
   const command = 'printf approved > approved.txt';
@@ -121,6 +121,7 @@ test('Host gates exact commands, resumes files once, and keeps opaque cancellati
   const server = createServer(async (request, response) => {
     let body = ''; for await (const part of request) body += part;
     const wire = JSON.parse(body);
+    if (sendMainContinuation(response, wire)) return;
     if (wire.tools?.some((tool: { function: { name: string } }) => tool.function.name === 'task_control')) {
       const current = JSON.stringify(wire.messages.at(-1)?.content);
       if (wire.messages.at(-1)?.role === 'tool') return sendChatCompletion(response, '已提交');
@@ -157,23 +158,26 @@ test('Host gates exact commands, resumes files once, and keeps opaque cancellati
   try {
     const input = { conversationId: 'c', actorId: '1', inputId: '1', text: '写文件并运行命令' };
     const accepted = await host.submit(input); assert.ok(accepted.taskId, accepted.text);
+    const scope = host.store.listActions(accepted.taskId).find(action => action.action.kind === 'permission-grant'); assert.ok(scope);
+    host.authorizeAction({ ...input, inputId: 'exact-scope-confirmation', text: '确认具体目录' }, scope.id, true);
     await host.waitForIdle();
     assert.equal(host.getTask(accepted.taskId)?.status, 'waiting');
     await assert.rejects(readFile(join(directory, 'work', 'approved.txt')));
-    const grant = host.store.listActions(accepted.taskId).find(action => action.action.kind === 'permission-grant'); assert.ok(grant);
+    const child = host.listTasks().find(task => task.parentTaskId === accepted.taskId)!;
+    const grant = host.store.listActions(child.id).find(action => action.action.kind === 'permission-grant'); assert.ok(grant);
     await host.submit({ ...input, inputId: 'grant-confirmation', text: `确认动作 ${grant.id}` }); await host.waitForIdle();
     const before = await stat(join(directory, 'work', 'before.txt'));
-    const action = host.store.listActions(accepted.taskId).find(action => action.status === 'pending');
+    const action = host.store.listActions(child.id).find(action => action.status === 'pending');
     assert.ok(action, JSON.stringify(host.getTask(accepted.taskId)));
     await host.submit({ ...input, inputId: '2', text: `确认动作 ${action.id}` });
     await commandReturned;
     assert.equal(await readFile(join(directory, 'work', 'approved.txt'), 'utf8'), 'approved');
     assert.equal((await stat(join(directory, 'work', 'before.txt'))).mtimeMs, before.mtimeMs);
-    assert.equal(host.store.listActions(accepted.taskId).find(item => item.id === action.id)?.status, 'consumed');
+    assert.equal(host.store.listActions(child.id).find(item => item.id === action.id)?.status, 'consumed');
     await host.submit({ ...input, inputId: '3', text: `停止任务 ${accepted.taskId}` });
     await host.waitForIdle();
-    assert.equal(host.getTask(accepted.taskId)?.status, 'waiting');
-    assert.match(host.getTask(accepted.taskId)?.error ?? '', /停止状态未知|核实/);
+    assert.equal(host.getTask(accepted.taskId)?.status, 'stopping');
+    assert.match(host.getTask(accepted.taskId)?.error ?? '', /停止状态未知|核实|尚未确认/);
   } finally {
     await host.close(); await pi.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -235,7 +239,7 @@ test('Host delivers actual task file evidence without treating model text as ver
   const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Be helpful.');
   const server = createServer(async (request, response) => {
     let body = ''; for await (const part of request) body += part;
-    const wire = JSON.parse(body);
+    const wire = JSON.parse(body); if (sendMainContinuation(response, wire)) return;
     const dialogue = wire.tools?.some((tool: { function: { name: string } }) => tool.function.name === 'task_control');
     if (wire.messages.at(-1)?.role === 'tool') return sendChatCompletion(response, dialogue ? '已提交' : '报告写好了，内容需要验收。');
     const name = dialogue ? 'task_control' : 'write';
@@ -252,7 +256,8 @@ test('Host delivers actual task file evidence without treating model text as ver
     assert.ok(accepted.taskId);
     await host.waitForIdle();
     const task = host.getTask(accepted.taskId)!;
-    assert.equal(task.status, 'partial');
+    assert.equal(task.status, 'waiting');
+    assert.equal(host.listTasks().find(child => child.parentTaskId === task.id)?.status, 'partial');
     assert.equal(task.result?.verified, false);
     const path = task.result?.artifacts?.[0]; assert.ok(path);
     assert.equal(await readFile(path, 'utf8'), '本周完成了数据整理');

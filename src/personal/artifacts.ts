@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Task, TaskResult } from './types.js';
+import { checkFile } from './permissions.js';
 
 /** Freeze verified bytes so queued delivery cannot pick up a later task's modifications. */
 export async function freezeArtifacts(dataDir: string, task: Task, result: TaskResult): Promise<TaskResult> {
@@ -12,7 +13,8 @@ export async function freezeArtifacts(dataDir: string, task: Task, result: TaskR
   const artifacts: string[] = []; const artifactDigests: Record<string, string> = {};
   for (const [index, source] of result.artifacts.entries()) {
     const path = await realpath(resolve(source)); const part = relative(root, path);
-    if (!part || part.startsWith('..') || isAbsolute(part)) throw new Error('成果文件超出任务目录');
+    if (task.direct && task.permission) await checkFile(task, path, false, dataDir);
+    else if (!part || part.startsWith('..') || isAbsolute(part)) throw new Error('成果文件超出任务目录');
     const bytes = await readFile(path);
     const digest = createHash('sha256').update(bytes).digest('hex');
     if (result.artifactDigests?.[resolve(source)] && result.artifactDigests[resolve(source)] !== digest)

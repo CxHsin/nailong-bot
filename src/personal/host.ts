@@ -2,9 +2,9 @@ import { randomUUID, createHash } from 'node:crypto';
 import { resolve, sep, dirname, basename, join } from 'node:path';
 import { realpathSync, statSync } from 'node:fs';
 import { PersonalStore } from './store.js';
-import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor, WorkToolContext, PermissionGrant } from './types.js';
+import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor, WorkToolContext, PermissionGrant, DelegationSpec, WorkEvent, ContinuationOutcome } from './types.js';
 
-export interface PersonalHostOptions { store: PersonalStore; dialogue: Dialogue; executor: TaskExecutor; maxConcurrent?: number; maxDurationMs?: number; maxTokens?: number; maxAttempts?: number; maxDialogueAttempts?: number; recoveryPollMs?: number; now?: () => number; interruptDialogue?(): Promise<void>; handleDecision?(input: PersonalInput, decision: Decision): Promise<PersonalResponse> }
+export interface PersonalHostOptions { store: PersonalStore; dialogue: Dialogue; executor: TaskExecutor; maxConcurrent?: number; maxDurationMs?: number; maxTokens?: number; maxAttempts?: number; maxDialogueAttempts?: number; maxRootCalls?: number; maxGlobalCalls?: number; maxGlobalTokens?: number; maxRework?: number; recoveryPollMs?: number; now?: () => number; acceptContinuation?(task: Task, result: import('./types.js').TaskResult): Promise<import('./types.js').TaskResult>; interruptDialogue?(): Promise<void>; handleDecision?(input: PersonalInput, decision: Decision): Promise<PersonalResponse> }
 function physicalResource(path: string): string {
   const absolute = resolve(path);
   try { const real = realpathSync.native(absolute); return process.platform === 'win32' ? real.toLowerCase() : real; }
@@ -24,12 +24,32 @@ export class PersonalHost {
   private readonly active = new Map<string, { abort: AbortController; promise: Promise<void> }>();
   private readonly conversations = new Map<string, Promise<unknown>>();
   private readonly appliedRevisions = new Map<string, number>();
+  private readonly modelWork = new Map<string, string>();
+  private readonly continuations = new Map<string, { abort: AbortController; promise: Promise<void>; taskId: string }>();
   private closing = false;
   private preserveOnClose = true;
   private readonly now: () => number;
-  constructor(private readonly options: PersonalHostOptions) { this.store = options.store; this.now = options.now ?? Date.now; }
+  constructor(private readonly options: PersonalHostOptions) { this.store = options.store; this.now = options.now ?? Date.now; for (const value of [options.maxConcurrent, options.maxDurationMs, options.maxTokens, options.maxAttempts, options.maxDialogueAttempts, options.maxRootCalls, options.maxGlobalCalls, options.maxGlobalTokens, options.maxRework]) if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) throw new Error('工作预算必须是有限正整数'); }
   getTask(id: string) { return this.store.getTask(id); }
   listTasks(conversationId?: string) { return this.store.listTasks(conversationId); }
+  private workForSession(sessionId: string) { return this.modelWork.get(sessionId) ?? this.listTasks().find(task => !task.direct && (task.sessionId === sessionId || sessionId.startsWith(`verify:${task.id}:`)))?.id; }
+  reserveSessionModelCall(sessionId: string) { this.reserveModelCall(this.workForSession(sessionId)); }
+  accountSessionModelUsage(sessionId: string, usage: import('./types.js').Usage) { this.accountModelUsage(this.workForSession(sessionId), usage); }
+  reserveModelCall(taskId?: string) { this.updateBudget(taskId, 1, 0); }
+  accountModelUsage(taskId: string | undefined, usage: import('./types.js').Usage) { this.updateBudget(taskId, 0, (usage.input ?? 0) + (usage.output ?? 0), usage.costKnown === true, usage.cost); }
+  private updateBudget(taskId: string | undefined, calls: number, tokens: number, costKnown = false, cost?: number) {
+    const task = taskId ? this.getTask(taskId) : undefined; const rootId = task?.rootTaskId ?? task?.id;
+    const ids = [`global:${new Date(this.now()).toISOString().slice(0, 10)}`, ...(rootId ? [`root:${rootId}`] : [])];
+    try { this.store.transaction(() => {
+      for (const id of ids) {
+        const budget = this.store.getBudget(id) ?? { id, calls: 0, tokens: 0, rework: 0, costKnown: true };
+        const global = id.startsWith('global:'); const callLimit = global ? this.options.maxGlobalCalls ?? 500 : this.options.maxRootCalls ?? 100;
+        const tokenLimit = global ? this.options.maxGlobalTokens ?? 2_000_000 : this.options.maxTokens ?? 500_000;
+        if (budget.calls + calls > callLimit || budget.tokens >= tokenLimit && calls) throw new Error('工作调用或 token 预算耗尽，暂停等待用户决定');
+        budget.calls += calls; budget.tokens += tokens; if (!calls) { budget.costKnown &&= costKnown; if (cost !== undefined && Number.isFinite(cost) && cost >= 0) budget.cost = (budget.cost ?? 0) + cost; } this.store.putBudget(budget);
+      }
+    }); } catch (error) { if (rootId) { const root = this.getTask(rootId)!; root.status = 'waiting'; root.error = String(error); this.store.putTask(root); const id = `budget-pause:${rootId}:${ids[0]}`; if (!this.delivery(id)) { const delivery: Delivery = { id, taskId: rootId, conversationId: root.conversationId, actorId: root.actorId, text: '工作调用或 token 预算耗尽，已保留已有材料并暂停；需要调整预算或改小目标后继续。', status: 'pending', createdAt: this.now() }; this.store.putDelivery(delivery); queueMicrotask(() => this.notify(delivery)); } } throw error; }
+  }
   /** Direct work shares the main Session, but owns a separate durable workspace. */
   workContext(input: PersonalInput, taskId?: string, eventId?: string): WorkToolContext {
     taskId ??= input.replyTaskId;
@@ -37,31 +57,139 @@ export class PersonalHost {
     if (!task) {
       if (taskId) throw new Error('工作不存在');
       task = this.createTask(input, { kind: 'start', goal: input.text });
-      task.direct = true; task.originInputId = input.inputId; task.status = 'waiting'; task.sessionId = this.store.conversationSession(input.conversationId);
+      task.direct = true; task.originInputId = input.inputId; task.originInput = input; task.status = 'waiting'; task.sessionId = this.store.conversationSession(input.conversationId);
       task.permission = { mode: 'restricted', readRoots: [task.cwd!], writeRoots: [task.cwd!], network: false,
         expiresAt: this.now() + 86_400_000, revision: task.revision, sourceInputId: input.inputId };
       this.store.putTask(task);
     }
     const id = task.id;
+    if (task.direct) this.modelWork.set(task.sessionId, id);
     const current = () => {
       const latest = this.getTask(id);
-      if (!latest || latest.actorId !== input.actorId || latest.conversationId !== input.conversationId || latest.cancelRequested || latest.contextExcluded || latest.status === 'cancelled') throw new Error('工作已取消或身份无效');
+      if (!latest || latest.actorId !== input.actorId || latest.conversationId !== input.conversationId || latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled', 'failed'].includes(latest.status)) throw new Error('工作已结束、取消或身份无效');
       return latest;
     };
-    return { task, eventId, current, requestAction: action => this.requestAction(id, action),
-      proposePermission: grant => this.requestAction(id, { kind: 'permission-grant', target: id, parameters: { grant, proposedInputId: input.inputId }, content: `确认一次工作权限；可信 Shell 继承 Host 本机权限，不能强制禁止删除文件或外发；受控删除和发送另需明确授权：${JSON.stringify(grant)}` }),
+    return { task, eventId, current, requestAction: action => { current(); return this.requestAction(id, action); },
+      proposePermission: grant => { current(); return this.requestAction(id, { kind: 'permission-grant', target: id, parameters: { grant, proposedInputId: input.inputId }, content: `确认一次工作权限；可信 Shell 继承 Host 本机权限，不能强制禁止删除文件或外发；受控删除和发送另需明确授权：${JSON.stringify(grant)}` }); },
       dispatch: async <T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T> => {
         const latest = current(); const dispatchId = `${id}:${eventId ?? input.inputId}:${callId}`;
+        const existing = this.store.getActionDispatch(dispatchId);
+        if (existing?.status === 'succeeded' && existing.evidence !== undefined) return JSON.parse(existing.evidence) as T;
+        if (this.store.listActionDispatches().some(record => record.taskId === id && ['dispatching', 'unknown'].includes(record.status))) throw new Error('该工作已有未核实派发；暂停所有后续副作用，不能通过新 callId 重做');
+        if (!existing && this.conflicts(latest)) throw new Error('工作资源被其他执行占用；动作尚未派发');
         const reserved = this.store.reserveActionDispatch({ id: dispatchId, taskId: id, eventId, revision: latest.revision,
           action, status: 'dispatching', startedAt: this.now() });
         if (!reserved.created) {
           if (reserved.record.status === 'succeeded' && reserved.record.evidence !== undefined) return JSON.parse(reserved.record.evidence) as T;
           throw new Error('该动作已有派发记录；不能自动重复副作用，需核对已有结果');
         }
-        try { const result = await execute(); this.store.finishActionDispatch(dispatchId, 'succeeded', JSON.stringify(result ?? null)); return result; }
+        latest.resourceHeld = true; this.store.putTask(latest);
+        try { const result = await execute(); this.store.finishActionDispatch(dispatchId, 'succeeded', JSON.stringify(result ?? null)); const fresh = current(); fresh.resourceHeld = !fresh.direct || this.store.listActionDispatches().some(record => record.taskId === id && ['dispatching', 'unknown'].includes(record.status)); this.store.putTask(fresh); this.pump(); return result; }
         catch (error) { this.store.finishActionDispatch(dispatchId, 'unknown', String(error)); throw error; }
-      }, send: text => this.publishNotification(current(), text, id),
+      }, send: text => this.publishNotification(current(), text, id), delegate: (callId, spec) => this.delegateWork(id, spec, callId), reserveModelCall: () => this.reserveModelCall(id), accountModelUsage: usage => this.accountModelUsage(id, usage),
+      materialActions: () => this.store.listActionDispatches().filter(action => action.taskId === id || this.getTask(action.taskId)?.rootTaskId === id),
+      controlChild: async (callId, childId, operation, text) => {
+        const parent = current(); const child = this.getTask(childId); if (!child || child.parentTaskId !== parent.id || child.actorId !== parent.actorId || child.conversationId !== parent.conversationId) throw new Error('只能操作当前父工作的直属帮手');
+        if (operation === 'cancel') return this.cancelWork(childId); if (operation === 'query') return { text: JSON.stringify(child), taskId: childId };
+        if (!text?.trim() || child.cancelRequested || !['queued', 'running', 'waiting'].includes(child.status)) throw new Error('帮手已结束或补充要求为空');
+        const operationId = `work-control:${id}:${eventId ?? input.inputId}:${callId}`; if (!child.requirementInputs?.includes(operationId)) { (child.requirementInputs ??= []).push(operationId); child.requirements.push(text); child.revision++; child.parentRevision = parent.revision; if (child.permission) child.permission.revision = child.revision; this.store.putTask(child); if (child.status === 'running') await this.options.executor.steer?.(child.id, text); }
+        return { text: '相关帮手补充要求已保存，执行者需确认应用；已有影响未撤销。', taskId: childId };
+      },
     };
+  }
+  delegateWork(parentId: string, spec: DelegationSpec, callId: string): Task {
+    const task = this.store.transaction(() => {
+      const parent = this.getTask(parentId);
+      if (!parent || parent.cancelRequested || parent.contextExcluded || ['completed', 'cancelled', 'failed'].includes(parent.status)) throw new Error('父工作已结束或取消');
+      if (this.store.listActionDispatches().some(record => record.taskId === parentId && ['dispatching', 'unknown'].includes(record.status))) throw new Error('父工作存在未核实动作，不能另开帮手重复执行');
+      const id = `delegation:${createHash('sha256').update(JSON.stringify([parentId, callId])).digest('hex')}`;
+      const existing = this.getTask(id); if (existing) return existing;
+      const previousWork = spec.reworkOf ? this.getTask(spec.reworkOf) : this.listTasks().find(child => child.parentTaskId === parent.id && child.goal.trim() === spec.goal.trim() && child.purpose === spec.purpose && ['completed', 'partial', 'failed', 'cancelled'].includes(child.status));
+      if (spec.reworkOf && (!previousWork || previousWork.parentTaskId !== parent.id)) throw new Error('返工必须关联该父工作的帮手');
+      if (previousWork) {
+        const budgetId = `root:${parent.rootTaskId ?? parent.id}`; const budget = this.store.getBudget(budgetId) ?? { id: budgetId, calls: 0, tokens: 0, rework: 0, costKnown: false };
+        if (budget.rework >= (this.options.maxRework ?? 3)) throw new Error('返工预算耗尽，保留已有材料并暂停');
+        budget.rework++; this.store.putBudget(budget);
+      }
+      if (!spec.goal.trim() || !['research', 'organization', 'coding'].includes(spec.purpose) || (spec.background?.length ?? 0) > 16_000) throw new Error('委派目标、成果类型或背景预算无效');
+      const child = this.createTask({ conversationId: parent.conversationId, actorId: parent.actorId, inputId: parent.originInputId ?? id, text: spec.goal },
+        { kind: 'start', goal: spec.goal, cwd: spec.cwd ?? parent.cwd, resources: spec.resources, executor: spec.purpose === 'coding' ? 'herdr' : 'local', deadline: parent.deadline }, id);
+      child.workKind = 'delegation'; child.parentTaskId = parent.id; child.rootTaskId = parent.rootTaskId ?? parent.id;
+      child.purpose = spec.purpose; child.parentRevision = parent.revision; child.background = spec.background;
+      if (parent.permission) {
+      const grant = spec.permission ?? { ...parent.permission, mode: 'restricted' as const, readRoots: parent.permission.readRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], writeRoots: parent.permission.writeRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], network: false, deleteOriginal: false, externalSend: false };
+        const within = (path: string, roots: string[]) => roots.some(root => { const actual = physicalResource(path); const base = physicalResource(root); return actual === base || actual.startsWith(base + sep); });
+        if (grant.expiresAt > parent.permission.expiresAt || grant.network && !parent.permission.network || grant.mode === 'trusted' && parent.permission.mode !== 'trusted' || grant.readRoots.some(path => !within(path, parent.permission!.readRoots)) || grant.writeRoots.some(path => !within(path, parent.permission!.writeRoots)) || grant.deleteOriginal && !parent.permission.deleteOriginal || grant.externalSend && !parent.permission.externalSend) throw new Error('子委派权限不能扩大父工作授权');
+        child.permission = { ...grant, readRoots: grant.readRoots.map(physicalResource), writeRoots: grant.writeRoots.map(physicalResource), revision: 0 };
+        child.resources = [...new Set([...child.resources, ...child.permission.readRoots, ...child.permission.writeRoots].flatMap(path => [path, ...(checkoutResource(path) ? [checkoutResource(path)!] : [])]))];
+      }
+      parent.purpose ??= spec.purpose; parent.status = 'waiting'; parent.resourceHeld = this.store.listActionDispatches().some(action => action.taskId === parent.id && ['dispatching', 'unknown'].includes(action.status)); this.store.putTask(parent); this.store.putTask(child); return child;
+    });
+    queueMicrotask(() => this.pump()); return task;
+  }
+  private scheduleContinuations() {
+    if (this.closing || !this.options.dialogue.resume) return;
+    for (const event of this.store.listWorkEvents()) {
+      if (event.state !== 'pending' || this.conversations.has(event.conversationId) || this.continuations.has(event.conversationId)) continue;
+      const abort = new AbortController(); const promise = Promise.resolve().then(() => this.consumeWorkEvent(event, abort.signal)).finally(() => { this.continuations.delete(event.conversationId); this.scheduleContinuations(); });
+      this.continuations.set(event.conversationId, { abort, promise, taskId: event.parentTaskId }); this.conversations.set(event.conversationId, promise);
+      void promise.finally(() => { if (this.conversations.get(event.conversationId) === promise) this.conversations.delete(event.conversationId); this.scheduleContinuations(); }).catch(() => {});
+    }
+  }
+  private async consumeWorkEvent(original: WorkEvent, signal: AbortSignal) {
+    const task = this.getTask(original.parentTaskId); if (!task) return;
+    if (task.cancelRequested || task.contextExcluded || ['completed', 'cancelled', 'failed'].includes(task.status)) { this.store.transitionWorkEvent(original.id, 'pending', 'blocked', '整体工作已结束'); return; }
+    if (this.store.listActionDispatches(original.id).some(record => ['dispatching', 'unknown'].includes(record.status))) { this.store.transitionWorkEvent(original.id, 'pending', 'unknown', '动作尚未核实'); return; }
+    const event = this.store.claimWorkEvent(original.id); if (!event) return;
+    try {
+      this.modelWork.set(task.sessionId, task.id);
+      const input = task.originInput ?? { conversationId: task.conversationId, actorId: task.actorId, inputId: task.originInputId ?? task.id, text: task.goal };
+      const outcome = await this.options.dialogue.resume!(event, { task: this.getTask(task.id)!, sessionId: task.sessionId, tasks: this.listTasks(task.conversationId), signal,
+        work: () => this.workContext(input, task.id, event.id), onInjection: receipt => { this.store.recordWorkEventInjection(event.id, receipt); } });
+      if (outcome.result?.verified && this.options.acceptContinuation) outcome.result = await this.options.acceptContinuation(this.getTask(task.id)!, outcome.result);
+      this.commitContinuation(event, outcome);
+    } catch (error) { this.store.transitionWorkEvent(event.id, 'processing', 'unknown', String(error)); const latest = this.getTask(task.id)!; if (!latest.cancelRequested) { latest.status = 'waiting'; latest.error = `后台续接需核实：${String(error)}`; this.store.putTask(latest); } }
+    finally { this.modelWork.delete(task.sessionId); }
+  }
+  private commitContinuation(event: WorkEvent, outcome: ContinuationOutcome) {
+    let delivery: Delivery | undefined;
+    this.store.transaction(() => {
+      const latest = this.getTask(event.parentTaskId)!;
+      const consumed = this.store.completeWorkEvent(event.id, outcome.completion);
+      if (consumed.state !== 'consumed' || latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled'].includes(latest.status)) return;
+      const stale = latest.revision !== outcome.reviewedRevision;
+      if (outcome.result) { latest.result = { ...outcome.result, producedRevision: outcome.reviewedRevision }; if (stale) latest.result.verified = false; }
+      const occupiedChild = this.listTasks().some(child => child.rootTaskId === latest.id && child.id !== latest.id && (child.resourceHeld || ['queued', 'running', 'stopping'].includes(child.status)));
+      latest.status = !stale && !occupiedChild && outcome.outcome === 'completed' && outcome.result?.verified && !outcome.result.partial ? 'completed' : 'waiting';
+      latest.error = stale ? '要求已变化，保留材料并等待最新要求复查。' : outcome.outcome === 'blocked' ? outcome.text ?? '工作受阻' : undefined;
+      latest.updatedAt = this.now(); latest.resourceHeld = this.store.listActionDispatches().some(record => record.taskId === latest.id && ['dispatching', 'unknown'].includes(record.status)); this.store.putTask(latest);
+      if (!stale && (latest.status === 'completed' || ['blocked', 'needs_decision'].includes(outcome.outcome))) {
+        const id = `work-notification:${event.id}`; delivery = this.delivery(id);
+        if (!delivery) { delivery = { id, conversationId: latest.conversationId, actorId: latest.actorId, taskId: latest.id, text: outcome.text ?? latest.result?.text ?? latest.error!, artifacts: latest.result?.artifacts, artifactDigests: latest.result?.artifactDigests, status: 'pending', createdAt: this.now() };
+          if (latest.status === 'completed' && latest.originInput && latest.originInput.origin !== 'plan') delivery.learning = { id, input: latest.originInput.text, answer: delivery.text, originInputId: latest.originInput.inputId, recallId: latest.originInput.inputId };
+          this.store.putDelivery(delivery); }
+      }
+    });
+    if (delivery) this.notify(delivery);
+  }
+  async cancelWork(taskId: string): Promise<PersonalResponse> {
+    const target = this.getTask(taskId); if (!target) return { text: '请明确要停止的工作。' };
+    const selected = new Set([target.id]); let changed = true;
+    while (changed) { changed = false; for (const task of this.listTasks()) if (task.parentTaskId && selected.has(task.parentTaskId) && !selected.has(task.id)) { selected.add(task.id); changed = true; } }
+    this.store.transaction(() => {
+      for (const id of selected) { const task = this.getTask(id)!; task.cancelRequested = true; if (['queued', 'running', 'waiting', 'stopping'].includes(task.status)) task.status = task.resourceHeld || this.active.has(id) ? 'stopping' : 'cancelled'; this.store.putTask(task); }
+      for (const event of this.store.listWorkEvents()) if (selected.has(event.taskId) || selected.has(event.parentTaskId)) this.store.transitionWorkEvent(event.id, event.state, 'blocked', '用户已停止工作');
+    });
+    const continuing = this.continuations.get(target.conversationId); if (continuing && selected.has(continuing.taskId)) continuing.abort.abort(new Error('工作已停止'));
+    for (const id of selected) {
+      const active = this.active.get(id); if (active) { active.abort.abort(); continue; }
+      const task = this.getTask(id)!; if (!task.resourceHeld) continue;
+      const identity = this.store.listAttempts(id).at(-1)?.identity;
+      const stopped = identity && this.options.executor.cancel ? await this.options.executor.cancel(identity).catch(() => false) : false;
+      const latest = this.getTask(id)!; latest.status = stopped ? 'cancelled' : 'stopping'; latest.resourceHeld = !stopped; latest.error = stopped ? undefined : '执行者停止状态未知，需要核实；已有影响未撤销。'; this.store.putTask(latest);
+    }
+    const latestTarget = this.getTask(target.id)!; if (latestTarget.direct && this.listTasks().some(child => selected.has(child.id) && child.id !== latestTarget.id && (child.resourceHeld || this.active.has(child.id)))) { latestTarget.status = 'stopping'; latestTarget.error = '部分帮手终止状态尚未确认，正在停止；已有影响未撤销。'; this.store.putTask(latestTarget); }
+    this.pump(); return { text: '停止意图已保存；正在核实帮手终止状态，已有影响未撤销。', taskId };
   }
   subscribe(listener: (delivery: Delivery) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   delivery(id: string) { return this.store.getDelivery(id); }
@@ -84,9 +212,16 @@ export class PersonalHost {
       const previous = this.store.getInput(key); if (previous) return previous;
       if (this.store.inputAttempts(key) >= (this.options.maxDialogueAttempts ?? 3)) throw new Error('输入处理尝试次数已达上限；输入已保存，请检查故障后发送新消息。');
       this.store.beginInput(key);
+      this.modelWork.delete(this.store.conversationSession(input.conversationId));
       const decision = await this.options.dialogue.decide(input, { tasks: this.listTasks(input.conversationId).filter(task => task.actorId === input.actorId && !task.contextExcluded), sessionId: this.store.conversationSession(input.conversationId), work: () => this.workContext(input), plans: this.store.listPlans<Plan>().filter(p => p.conversationId === input.conversationId && p.actorId === input.actorId && !p.contextExcluded), actions: this.store.listActions().filter(a => { const task = this.getTask(a.taskId); return task?.conversationId === input.conversationId && task.actorId === input.actorId && !task.contextExcluded; }) }).catch(error => { this.store.inputFailure(key, String(error)); throw error; });
       if (this.closing) throw new Error('Host shutdown; accepted input retained');
       if (decision.kind === 'start') return this.enqueueTask(input, decision);
+      if (decision.kind === 'complete') {
+        const task = this.getTask(decision.taskId); if (!task || task.actorId !== input.actorId || task.conversationId !== input.conversationId) throw new Error('整体完成工作身份不符');
+        const event = this.store.enqueueWorkEvent({ id: `direct_completion:${task.id}:${input.inputId}`, kind: 'direct_completion', taskId: task.id, parentTaskId: task.id, rootTaskId: task.rootTaskId ?? task.id, attemptId: input.inputId, conversationId: task.conversationId, revision: decision.outcome.reviewedRevision, createdAt: this.now(), state: 'pending' });
+        if (event.state !== 'consumed') { this.store.claimWorkEvent(event.id); this.store.recordWorkEventInjection(event.id, decision.injection); if (decision.outcome.result?.verified && this.options.acceptContinuation) decision.outcome.result = await this.options.acceptContinuation(this.getTask(task.id)!, decision.outcome.result); this.commitContinuation(event, decision.outcome); }
+        const delivery = this.delivery(`work-notification:${event.id}`); const response = { text: delivery?.text ?? '成果已保存，等待最新要求复查。', taskId: task.id, deliveryId: delivery?.id }; this.store.putInput(key, response); return response;
+      }
       const response = await this.apply(input, decision);
       this.store.transaction(() => {
         const existing = response.deliveryId ? this.delivery(response.deliveryId) : undefined;
@@ -98,7 +233,7 @@ export class PersonalHost {
       this.notify(this.delivery(response.deliveryId!)!); this.pump(); return response;
     });
     this.conversations.set(input.conversationId, current);
-    void current.finally(() => { if (this.conversations.get(input.conversationId) === current) this.conversations.delete(input.conversationId); }).catch(() => {});
+    void current.finally(() => { if (this.conversations.get(input.conversationId) === current) { this.conversations.delete(input.conversationId); this.modelWork.delete(this.store.conversationSession(input.conversationId)); } this.scheduleContinuations(); }).catch(() => {});
     return current;
   }
   async startTask(input: PersonalInput, decision: Extract<Decision, { kind: 'start' }>): Promise<PersonalResponse> {
@@ -108,13 +243,21 @@ export class PersonalHost {
     const key = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
     const response = this.store.transaction(() => {
       const previous = this.store.getInput(key); if (previous) return previous;
-      const task = this.createTask(input, decision); const response = { text: `已接收任务：${task.goal}`, taskId: task.id, deliveryId: '' };
+      const task = this.options.dialogue.resume ? this.workContext(input).task : this.createTask(input, decision);
+      if (this.options.dialogue.resume) {
+        task.goal = decision.goal; let authorized = true;
+        if (decision.cwd) { const cwd = physicalResource(decision.cwd); authorized = task.permission!.readRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)) && task.permission!.writeRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)); if (authorized) task.cwd = cwd;
+          else { task.error = '目标目录尚未授权；需确认具体工作范围后委派。'; this.store.putTask(task); void this.requestAction(task.id, { kind: 'permission-grant', target: task.id, parameters: { grant: { ...task.permission!, readRoots: [cwd], writeRoots: [cwd] }, proposedInputId: input.inputId, delegation: { goal: decision.goal, purpose: decision.executor === 'herdr' ? 'coding' : 'research', cwd, resources: decision.resources } }, content: `确认工作读写目录 ${cwd}；未授权前不会执行。` }); }
+        }
+        this.store.putTask(task); if (authorized) this.delegateWork(task.id, { goal: decision.goal, purpose: decision.executor === 'herdr' ? 'coding' : 'research', cwd: decision.cwd, resources: decision.resources }, `start:${input.inputId}`);
+      }
+      const response = { text: `已接收任务：${task.goal}`, taskId: task.id, deliveryId: '' };
       response.deliveryId = this.makeDelivery(input, response.text, task.id).id; this.store.putInput(key, response); return response;
     });
     queueMicrotask(() => { const delivery = this.delivery(response.deliveryId!); if (!this.closing && delivery) { this.notify(delivery); this.pump(); } }); return response;
   }
-  private createTask(input: PersonalInput, decision: Extract<Decision, { kind: 'start' }>): Task {
-    const id = randomUUID(); const cwd = physicalResource(decision.cwd ?? join(this.store.directory, 'workspaces', id));
+  private createTask(input: PersonalInput, decision: Extract<Decision, { kind: 'start' }>, id: string = randomUUID()): Task {
+    const cwd = physicalResource(decision.cwd ?? join(this.store.directory, 'workspaces', id));
     const paths = [ ...(decision.resources ?? []), cwd ].map(physicalResource);
     const explicitProjectPaths = [ ...(decision.resources ?? []), ...(decision.cwd ? [cwd] : []) ].map(physicalResource);
     // Generated per-task workspaces have their own scope. They do not inherit
@@ -127,6 +270,7 @@ export class PersonalHost {
     this.store.putTask(task); return task;
   }
   private async apply(input: PersonalInput, decision: Decision): Promise<PersonalResponse> {
+    if (decision.kind === 'complete') throw new Error('整体完成必须经过持久事件结算');
     if (decision.kind === 'reply') return { text: decision.text };
     if (decision.kind === 'start') { const task = this.createTask(input, decision); return { text: `已接收任务：${task.goal}`, taskId: task.id }; }
     if (decision.kind === 'authorize') return this.authorizeAction(input, decision.actionId, decision.approved);
@@ -137,6 +281,7 @@ export class PersonalHost {
     if (task.contextExcluded && decision.kind !== 'cancel') return { text: '该任务上下文因遗忘已排除。历史责任仍保留；请用新的输入重新说明可使用的目标。', taskId: task.id };
     if (decision.kind === 'query') return { text: `${task.goal}\n状态：${task.status}${task.result ? '\n' + task.result.text : ''}${task.error ? '\n' + task.error : ''}`, taskId: task.id };
     if (decision.kind === 'cancel') {
+      if (this.options.dialogue.resume) return this.cancelWork(task.id);
       if (!['queued', 'running', 'waiting', 'stopping'].includes(task.status)) return { text: `任务已结束：${task.status}`, taskId: task.id };
       task.cancelRequested = true;
       if (task.status === 'queued' || task.status === 'waiting' && !task.resourceHeld && !this.active.has(task.id)) { task.status = 'cancelled'; task.resourceHeld = false; this.store.putTask(task); this.pump(); return { text: '任务已停止，已有影响未撤销。', taskId: task.id }; }
@@ -155,6 +300,7 @@ export class PersonalHost {
     if (task.requirementInputs?.includes(requirementInput)) return { text: '补充要求已接收；不会重复改向。执行状态可查询。', taskId: task.id };
     (task.requirementInputs ??= []).push(requirementInput);
     task.requirements.push(requirement); task.revision++; if (task.permission) task.permission.revision = task.revision; task.updatedAt = this.now(); this.store.putTask(task);
+    if (task.direct && this.options.dialogue.resume) { this.store.enqueueWorkEvent({ id: `requirements_changed:${task.id}:${task.revision}`, kind: 'requirements_changed', taskId: task.id, parentTaskId: task.id, rootTaskId: task.rootTaskId ?? task.id, attemptId: requirementInput, conversationId: task.conversationId, revision: task.revision, createdAt: this.now(), state: 'pending' }); return { text: '补充要求已保存，本体将在当前回复后复查相关子目标；已有影响未撤销。', taskId: task.id }; }
     const applied = task.status === 'running' ? await this.options.executor.steer?.(task.id, requirement) ?? false : true;
     if (applied) this.appliedRevisions.set(task.id, task.revision);
     return { text: applied ? '补充要求已应用；已有影响未撤销。' : '已接收补充要求，执行者尚未确认应用。', taskId: task.id };
@@ -185,7 +331,9 @@ export class PersonalHost {
       const grant = record.action.parameters.grant as Omit<PermissionGrant, 'revision' | 'sourceInputId'>;
       if (!grant || !['restricted', 'trusted'].includes(grant.mode) || !Array.isArray(grant.readRoots) || !Array.isArray(grant.writeRoots) || ![...grant.readRoots, ...grant.writeRoots].every(path => typeof path === 'string') || typeof grant.network !== 'boolean' || !Number.isFinite(grant.expiresAt) || grant.expiresAt <= this.now()) throw new Error('权限范围无效或已过期');
       task.permission = { ...grant, readRoots: grant.readRoots.map(physicalResource), writeRoots: grant.writeRoots.map(physicalResource), revision: task.revision, sourceInputId: input.inputId };
+      task.resources = [...new Set([...task.resources, ...task.permission.readRoots, ...task.permission.writeRoots].flatMap(path => [path, ...(checkoutResource(path) ? [checkoutResource(path)!] : [])]))];
       record.status = 'consumed'; this.store.putAction(record); this.store.putTask(task);
+      if (record.action.parameters.delegation) this.delegateWork(task.id, record.action.parameters.delegation as DelegationSpec, `authorized-start:${record.id}`);
     }
     if (approved && !task.direct && task.status === 'waiting' && !task.cancelRequested && !task.resourceHeld && !this.active.has(task.id) && this.store.listAttempts(task.id).length < (this.options.maxAttempts ?? 3)) { task.status = 'queued'; this.store.putTask(task); }
     return { text: approved ? '已确认此项具体动作；目标或参数变化需要重新确认。' : '已拒绝此项动作。', taskId: task.id };
@@ -206,10 +354,11 @@ export class PersonalHost {
   }
   private pump() {
     if (this.closing) return;
+    for (const root of this.listTasks().filter(task => task.direct && task.cancelRequested)) { const uncertain = root.resourceHeld || this.listTasks().some(child => child.rootTaskId === root.id && child.id !== root.id && (child.resourceHeld || ['running', 'stopping'].includes(child.status))); const status = uncertain ? 'stopping' : 'cancelled'; if (root.status !== status) { root.status = status; root.error = uncertain ? '部分执行终止尚未确认，正在停止；已有影响未撤销。' : undefined; this.store.putTask(root); } }
     for (const task of this.listTasks()) {
-      const occupied = this.listTasks().filter(t => this.active.has(t.id) || ['running', 'stopping'].includes(t.status)).length;
+      const occupied = this.listTasks().filter(t => !t.direct && (this.active.has(t.id) || t.resourceHeld || ['running', 'stopping'].includes(t.status))).length;
       if (occupied >= (this.options.maxConcurrent ?? 2)) break;
-      if (task.status !== 'queued' || this.conflicts(task)) continue;
+      if (task.direct || this.active.has(task.id) || task.status !== 'queued' || this.conflicts(task)) continue;
       if (task.contextExcluded) continue;
       if (task.deadline !== undefined && this.now() >= task.deadline) { task.status = 'waiting'; task.error = '任务期限已过，不会执行。'; this.store.putTask(task); this.publishNotification(task, task.error, task.id); continue; }
       const abort = new AbortController();
@@ -234,6 +383,7 @@ export class PersonalHost {
     };
     abort.signal.addEventListener('abort', requestCancel, { once: true });
     try {
+      if (task.executor === 'herdr') { this.reserveModelCall(task.id); this.accountModelUsage(task.id, { costKnown: false }); }
       const result = await this.options.executor.execute({ task, attempt, signal: abort.signal,
         onIdentity: identity => { attempt.identity = identity; this.store.putAttempt(attempt); if (abort.signal.aborted) requestCancel(); },
         onUsage: usage => { attempt.usage = usage; this.store.putAttempt(attempt); if ((usage.input ?? 0) + (usage.output ?? 0) > (this.options.maxTokens ?? 500_000)) abort.abort(new Error('执行用量预算耗尽')); },
@@ -252,6 +402,7 @@ export class PersonalHost {
       if (error instanceof Error && error.name === 'ExecutorAttentionError' && this.store.listActions(task.id).some(a => a.status === 'approved' && a.revision === task.revision)) task.status = 'queued';
       if (attempt.identity && this.options.executor.inspect && task.status === 'failed' && !abort.signal.aborted) {
         const evidence = await this.options.executor.inspect(attempt.identity).catch(() => ({ state: 'unknown' as const }));
+        task = { ...this.getTask(task.id)!, status: task.status, error: task.error, result: task.result, resourceHeld: task.resourceHeld };
         if (evidence.state === 'resumable') { task.resourceHeld = false; task.status = this.store.listAttempts(task.id).length < (this.options.maxAttempts ?? 3) ? 'queued' : 'waiting'; }
         else if (evidence.state === 'stopped') task.resourceHeld = false;
       }
@@ -259,6 +410,7 @@ export class PersonalHost {
       if (!attempt.identity) task.resourceHeld = false;
       if (task.status === 'waiting' && attempt.identity?.kind === 'pi' && this.options.executor.inspect && !task.cancelRequested) {
         const evidence = await this.options.executor.inspect(attempt.identity).catch(() => ({ state: 'unknown' as const }));
+        task = { ...this.getTask(task.id)!, status: task.status, error: task.error, result: task.result, resourceHeld: task.resourceHeld };
         if (['resumable', 'stopped', 'completed'].includes(evidence.state)) task.resourceHeld = false;
       }
       if (attempt.identity && this.options.executor.cancel && task.status === 'failed') requestCancel();
@@ -267,8 +419,9 @@ export class PersonalHost {
       abort.signal.removeEventListener('abort', requestCancel);
       if (!preservingShutdown() && (abort.signal.aborted || cancellation) && attempt.identity && this.options.executor.cancel) {
         requestCancel(); const stopped = await cancellation;
+        const latest = this.getTask(task.id)!; task = { ...latest, result: task.result, error: task.error, status: task.status };
         task.resourceHeld = !stopped;
-        if (!stopped) { task.status = 'waiting'; task.error = '执行者停止状态未知，需要核实；不会自动重试。'; }
+        if (!stopped) { task.status = task.workKind === 'delegation' && task.cancelRequested ? 'stopping' : 'waiting'; task.error = '执行者停止状态未知，需要核实；不会自动重试。'; }
       }
       task.updatedAt = this.now(); attempt.status = task.status; attempt.finishedAt = this.now();
       if (this.getTask(task.id)?.contextExcluded) { task.contextExcluded = true; task.cancelRequested = true; this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); }); return; }
@@ -278,6 +431,7 @@ export class PersonalHost {
         this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); }); return;
       }
       let delivery!: Delivery;
+      if (task.workKind === 'delegation' && task.parentTaskId) { task.result ??= { text: task.error ?? '帮手停止，已有影响保留', verified: false, partial: true, producedRevision: attempt.presentedRevision }; this.store.settleDelegationResult(task, attempt); this.scheduleContinuations(); return; }
       this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); delivery = this.makeDelivery(task, `${task.goal}\n状态：${task.status}\n${task.result?.text ?? task.error ?? '任务停止；已有影响未撤销。'}`, task.id, task.result?.artifacts); if (task.result && ['completed', 'partial'].includes(task.status)) { delivery.learning = { id: delivery.id, input: task.goal, answer: task.result.text }; this.store.putDelivery(delivery); } });
       this.notify(delivery);
     }
@@ -285,20 +439,38 @@ export class PersonalHost {
   /** Reconcile actual executor state before considering any new execution. */
   async recover() {
     for (const delivery of this.store.listDeliveries()) if (delivery.status === 'sending') { delivery.status = 'unknown'; this.store.putDelivery(delivery); }
-    for (const task of this.listTasks()) {
+    if (this.options.dialogue.inspectContinuation) for (const event of this.store.listWorkEvents()) {
+      if (!['processing', 'unknown'].includes(event.state)) continue;
+      const parent = this.getTask(event.parentTaskId); if (!parent || parent.cancelRequested || parent.contextExcluded || ['completed', 'cancelled'].includes(parent.status)) { this.store.transitionWorkEvent(event.id, event.state, 'blocked', '整体工作已结束或取消'); continue; }
+      const evidence = await this.options.dialogue.inspectContinuation(event, parent.sessionId).catch(() => ({ state: 'unknown' as const }));
+      const latestParent = this.getTask(parent.id); if (!latestParent || latestParent.cancelRequested || latestParent.contextExcluded || ['completed', 'cancelled'].includes(latestParent.status)) { this.store.transitionWorkEvent(event.id, event.state, 'blocked', '核对期间整体已结束'); continue; }
+      const uncertain = this.store.listActionDispatches(event.id).some(action => ['dispatching', 'unknown'].includes(action.status));
+      if (evidence.state === 'completed' && evidence.injection && evidence.outcome && !uncertain) {
+        if (evidence.outcome.result?.verified && this.options.acceptContinuation) evidence.outcome.result = await this.options.acceptContinuation(this.getTask(parent.id)!, evidence.outcome.result);
+        this.store.transitionWorkEvent(event.id, event.state, 'processing'); this.store.recordWorkEventInjection(event.id, evidence.injection); this.commitContinuation(event, evidence.outcome);
+      } else if (evidence.state === 'absent' && !uncertain && !event.injection) this.store.transitionWorkEvent(event.id, event.state, 'pending');
+      else if (evidence.state === 'injected' && evidence.injection && !uncertain) {
+        this.store.transitionWorkEvent(event.id, event.state, 'processing'); this.store.recordWorkEventInjection(event.id, evidence.injection); this.store.transitionWorkEvent(event.id, 'processing', 'pending');
+      } else this.store.transitionWorkEvent(event.id, event.state, 'unknown', 'Session 或动作尚未核实，不自动重做');
+    }
+    for (let task of this.listTasks()) {
       if (task.direct) continue;
       if (!['running', 'stopping', 'waiting'].includes(task.status) || this.active.has(task.id)) continue;
       const attempt = this.store.listAttempts(task.id).at(-1);
       if (task.contextExcluded) { task.status = task.resourceHeld ? 'waiting' : 'cancelled'; this.store.putTask(task); continue; }
       const evidence = attempt?.identity && this.options.executor.inspect ? await this.options.executor.inspect(attempt.identity).catch(() => ({ state: 'unknown' as const })) : { state: 'unknown' as const };
+      task = this.getTask(task.id)!;
       if (task.cancelRequested || task.status === 'stopping') {
         const stopped = evidence.state === 'stopped' || evidence.state === 'resumable' || attempt?.identity && this.options.executor.cancel && await this.options.executor.cancel(attempt.identity).catch(() => false);
-        task.status = stopped ? 'cancelled' : 'waiting'; task.resourceHeld = !stopped; task.cancelRequested = true;
+        task = this.getTask(task.id)!; task.status = stopped ? 'cancelled' : task.workKind === 'delegation' ? 'stopping' : 'waiting'; task.resourceHeld = !stopped; task.cancelRequested = true;
         task.error = stopped ? undefined : '执行者停止状态未知，需要核实；不会自动继续。';
       } else if (evidence.state === 'completed' && evidence.result) {
         evidence.result.producedRevision ??= attempt?.presentedRevision;
-        task.result = evidence.result; task.status = evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
+        const latest = this.getTask(task.id)!; if (latest.cancelRequested || latest.contextExcluded) continue;
+        task = latest; task.result = evidence.result; if (evidence.result.producedRevision !== task.revision) evidence.result.verified = false;
+        task.status = evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
         task.resourceHeld = false;
+        if (task.workKind === 'delegation' && attempt) { this.store.settleDelegationResult(task, { ...attempt, status: task.status, finishedAt: this.now() }); continue; }
         let delivery!: Delivery;
         this.store.transaction(() => { this.store.putTask(task); if (attempt) { attempt.status = task.status; this.store.putAttempt(attempt); } delivery = this.makeDelivery(task, `${task.goal}\n状态：${task.status}\n${evidence.result!.text}`, task.id, evidence.result!.artifacts); }); this.notify(delivery);
       } else if (evidence.state === 'resumable') {
@@ -318,7 +490,7 @@ export class PersonalHost {
       if (this.store.inputAttempts(key) >= (this.options.maxDialogueAttempts ?? 3)) continue;
       await this.submit(input).catch(() => {});
     }
-    this.pump();
+    this.pump(); this.scheduleContinuations();
   }
   async excludeConversationContext(conversationId: string) {
     const tasks = this.listTasks(conversationId);
@@ -369,7 +541,8 @@ export class PersonalHost {
         current.error = stopped ? '执行者已停止；已有影响未撤销。' : '执行者状态未确认；不会重复启动。';
       } else if (evidence.state === 'completed' && evidence.result) {
         evidence.result.producedRevision ??= attempt.presentedRevision;
-        current.result = evidence.result; current.status = evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
+        current.result = evidence.result; if (current.cancelRequested || current.contextExcluded || evidence.result.producedRevision !== current.revision) evidence.result.verified = false;
+        current.status = current.cancelRequested ? 'cancelled' : evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
         current.resourceHeld = false;
       } else { current.status = evidence.state === 'stopped' && current.status === 'stopping' ? 'cancelled' : 'waiting'; current.resourceHeld = evidence.state === 'unknown'; current.error = '恢复执行状态需人工核实。'; }
       current.updatedAt = this.now(); attempt.status = current.status; attempt.finishedAt = this.now();
@@ -379,11 +552,12 @@ export class PersonalHost {
         this.store.transaction(() => { this.store.putTask(current); this.store.putAttempt(attempt); }); return;
       }
       let delivery!: Delivery;
+      if (current.workKind === 'delegation') { current.result ??= { text: current.error ?? '帮手状态需核实', verified: false, partial: true, producedRevision: attempt.presentedRevision }; this.store.settleDelegationResult(current, attempt); this.scheduleContinuations(); return; }
       this.store.transaction(() => { this.store.putTask(current); this.store.putAttempt(attempt); delivery = this.makeDelivery(current, `${current.goal}\n状态：${current.status}\n${current.result?.text ?? current.error}`, current.id, current.result?.artifacts); });
       this.notify(delivery);
     })().finally(() => { this.active.delete(task.id); this.pump(); });
     this.active.set(task.id, { abort, promise });
   }
-  async waitForIdle() { while (this.active.size) await Promise.all([...this.active.values()].map(x => x.promise)); }
-  async close(options: { preserveTasks?: boolean } = {}) { this.preserveOnClose = options.preserveTasks ?? true; this.closing = true; for (const entry of this.active.values()) entry.abort.abort(new Error('Host shutdown')); await this.options.interruptDialogue?.(); await Promise.allSettled([...this.conversations.values()]); await this.waitForIdle(); this.store.close(); }
+  async waitForIdle() { this.pump(); this.scheduleContinuations(); while (this.active.size || this.continuations.size || this.conversations.size) { await Promise.allSettled([...this.active.values()].map(x => x.promise).concat([...this.continuations.values()].map(x => x.promise), [...this.conversations.values()].map(p => p.then(() => {})))); this.scheduleContinuations(); } }
+  async close(options: { preserveTasks?: boolean } = {}) { this.preserveOnClose = options.preserveTasks ?? true; this.closing = true; for (const entry of this.active.values()) entry.abort.abort(new Error('Host shutdown')); for (const entry of this.continuations.values()) entry.abort.abort(new Error('Host shutdown')); await this.options.interruptDialogue?.(); await Promise.allSettled([...this.conversations.values()]); await this.waitForIdle(); this.store.close(); }
 }
