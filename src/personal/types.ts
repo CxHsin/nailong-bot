@@ -1,7 +1,7 @@
 export type TaskStatus = 'queued' | 'running' | 'stopping' | 'cancelled' | 'completed' | 'partial' | 'failed' | 'waiting';
 export interface ExecutorIdentity { kind: string; [key: string]: unknown }
 export interface Usage { input?: number; output?: number; cost?: number; costKnown?: boolean }
-export interface TaskResult { text: string; verified: boolean; artifacts?: string[]; artifactDigests?: Record<string, string>; partial?: boolean }
+export interface TaskResult { text: string; verified: boolean; artifacts?: string[]; artifactDigests?: Record<string, string>; partial?: boolean; producedRevision?: number }
 export interface Task {
   id: string; conversationId: string; actorId: string; goal: string; resources: string[];
   executor: 'local' | 'herdr'; cwd?: string; sessionId: string; status: TaskStatus;
@@ -10,10 +10,29 @@ export interface Task {
   requirementInputs?: string[];
   contextExcluded?: boolean;
   deadline?: number;
+  workKind?: 'root' | 'delegation';
+  parentTaskId?: string;
+  rootTaskId?: string;
 }
 export interface Attempt {
   id: string; taskId: string; sessionId: string; status: TaskStatus; startedAt: number;
   finishedAt?: number; identity?: ExecutorIdentity; usage?: Usage;
+  startedRevision?: number;
+  presentedRevision?: number;
+}
+export interface SessionReceipt { sessionId: string; entryId: string; at: number }
+export interface WorkEvent {
+  id: string; kind: 'delegation_result'; conversationId: string;
+  taskId: string; parentTaskId: string; rootTaskId: string; attemptId: string;
+  revision: number; result?: TaskResult; createdAt: number;
+  state: 'pending' | 'processing' | 'consumed' | 'blocked' | 'unknown';
+  injection?: SessionReceipt; completion?: SessionReceipt;
+  error?: string;
+}
+export interface ActionDispatch {
+  id: string; taskId: string; eventId?: string; attemptId?: string; revision: number;
+  action: ActionSpec; status: 'dispatching' | 'succeeded' | 'failed' | 'unknown';
+  startedAt: number; finishedAt?: number; evidence?: string;
 }
 export interface PersonalInput { conversationId: string; actorId: string; text: string; inputId: string; replyTaskId?: string;
   images?: Array<{ type: 'image'; mimeType: string; data: string }>; }

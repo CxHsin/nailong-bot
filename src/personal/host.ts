@@ -176,7 +176,7 @@ export class PersonalHost {
   private async execute(task: Task, abort: AbortController) {
     task = this.getTask(task.id)!;
     if (task.status !== 'queued' || abort.signal.aborted) return;
-    const attempt: Attempt = { id: randomUUID(), taskId: task.id, sessionId: task.sessionId, status: 'running', startedAt: this.now() };
+    const attempt: Attempt = { id: randomUUID(), taskId: task.id, sessionId: task.sessionId, status: 'running', startedAt: this.now(), startedRevision: task.revision, presentedRevision: task.revision };
     if (this.store.listAttempts(task.id).length >= (this.options.maxAttempts ?? 3)) { task.status = 'waiting'; task.error = '执行尝试次数预算耗尽'; task.resourceHeld = false; this.store.putTask(task); return; }
     task.status = 'running'; task.error = undefined; task.resourceHeld = true; this.store.transaction(() => { this.store.putTask(task); this.store.putAttempt(attempt); });
     this.appliedRevisions.set(task.id, task.revision);
@@ -193,9 +193,9 @@ export class PersonalHost {
       const result = await this.options.executor.execute({ task, attempt, signal: abort.signal,
         onIdentity: identity => { attempt.identity = identity; this.store.putAttempt(attempt); if (abort.signal.aborted) requestCancel(); },
         onUsage: usage => { attempt.usage = usage; this.store.putAttempt(attempt); if ((usage.input ?? 0) + (usage.output ?? 0) > (this.options.maxTokens ?? 500_000)) abort.abort(new Error('执行用量预算耗尽')); },
-        onRequirementApplied: revision => { const current = this.getTask(task.id); if (current && revision <= current.revision) this.appliedRevisions.set(task.id, revision); },
+        onRequirementApplied: revision => { const current = this.getTask(task.id); if (current && Number.isInteger(revision) && revision >= (attempt.presentedRevision ?? 0) && revision <= current.revision) { attempt.presentedRevision = revision; this.store.putAttempt(attempt); this.appliedRevisions.set(task.id, revision); } },
         requestAction: action => this.requestAction(task.id, action) });
-      task = this.getTask(task.id)!; task.result = result;
+      task = this.getTask(task.id)!; result.producedRevision = attempt.presentedRevision; task.result = result;
       if (abort.signal.aborted) task.status = abort.signal.reason instanceof Error && /预算/.test(abort.signal.reason.message) ? 'waiting' : 'cancelled';
       else if (task.revision > (this.appliedRevisions.get(task.id) ?? 0)) { task.status = 'partial'; result.verified = false; }
       else task.status = result.verified && !result.partial ? 'completed' : 'partial';
@@ -251,6 +251,7 @@ export class PersonalHost {
         task.status = stopped ? 'cancelled' : 'waiting'; task.resourceHeld = !stopped; task.cancelRequested = true;
         task.error = stopped ? undefined : '执行者停止状态未知，需要核实；不会自动继续。';
       } else if (evidence.state === 'completed' && evidence.result) {
+        evidence.result.producedRevision ??= attempt?.presentedRevision;
         task.result = evidence.result; task.status = evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
         task.resourceHeld = false;
         let delivery!: Delivery;
@@ -322,6 +323,7 @@ export class PersonalHost {
         current.status = stopped && current.status === 'stopping' ? 'cancelled' : 'waiting';
         current.error = stopped ? '执行者已停止；已有影响未撤销。' : '执行者状态未确认；不会重复启动。';
       } else if (evidence.state === 'completed' && evidence.result) {
+        evidence.result.producedRevision ??= attempt.presentedRevision;
         current.result = evidence.result; current.status = evidence.result.verified && !evidence.result.partial ? 'completed' : 'partial';
         current.resourceHeld = false;
       } else { current.status = evidence.state === 'stopped' && current.status === 'stopping' ? 'cancelled' : 'waiting'; current.resourceHeld = evidence.state === 'unknown'; current.error = '恢复执行状态需人工核实。'; }

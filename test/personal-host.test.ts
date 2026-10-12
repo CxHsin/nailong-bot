@@ -100,6 +100,27 @@ test('received steering cannot turn stale work into verified completion', async 
     assert.match(response.text, /尚未确认/); release(); await host.waitForIdle();
     assert.equal(host.getTask(first.taskId!)?.status, 'partial');
     assert.equal(host.getTask(first.taskId!)?.result?.verified, false);
+    assert.equal(host.getTask(first.taskId!)?.result?.producedRevision, 0);
+    assert.equal(host.store.listAttempts(first.taskId!).at(-1)?.startedRevision, 0);
+    assert.equal(host.store.listAttempts(first.taskId!).at(-1)?.presentedRevision, 0);
+  } finally { release(); await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('applied requirements remain distinct from attempt start and produce the matching result revision', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personal-version-'));
+  let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve; });
+  let execution!: TaskExecution;
+  const host = new PersonalHost({ store: new PersonalStore(directory),
+    dialogue: { async decide(input) { return input.text === 'change' ? { kind: 'steer', text: 'add sources' } : { kind: 'start', goal: 'research' }; } },
+    executor: { async execute(request) { execution = request; await barrier; request.onRequirementApplied?.(1); request.onRequirementApplied?.(0); request.onRequirementApplied?.(9); return { text: 'research with sources', verified: true }; }, async steer() { return true; } } });
+  try {
+    const response = await host.submit({ conversationId: 'c', actorId: 'a', inputId: 'start', text: 'research' });
+    await host.submit({ conversationId: 'c', actorId: 'a', inputId: 'change', text: 'change', replyTaskId: response.taskId });
+    release(); await host.waitForIdle();
+    assert.equal(execution.attempt.startedRevision, 0);
+    assert.equal(host.store.listAttempts(response.taskId!).at(-1)?.presentedRevision, 1);
+    assert.equal(host.getTask(response.taskId!)?.result?.producedRevision, 1);
+    assert.equal(host.getTask(response.taskId!)?.status, 'completed');
   } finally { release(); await host.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -244,6 +265,7 @@ test('recovery resolves an uncertain waiting result and releases its directory w
     const second = await host.submit({ conversationId: 'c', actorId: 'a', inputId: '2', text: 'second' }); assert.equal(host.getTask(second.taskId!)?.status, 'queued');
     await host.recover(); await host.waitForIdle();
     assert.equal(executions, 2); assert.equal(host.getTask(first.taskId!)?.status, 'completed'); assert.equal(host.getTask(second.taskId!)?.status, 'completed');
+    assert.equal(host.getTask(first.taskId!)?.result?.producedRevision, 0);
   } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
