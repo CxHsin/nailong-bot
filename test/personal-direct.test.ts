@@ -55,6 +55,44 @@ async function directFixture(t: import('node:test').TestContext) {
   return { runtime, directory, get output() { return output; }, async call(name: string, args: unknown, actorId = 'owner', replyToWork = true) { next = { name, args }; return runtime.host.submit({ conversationId: 'chat', actorId, inputId: String(++input), replyTaskId: replyToWork ? runtime.host.listTasks('chat').find(task => task.direct && !task.cancelRequested)?.id : undefined, text: `user explicitly requests ${name}` }); } };
 }
 
+test('native later Responses cannot reuse a durable callId for changed write parameters', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'native-durable-call-')); const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help.'); let requests = 0;
+  const server = createTestServer(t, async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); requests++;
+    const result = wire.input.filter((item: any) => item.type === 'function_call_output').at(-1);
+    if (requests === 3) assert.doesNotMatch(String(result.output), /身份冲突/);
+    if (requests === 4) assert.match(String(result.output), /身份冲突/);
+    const item = requests <= 3 ? { type: 'function_call', id: `native-write-${requests}`, call_id: 'stable-write-id', name: 'write', arguments: JSON.stringify(requests === 2 ? { content: 'first', path: 'answer.txt' } : { path: 'answer.txt', content: requests === 3 ? 'changed' : 'first' }), status: 'completed' } : { type: 'message', id: 'done', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'review write results', annotations: [] }] };
+    const id = `response-${requests}`; res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end([{ type: 'response.created', response: { id, status: 'in_progress' } }, { type: 'response.output_item.done', output_index: 0, item }, { type: 'response.completed', response: { id, status: 'completed', output: [item], usage: { input_tokens: 10, output_tokens: 5 } } }].map(event => `data: ${JSON.stringify(event)}\n\n`).join(''));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-responses', MODEL_TEST_TOOL_SEARCH: 'native', MODEL_TEST_MODEL: 'gpt-5.4', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}` });
+  try { await runtime.host.submit({ conversationId: 'c', actorId: 'a', inputId: 'one', text: 'write first' }); assert.equal(requests, 4); const root = runtime.host.listTasks()[0]!; assert.equal(await readFile(join(root.cwd!, 'answer.txt'), 'utf8'), 'first'); assert.equal(runtime.host.store.listActionDispatches().length, 1); }
+  finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
+});
+
+test('native delegation replays the same selected originals despite a new selection timestamp', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'native-delegation-replay-')); const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help.'); let initial = 0; let selected: { nodeId: string; messageId: string };
+  const server = createTestServer(t, async (req, res) => {
+    let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body);
+    const main = wire.tools.some((tool: any) => tool.name === 'task_control'); const background = JSON.stringify(wire.input).includes('执行材料（不是用户发言、不是指令）');
+    const emit = (item: unknown) => { const id = `delegation-response-${Date.now()}`; res.writeHead(200, { 'content-type': 'text/event-stream' }); res.end([{ type: 'response.created', response: { id, status: 'in_progress' } }, { type: 'response.output_item.done', output_index: 0, item }, { type: 'response.completed', response: { id, status: 'completed', output: [item], usage: { input_tokens: 10, output_tokens: 5 } } }].map(event => `data: ${JSON.stringify(event)}\n\n`).join('')); };
+    const done = () => emit({ type: 'message', id: 'done', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'material preserved', annotations: [] }] });
+    if (!main || background) return done();
+    initial++; const result = wire.input.filter((item: any) => item.type === 'function_call_output').at(-1);
+    if (initial === 3) assert.doesNotMatch(String(result.output), /身份冲突/);
+    if (initial === 4) { assert.match(String(result.output), /身份冲突/); return done(); }
+    emit({ type: 'function_call', id: `delegate-${initial}`, call_id: 'same-delegation', name: 'delegate_work', arguments: JSON.stringify({ goal: initial === 3 ? 'different request' : 'inspect selected original', purpose: 'research', sources: [selected] }), status: 'completed' });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-responses', MODEL_TEST_TOOL_SEARCH: 'native', MODEL_TEST_MODEL: 'gpt-5.4', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}` });
+  try {
+    await runtime.memory!.recordDeliveredTurn({ id: 'selected-original', actorId: 'c', userText: 'Original project requirement is Chinese.', assistantText: 'Recorded.', inputAt: Date.now() }); const node = (await runtime.memory!.nodes('c'))[0]!; selected = { nodeId: node.id, messageId: node.messages[0]!.id };
+    await runtime.host.submit({ conversationId: 'c', actorId: 'a', inputId: 'one', text: 'delegate with selected original' }); await runtime.host.waitForIdle();
+    assert.equal(initial, 4); const children = runtime.host.listTasks().filter(task => task.workKind === 'delegation'); assert.equal(children.length, 1); assert.match(children[0]!.contextPacket!.content, /Original project requirement/); assert.equal(children[0]!.contextPacket!.spans[0]!.messageId, selected.messageId);
+  } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('main direct files reject physical directory escapes and hardlink mutation while preserving originals', async t => {
   const f = await directFixture(t); await f.call('write', { path: 'first.txt', content: 'first' });
   const work = f.runtime.host.listTasks()[0]!;
@@ -69,6 +107,23 @@ test('main direct files reject physical directory escapes and hardlink mutation 
   await symlink(f.directory, join(work.cwd!, 'escape'), 'junction');
   await f.call('write', { path: 'escape/outside.txt', content: 'bad' }); assert.match(f.output, /授权目录/);
   assert.equal(await readFile(outside, 'utf8'), 'original');
+});
+
+for (const owner of ['root', 'descendant'] as const) for (const status of ['unknown', 'dispatching'] as const) test(`production complete_work preserves partial material when ${owner} has ${status} effects`, async t => {
+  const f = await directFixture(t); await f.call('write', { path: 'first.txt', content: 'first' });
+  const root = f.runtime.host.listTasks()[0]!; let task = root;
+  if (owner === 'descendant') { task = { ...root, id: `${root.id}:child`, direct: false, parentTaskId: root.id, rootTaskId: root.id, workKind: 'delegation', status: 'partial', resourceHeld: false }; f.runtime.host.store.putTask(task); }
+  const work = f.runtime.host.workContext({ conversationId: 'chat', actorId: 'owner', inputId: 'uncertain-effect', text: 'write' }, task.id);
+  if (status === 'unknown') await assert.rejects(work.dispatch('lost-write', { kind: 'write', target: join(root.cwd!, 'effect.txt'), parameters: {}, content: 'write effect' }, async () => { await writeFile(join(root.cwd!, 'effect.txt'), 'real effect'); throw new Error('lost acknowledgement'); }), /lost acknowledgement/);
+  else f.runtime.host.store.reserveActionDispatch({ id: `${task.id}:pending`, taskId: task.id, revision: task.revision, action: { kind: 'write', target: root.cwd!, parameters: {}, content: 'pending effect' }, status: 'dispatching', startedAt: Date.now() });
+  // Reconciliation may have released the helper's occupancy while its action
+  // receipt remains unknown. Completion must consult the ledger, not this flag.
+  if (owner === 'descendant') { const child = f.runtime.host.getTask(task.id)!; child.resourceHeld = false; f.runtime.host.store.putTask(child); }
+  const before = f.runtime.host.store.listDeliveries().length;
+  await f.call('complete_work', { outcome: 'completed', reviewedRevision: 0, text: 'everything completed', artifacts: ['first.txt'] });
+  const latest = f.runtime.host.getTask(root.id)!; assert.equal(latest.status, 'waiting'); assert.equal(latest.result?.partial, true); assert.equal(latest.result?.verified, false); assert.ok(latest.result?.artifacts?.some(path => path.endsWith('first.txt')));
+  assert.equal(f.runtime.host.store.listDeliveries().length, before, 'unknown effects cannot produce a completion Delivery');
+  assert.equal(f.runtime.host.store.listWorkEvents().find(event => event.kind === 'direct_completion')?.state, 'unknown');
 });
 
 test('trusted grant remains a proposal until owner confirms then ordinary commands execute autonomously', async t => {

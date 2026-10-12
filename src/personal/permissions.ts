@@ -27,10 +27,13 @@ export interface ExecutionBackend {
   supports(request: { cwd: string; grant: PermissionGrant }): Promise<{ supported: boolean; reasons: string[] }>;
   execute(request: { command: string; cwd: string; grant: PermissionGrant; signal?: AbortSignal; timeout?: number }): Promise<unknown>;
 }
-export async function selectBackend(task: Task, backends: ExecutionBackend[] = []): Promise<ExecutionBackend> {
+export async function matchesExecutionBackend(task: Task, backend?: Pick<ExecutionBackend, 'verified' | 'identity' | 'capabilities' | 'supports'>): Promise<boolean> {
   const grant = requirePermission(task);
-  for (const backend of backends) if (backend.verified && backend.identity && backend.capabilities.readIsolation && backend.capabilities.writeIsolation && (grant.network || backend.capabilities.networkIsolation) && backend.capabilities.processTreeStop &&
-    (await backend.supports({ cwd: task.cwd!, grant })).supported) return backend;
+  return !!backend?.verified && !!backend.identity && backend.capabilities.readIsolation && backend.capabilities.writeIsolation && (grant.network || backend.capabilities.networkIsolation) && backend.capabilities.processTreeStop && (await backend.supports({ cwd: task.cwd!, grant })).supported;
+}
+export async function selectBackend(task: Task, backends: ExecutionBackend[] = []): Promise<ExecutionBackend> {
+  requirePermission(task);
+  for (const backend of backends) if (await matchesExecutionBackend(task, backend)) return backend;
   throw permissionError('没有匹配当前目录、读写、网络及停止边界的已验证后端；未派发命令。可信本机执行需要用户明确授予。');
 }
 export async function checkFile(task: Task, path: string, mutation: boolean, dataDir: string, skillRoots: string[] = []): Promise<string> {

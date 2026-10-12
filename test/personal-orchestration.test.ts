@@ -46,6 +46,36 @@ test('unknown work dispatch blocks a new callId and foreign permission proposals
   } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('durable action replay verifies canonical content and revision before returning old evidence', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'dispatch-identity-')); let store = new PersonalStore(directory); let host = new PersonalHost({ store, dialogue: { async decide() { return { kind: 'reply', text: '' }; } }, executor: { async execute() { return { text: '', verified: false }; } } });
+  const input = { conversationId: 'c', actorId: 'a', inputId: 'same-input', text: 'write' }; let work = host.workContext(input); let effects = 0;
+  const action = { kind: 'write', target: work.task.cwd!, parameters: { path: 'answer.txt', content: 'first' }, content: 'write' };
+  try {
+    assert.deepEqual(await work.dispatch('same-call', action, async () => { effects++; writeFileSync(join(directory, 'effect.txt'), 'first'); return { actual: 'first' }; }), { actual: 'first' });
+    const taskId = work.task.id; await host.close(); store = new PersonalStore(directory); host = new PersonalHost({ store, dialogue: { async decide() { return { kind: 'reply', text: '' }; } }, executor: { async execute() { return { text: '', verified: false }; } } }); work = host.workContext(input, taskId);
+    assert.deepEqual(await work.dispatch('same-call', { ...action, parameters: { content: 'first', path: 'answer.txt' } }, async () => { effects++; return { actual: 'repeated' }; }), { actual: 'first' });
+    await assert.rejects(work.dispatch('same-call', { ...action, parameters: { path: 'answer.txt', content: 'changed' } }, async () => { effects++; return 'changed'; }), /身份冲突/);
+    const revised = work.current(); revised.revision++; store.putTask(revised);
+    await assert.rejects(work.dispatch('same-call', action, async () => { effects++; return 'changed revision'; }), /身份冲突/);
+    assert.equal(effects, 1); assert.equal(readFileSync(join(directory, 'effect.txt'), 'utf8'), 'first'); assert.equal(store.listActionDispatches().length, 1);
+  } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('durable delegation replay verifies specification and parent version before reusing a child', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'delegation-identity-')); const store = new PersonalStore(directory); const host = new PersonalHost({ store, dialogue: { async decide() { return { kind: 'reply', text: '' }; } }, executor: { async execute() { return { text: 'material', verified: false }; } } });
+  try {
+    const work = host.workContext({ conversationId: 'c', actorId: 'a', inputId: 'input', text: 'research' });
+    const child = work.delegate!('same-call', { goal: 'first', purpose: 'research' }); await host.waitForIdle();
+    assert.equal(work.delegate!('same-call', { purpose: 'research', goal: 'first' }).id, child.id);
+    assert.throws(() => work.delegate!('same-call', { goal: 'changed', purpose: 'research' }), /身份冲突/);
+    const revised = work.current(); revised.revision++; store.putTask(revised);
+    assert.throws(() => work.delegate!('same-call', { goal: 'first', purpose: 'research' }), /身份冲突/);
+    assert.equal(host.listTasks().filter(task => task.parentTaskId === work.task.id).length, 1);
+    const legacy = store.getTask(child.id)!; delete legacy.delegationIdentity; store.putTask(legacy);
+    assert.throws(() => work.delegate!('same-call', { goal: 'first', purpose: 'research' }), /身份冲突/);
+  } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('production research keeps a denied file action partial even after submitting valid source evidence', { timeout: 15000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'personal-research-denial-')); const promptFile = join(directory, 'prompt.md'); writeFileSync(promptFile, 'Help.'); let denied = 0;
   const server = createTestServer(t, async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return; const last = wire.messages.at(-1); const main = wire.tools.some((tool: { function: { name: string } }) => tool.function.name === 'task_control'); const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
@@ -216,6 +246,31 @@ test('restart repairs Session completion receipt without another model turn or c
     assert.equal(turns, 1); assert.equal(host.getTask(response.taskId!)?.status, 'completed'); assert.equal(store.listWorkEvents()[0]?.state, 'consumed');
     await host.recover(); assert.equal(store.listDeliveries().filter(delivery => delivery.text === 'already synthesized').length, 1);
   } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+for (const recovery of [false, true]) test(`${recovery ? 'receipt recovery' : 'main continuation'} cannot complete while a prior root effect is unknown`, async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'completion-unknown-root-')); const store = new PersonalStore(directory); let host!: PersonalHost;
+  const injection = { sessionId: 'main', entryId: 'injected', at: 2 }; const outcome = { outcome: 'completed' as const, reviewedRevision: 0, result: { text: 'synthesis with unknown effects', verified: true, artifacts: [join(directory, 'effect.txt')] }, completion: { sessionId: 'main', entryId: 'completed', at: 3 } };
+  const loseAcknowledgement = async (taskId: string) => { await new Promise(resolve => setImmediate(resolve)); const work = host.workContext({ conversationId: 'c', actorId: 'a', inputId: 'prior-user-effect', text: 'effect' }, taskId); await assert.rejects(work.dispatch('external', { kind: 'write', target: directory, parameters: {}, content: 'write actual effect' }, async () => { writeFileSync(join(directory, 'effect.txt'), 'actual effect'); throw new Error('lost effect receipt'); }), /lost effect receipt/); };
+  host = new PersonalHost({ store, dialogue: { async decide() { return { kind: 'start', goal: 'synthesize' }; }, async resume(_event, context) { if (recovery) throw new Error('died before SQL completion'); context.onInjection(injection); await loseAcknowledgement(context.task.id); return outcome; }, async inspectContinuation() { return { state: 'completed', injection, outcome }; } }, executor: { async execute() { return { text: 'actual child material', verified: true }; } } });
+  try {
+    const response = await host.submit({ conversationId: 'c', actorId: 'a', inputId: 'user', text: 'synthesize' }); await host.waitForIdle();
+    if (recovery) { await loseAcknowledgement(response.taskId!); await host.recover(); await host.waitForIdle(); }
+    const root = host.getTask(response.taskId!)!; assert.equal(root.status, 'waiting'); assert.equal(root.result?.partial, true); assert.equal(root.result?.verified, false); assert.equal(root.resourceHeld, true); assert.equal(readFileSync(join(directory, 'effect.txt'), 'utf8'), 'actual effect');
+    assert.equal(store.listWorkEvents()[0]?.state, 'unknown'); assert.equal(store.listDeliveries().some(delivery => delivery.text === outcome.result.text), false);
+  } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('late accepted completion cannot revive a cancelled root with an unknown effect', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cancelled-completion-')); const store = new PersonalStore(directory); let host!: PersonalHost;
+  host = new PersonalHost({ store, acceptContinuation: async (task, result) => { await host.cancelWork(task.id); return result; }, dialogue: { async decide() { return { kind: 'start', goal: 'work' }; }, async resume(_event, context) {
+    context.onInjection({ sessionId: context.sessionId, entryId: 'injected', at: 1 }); await new Promise(resolve => setImmediate(resolve));
+    const work = host.workContext({ conversationId: 'c', actorId: 'a', inputId: 'prior', text: 'effect' }, context.task.id);
+    await assert.rejects(work.dispatch('effect', { kind: 'write', target: directory, parameters: {}, content: 'actual write' }, async () => { writeFileSync(join(directory, 'effect.txt'), 'effect'); throw new Error('lost receipt'); }), /lost receipt/);
+    return { outcome: 'completed', reviewedRevision: 0, result: { text: 'late completion', verified: true }, completion: { sessionId: context.sessionId, entryId: 'completed', at: 2 } };
+  } }, executor: { async execute() { return { text: 'material', verified: true }; } } });
+  try { const response = await host.submit({ conversationId: 'c', actorId: 'a', inputId: 'one', text: 'work' }); await host.waitForIdle(); const root = host.getTask(response.taskId!)!; assert.equal(root.cancelRequested, true); assert.equal(root.status, 'stopping'); assert.equal(root.resourceHeld, true); assert.equal(store.listWorkEvents()[0]?.state, 'blocked'); assert.equal(store.listDeliveries().some(delivery => delivery.text === 'late completion'), false); }
+  finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('root cancellation marks all helpers before termination and late results cannot revive stopped work', async () => {

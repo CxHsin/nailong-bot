@@ -2,6 +2,7 @@ import { closeSync, existsSync, fsyncSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { requestIdentity } from './request-identity.js';
 import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch, WorkBudget, WorkingAgreement } from './types.js';
 
 /** Business records are authoritative; SDK sessions contain model exchanges only. */
@@ -165,7 +166,7 @@ export class PersonalStore {
     return this.transaction(() => {
       const existing = this.getActionDispatch(record.id);
       if (existing) {
-        if (existing.taskId !== record.taskId || existing.eventId !== record.eventId || existing.attemptId !== record.attemptId || existing.revision !== record.revision || JSON.stringify(existing.action) !== JSON.stringify(record.action)) throw new Error('动作派发身份冲突');
+        if (requestIdentity([existing.taskId, existing.eventId, existing.attemptId, existing.revision, existing.action]) !== requestIdentity([record.taskId, record.eventId, record.attemptId, record.revision, record.action])) throw new Error('动作派发身份冲突');
         return { record: existing, created: false };
       }
       if (record.status !== 'dispatching') throw new Error('动作派发必须从 dispatching 开始');

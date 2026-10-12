@@ -9,7 +9,7 @@ import { createPersonalMemory } from './memory.js';
 import { HerdrExecutor, type HerdrOptions } from './herdr.js';
 import { PersonalPlans } from './plans.js';
 import { VerificationChecks, type VerificationOptions } from './verification.js';
-import { requirePermission, permissionError, permissionSnapshot, assertPermissionSnapshot, type ExecutionBackend } from './permissions.js';
+import { requirePermission, permissionError, permissionSnapshot, assertPermissionSnapshot, matchesExecutionBackend, type ExecutionBackend } from './permissions.js';
 import { loadExecutionBackends } from './execution-backends.js';
 import { freezeArtifacts } from './artifacts.js';
 import { inspectMaterial } from './acceptance.js';
@@ -75,7 +75,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       { timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000),
         async runCommand(task, command, context) {
           const current = host.getTask(task.id) ?? task; const grant = requirePermission(current);
-          const matches = async (current: Task) => { const grant = requirePermission(current); const backend = dependencies.verificationBackend; return !!backend?.verified && !!backend.identity && backend.capabilities.readIsolation && backend.capabilities.writeIsolation && (grant.network || backend.capabilities.networkIsolation) && backend.capabilities.processTreeStop && (await backend.supports({ cwd: current.cwd!, grant })).supported; };
+          const matches = (current: Task) => matchesExecutionBackend(current, dependencies.verificationBackend);
           if (grant.mode !== 'trusted' && !await matches(current)) throw permissionError('独立检查没有匹配当前工作权限和身份的已验证命令后端；未派发');
           const work = host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: `verification:${task.revision}`, text: task.goal }, task.id);
           const callId = `check:${JSON.stringify(command)}`;

@@ -25,6 +25,7 @@ export interface Task {
   permission?: PermissionGrant;
   purpose?: 'research' | 'organization' | 'coding';
   parentRevision?: number;
+  delegationIdentity?: string;
   background?: string;
   originInput?: PersonalInput;
   contextPacket?: ContextPacket;

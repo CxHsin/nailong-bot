@@ -4,6 +4,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { PersonalStore } from './store.js';
 import type { ActionSpec, ActionRecord, Attempt, Decision, Delivery, Dialogue, PersonalInput, PersonalResponse, Plan, Task, TaskExecutor, WorkToolContext, PermissionGrant, DelegationSpec, WorkEvent, ContinuationOutcome } from './types.js';
 import { recallIdentity } from './memory-context.js';
+import { requestIdentity } from './request-identity.js';
 import type { AgreementChange, WorkingAgreement } from './types.js';
 
 export interface PersonalHostOptions { store: PersonalStore; dialogue: Dialogue; executor: TaskExecutor; maxConcurrent?: number; maxDurationMs?: number; maxTokens?: number; maxAttempts?: number; maxDialogueAttempts?: number; maxRootCalls?: number; maxGlobalCalls?: number; maxGlobalTokens?: number; maxRework?: number; recoveryPollMs?: number; now?: () => number; acceptContinuation?(task: Task, result: import('./types.js').TaskResult): Promise<import('./types.js').TaskResult>; interruptDialogue?(): Promise<void>; handleDecision?(input: PersonalInput, decision: Decision): Promise<PersonalResponse> }
@@ -92,12 +93,13 @@ export class PersonalHost {
       proposePermission: grant => { current(); return this.requestAction(id, { kind: 'permission-grant', target: id, parameters: { grant, proposedInputId: input.inputId }, content: `确认一次工作权限；可信 Shell 继承 Host 本机权限，不能强制禁止删除文件或外发；受控删除和发送另需明确授权：${JSON.stringify(grant)}` }); },
       dispatch: async <T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T> => {
         const latest = current(); const dispatchId = `${id}:${eventId ?? input.inputId}:${callId}`;
+        const proposed = { id: dispatchId, taskId: id, eventId, revision: latest.revision, action, status: 'dispatching' as const, startedAt: this.now() };
         const existing = this.store.getActionDispatch(dispatchId);
+        if (existing) this.store.reserveActionDispatch(proposed);
         if (existing?.status === 'succeeded' && existing.evidence !== undefined) return JSON.parse(existing.evidence) as T;
         if (this.store.listActionDispatches().some(record => record.taskId === id && ['dispatching', 'unknown'].includes(record.status))) throw new Error('该工作已有未核实派发；暂停所有后续副作用，不能通过新 callId 重做');
         if (!existing && this.conflicts(latest)) throw new Error('工作资源被其他执行占用；动作尚未派发');
-        const reserved = this.store.reserveActionDispatch({ id: dispatchId, taskId: id, eventId, revision: latest.revision,
-          action, status: 'dispatching', startedAt: this.now() });
+        const reserved = this.store.reserveActionDispatch(proposed);
         if (!reserved.created) {
           if (reserved.record.status === 'succeeded' && reserved.record.evidence !== undefined) return JSON.parse(reserved.record.evidence) as T;
           throw new Error('该动作已有派发记录；不能自动重复副作用，需核对已有结果');
@@ -122,7 +124,10 @@ export class PersonalHost {
       if (!parent || parent.cancelRequested || parent.contextExcluded || ['completed', 'cancelled', 'failed'].includes(parent.status)) throw new Error('父工作已结束或取消');
       if (this.store.listActionDispatches().some(record => record.taskId === parentId && ['dispatching', 'unknown'].includes(record.status))) throw new Error('父工作存在未核实动作，不能另开帮手重复执行');
       const id = `delegation:${createHash('sha256').update(JSON.stringify([parentId, callId])).digest('hex')}`;
-      const existing = this.getTask(id); if (existing) return existing;
+      // Selection time is Host metadata; the selected original spans and rules
+      // remain part of the request identity and must still match on replay.
+      const identity = requestIdentity([parent.revision, { ...spec, contextPacket: spec.contextPacket ? { ...spec.contextPacket, at: undefined } : undefined }]);
+      const existing = this.getTask(id); if (existing) { if (existing.delegationIdentity !== identity) throw new Error('委派请求身份冲突；旧记录缺少可核对身份时需人工核对，不能推断为当前要求。'); return existing; }
       const previousWork = spec.reworkOf ? this.getTask(spec.reworkOf) : this.listTasks().find(child => child.parentTaskId === parent.id && child.goal.trim() === spec.goal.trim() && child.purpose === spec.purpose && ['completed', 'partial', 'failed', 'cancelled'].includes(child.status));
       if (spec.reworkOf && (!previousWork || previousWork.parentTaskId !== parent.id)) throw new Error('返工必须关联该父工作的帮手');
       if (previousWork) {
@@ -134,6 +139,7 @@ export class PersonalHost {
       const child = this.createTask({ conversationId: parent.conversationId, actorId: parent.actorId, inputId: parent.originInputId ?? id, text: spec.goal },
         { kind: 'start', goal: spec.goal, cwd: spec.cwd ?? parent.cwd, resources: spec.resources, executor: spec.purpose === 'coding' ? 'herdr' : 'local', deadline: parent.deadline }, id);
       child.workKind = 'delegation'; child.parentTaskId = parent.id; child.rootTaskId = parent.rootTaskId ?? parent.id;
+      child.delegationIdentity = identity;
       child.purpose = spec.purpose; child.parentRevision = parent.revision; child.background = spec.background;
       if (spec.contextPacket) {
         if (spec.contextPacket.source !== 'parent_selected' || Buffer.byteLength(JSON.stringify(spec.contextPacket)) > 16000 || spec.contextPacket.agreementIds.some(id => !this.agreements(parent.id).some(rule => rule.id === id))) throw new Error('子背景或必要约定范围无效');
@@ -178,6 +184,17 @@ export class PersonalHost {
     let delivery: Delivery | undefined;
     this.store.transaction(() => {
       const latest = this.getTask(event.parentTaskId)!;
+      if (latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled', 'failed'].includes(latest.status)) { this.store.transitionWorkEvent(event.id, 'processing', 'blocked', '整体工作已结束或取消'); return; }
+      // A Session receipt proves the model finished its turn, not that earlier
+      // effects belonging to this root or its helpers were reconciled.
+      const rootId = latest.rootTaskId ?? latest.id;
+      const uncertain = this.store.listActionDispatches().filter(action => ['dispatching', 'unknown'].includes(action.status) && (action.taskId === rootId || this.getTask(action.taskId)?.rootTaskId === rootId));
+      if (uncertain.length) {
+        if (outcome.result) latest.result = { ...outcome.result, producedRevision: outcome.reviewedRevision, verified: false, partial: true };
+        latest.status = 'waiting'; latest.error = '工作或相关帮手存在未核实动作；已保留部分材料，等待核对，不能宣布整体完成。'; latest.updatedAt = this.now();
+        latest.resourceHeld ||= uncertain.some(action => action.taskId === latest.id); this.store.putTask(latest);
+        this.store.transitionWorkEvent(event.id, 'processing', 'unknown', latest.error); return;
+      }
       const consumed = this.store.completeWorkEvent(event.id, outcome.completion);
       if (consumed.state !== 'consumed' || latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled'].includes(latest.status)) return;
       if (event.kind === 'context_request') {
