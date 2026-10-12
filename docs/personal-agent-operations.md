@@ -1,6 +1,6 @@
 # Personal Agent 操作与验收
 
-日期：2026-10-12；重构基准：`d03422048b6a22502e8ac1952ae3d3a434612bc1`。当前入口见 [README](../README.md)，目标为 [#157](https://github.com/CxHsin/nailong-bot/issues/157)。
+更新：2026-10-13，当前规格 [#167](https://github.com/CxHsin/nailong-bot/issues/167)，入口见 [README](../README.md)，当前证据见[本轮验收](personal-agent-acceptance-20261013.md)。2026-10-12 #157 的 `d03422048b6a22502e8ac1952ae3d3a434612bc1` 是历史重构基线。
 
 ## 配置
 
@@ -25,6 +25,8 @@
 | `AGENT_SHELL_PATH` | 可选 Pi shell |
 | `AGENT_VERIFICATION_CHECKS` | JSON 数组，确切 command/args/cwd，部署者预先授权 |
 | `AGENT_CHECK_TIMEOUT_MS` | 120000，检查命令上限 |
+| `AGENT_CODEX_SANDBOX_EXECUTABLE` | 可选，候选的物理执行文件；不会自动安装或配置 |
+| `AGENT_CODEX_SANDBOX_EVIDENCE` | 可选，version1 unelevated采样记录；当前候选只能诊断并拒绝受限命令 |
 
 本地执行与验收模型用量合并进入 Attempt 预算；herdr 外部执行用量未知，不能推定免费。验收受模型超时与 Task 取消信号约束。未知动作消费不能当作可安全重试。计划停机期间不运行，恢复按持久错过策略处理。
 
@@ -40,9 +42,9 @@
 
 ### 业务 schema 升级（#168）
 
-2026-10-13 新增独立 `personal_schema`；#168 引入版本 1，#171 升为版本 2，新增持久全局/整体目标预算。打开已有 `personal.sqlite` 时，Host 先取得数据目录所有权，再用 SQLite `VACUUM INTO` 将包含已提交 WAL 页的一致快照写入 `personal-schema-backups/`，同步备份文件并检查完整性后才提交升级。备份失败会关闭数据库并释放所有权；高于当前代码支持的版本拒绝启动。已成功升级的目录重启不再备份或重复迁移。
+2026-10-13 新增独立 `personal_schema`；#168 引入版本 1，#171 升为版本 2，新增持久全局/整体目标预算；#172 升为版本 3，保存工作约定及修订。打开已有 `personal.sqlite` 时，Host 先取得数据目录所有权，再用 SQLite `VACUUM INTO` 将包含已提交 WAL 页的一致快照写入 `personal-schema-backups/`，同步备份文件并检查完整性后才提交升级。备份失败会关闭数据库并释放所有权；高于当前代码支持的版本拒绝启动。已成功升级的目录重启不再备份或重复迁移。
 
-旧 Task 增加整体工作身份及自身 root 身份；原 Task、Attempt、Plan、Session、Delivery、原文和排除记录保留。旧 Attempt 的实际要求版本与旧成果产生版本无法从当前 Task 修订号推知，因此保持未知。历史 Session 导入清单与记忆文件不参与此次升级，也不会重新导入。旧完成成果不创建新的交付；待交付及 unknown 记录保持。
+旧 Task 增加整体工作身份及自身 root 身份；原 Task、Attempt、Plan、Session、Delivery、原文和排除记录保留。旧 Attempt 的实际要求版本与旧成果产生版本无法从当前 Task 修订号推知，因此保持未知。历史 Session 导入清单不参与业务升级，也不会重新导入。#172 独立 personal-memory.sqlite schema v1 使用相同一致快照机制保存召回、实际呈现及学习事实；业务备份不替代记忆备份。旧完成成果不创建新的交付；待交付及 unknown 记录保持。
 
 存储接口提供委派结果与唯一工作事件的原子结算、Session 注入/完成回执和动作派发账本。结果事件消费记录表示本体处理了材料，不能证明整体目标符合最新要求。子结果不会创建 Delivery。重启时已存在的动作身份须核实；unknown 不是重新派发许可。#171 在生产工厂接入下面的闭环；此处说明代码行为，不表示生产 bot 已部署。
 
@@ -54,11 +56,21 @@
 
 结果先结算进唯一事件，再通过原生 `nailong_work_result` 自定义 Session 消息回本体。它保持执行材料身份，不进入 Host 用户输入、检索触发或学习轮次。已排队的真实用户消息先处理；同一主 Session 串行打开。整体补充要求创建持久 `requirements_changed` 事件，本体通过相关帮手控制工具选择目标，不广播全部孩子。整体完成由 `complete_work` 显式提出，Host 在实际材料检查后重读要求版本及取消/活跃孩子；旧版本只保留材料。轻量本体文件工作也通过该工具及实际用户 Session 条目/完成标记结算。
 
-研究使用 `submit_material` 提交实际原文路径、匹配的摘录、支持结论及不确定性；任意生成文件不能自动算来源。当前自动来源验收覆盖本地原文，远端出处需后续受控检索凭据适配，不能凭 URL 自称已核实。整理通过受控文件移动/删除的前后路径、SHA256 与数量凭据检查实际变化；目录创建或任意 manifest 不能单独通过。编码验收保留实际检查与文件摘要、原始子任务修订号和父要求版本，文件在检查后改变或旧父要求不匹配时保持 partial。整体通过后冻结交付文件，本体最终交付才关联原始用户输入；计划触发不伪造用户学习轮次。
+研究使用 `submit_material` 提交本地原文路径或受控远端 receiptId、匹配的摘录、支持结论及不确定性；本地文件按 local 标记，不冒充远端来源。远端来源需成功受控检索回执，包含 URL 与真实 provider-returned payload 摘要，孩子及本体从同 root 账本核验；没有回执的 URL 或生成文件不构成远端证据。无效已声明材料保持 partial，不能被其他有效文件掩盖。整理通过受控文件移动/删除的前后路径、SHA256 与数量凭据检查实际变化；目录创建或任意 manifest 不能单独通过。编码验收保留实际检查与文件摘要、原始子任务修订号和父要求版本，文件在检查后改变或旧父要求不匹配时保持 partial。整体通过后冻结交付文件，本体最终交付才关联原始用户输入；计划触发不伪造用户学习轮次。
 
 父停止先持久标记后代再终止；只停帮手仅影响该分支。终止未知显示正在停止并占资源，不声称撤销已有影响。恢复先核对 Session 真实条目、完成标记、事件和派发账本。已确认工具结果可复用；同一工作有 unknown/dispatching 动作时，新 callId 或新委派也不能绕过暂停。Session 完成标记已 fsync、Host 事务未提交的轻量完成可直接修复，不再调用模型。此机制不承诺模型和工具 exactly once。
 
 全局/整体调用及 token 预算跨重启持久；普通对话在工作尚未建立前归全局预算。每个可观测模型 HTTP 尝试（含重试及 provider 续接）在派发前预留调用，SDK 实际可得用量和成本字段记账；herdr 内部调用、token 或成本不可见时保留 unknown，只计 Host 启动及已观察用量，不假定免费。达限保存材料、暂停并生成一次预算通知，不自动扩额。独立命令后端、herdr 隔离策略及真实进程终止仍需部署验证；测试注入后端只证明公共契约。
+
+## 召回、约定与权限诊断
+
+同一真实用户输入以 conversation/actor/input 唯一身份保存一次召回。started 的未知嵌入不重新请求；不可用事实保留并允许文字检索回退。工具续步、计划和后台材料不会自动召回，孩子没有全部历史搜索工具；request_context 定向请求由本体 provide_context 选择原文。嵌入 HTTP 在实际派发前记全局预算，成本不可见保留 unknown；后台瞬时失败最多3次。已送达学习保留原用户时间/身份，后台报告不伪造新用户轮次。
+
+working_agreements 按需原生发现，支持工作/项目/明确全局的内容、修订和撤销。保存前展示内容和范围，用户后续“确认动作 ID”或“拒绝动作 ID”处理，模型 approved 参数不能伪造用户确认；约定不扩大权限。计划专用操作同样通过原生发现 plan_control，不放进常驻 task_control schema。
+
+后端诊断通过 runtime.backendDiagnostics 返回候选身份和失败原因，配置/evidence 不来自模型。当前 unelevated 只有部分写边界，未实现完整受限 execute；默认受限命令继续受阻。Shell、结构化独立检查和 herdr 分别核对当前范围、模式、版本与身份；supports 等待期间缩小授权会阻止派发，外部 Agent 目标变化需重新核验原授权。可信 Shell 仍继承本机权限。具体证据格式见 execution-backends.ts 的 CodexProbeEvidence，版本不支持/过期/文件 hash 或 OS release 变化不沿用证据。
+
+unknown/dispatching 保持工作占用，新 callId 和新委派不能重复未知效果。人工先核对既有结果、实际执行身份及 Delivery；确认没有效果之后仍需通过明确恢复决策继续，不能删除账本或篡改回执把 unknown 改成成功。没有完全验证的终止结果不能释放资源。默认新目标不继承旧可信权限。
 
 ## 验证证据
 
@@ -75,7 +87,7 @@
 | herdr 身份、改向和验收契约 | personal-herdr |
 | 本体/帮手结果闭环、类型验收、选择性改向、预算及崩溃窗口 | personal-orchestration，生产 Pi HTTP/受控 herdr CLI 和真实 Node 检查 |
 
-真实 Windows/herdr/Codex 已验证：实际文件42/64；计数进程停止于33，父子 PID 消失；崩溃窗口后同 Task 验收128且无新 prompt。临时具名会话已清理，默认会话未操作。详见[实机记录](personal-herdr-acceptance-20261012.md)。它不证明真实 Telegram 闭环。
+2026-10-12 #157 历史 Windows/herdr/Codex 已验证：实际文件42/64；计数进程停止于33，父子 PID 消失；崩溃窗口后同 Task 验收128且无新 prompt。临时具名会话已清理，默认会话未操作。详见[实机记录](personal-herdr-acceptance-20261012.md)。它不证明真实 Telegram 闭环。
 
 2026-10-12 已获授权完成真实 Telegram 文字入站、真实模型回复、消息与文件出站，并根据实机失败修复默认任务目录及验收凭据。修复后同一授权目标通过结构化 Host 重试完成独立文件验收，附件消息470已发送；该重试不能算修复后的新自然语言入站。详见[Telegram 实机记录](personal-telegram-acceptance-20261012.md)。
 

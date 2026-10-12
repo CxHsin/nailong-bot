@@ -19,16 +19,19 @@ export function requirePermission(task: Task, now = Date.now()): PermissionGrant
   if (!grant || grant.expiresAt <= now || grant.revision !== task.revision || task.cancelRequested || task.contextExcluded) throw permissionError('工作权限缺失、过期或要求已变化，需要明确授权');
   return grant;
 }
+export function permissionSnapshot(task: Task) { return JSON.stringify([task.id, task.revision, task.cwd, task.permission]); }
+export function assertPermissionSnapshot(task: Task, expected: string) { requirePermission(task); if (permissionSnapshot(task) !== expected) throw permissionError('权限范围或执行目录在后端检查期间改变；未派发'); }
 export interface ExecutionBackend {
-  id: string; verified: boolean;
+  id: string; verified: boolean; identity: string;
   capabilities: { readIsolation: boolean; writeIsolation: boolean; networkIsolation: boolean; processTreeStop: boolean };
+  supports(request: { cwd: string; grant: PermissionGrant }): Promise<{ supported: boolean; reasons: string[] }>;
   execute(request: { command: string; cwd: string; grant: PermissionGrant; signal?: AbortSignal; timeout?: number }): Promise<unknown>;
 }
-export function selectBackend(task: Task, backends: ExecutionBackend[] = []): ExecutionBackend {
+export async function selectBackend(task: Task, backends: ExecutionBackend[] = []): Promise<ExecutionBackend> {
   const grant = requirePermission(task);
-  const backend = backends.find(b => b.verified && b.capabilities.readIsolation && b.capabilities.writeIsolation && (grant.network || b.capabilities.networkIsolation) && b.capabilities.processTreeStop);
-  if (!backend) throw permissionError('没有满足工作读写、网络及停止边界的已验证后端；未派发命令。可信本机执行需要用户明确授予。');
-  return backend;
+  for (const backend of backends) if (backend.verified && backend.identity && backend.capabilities.readIsolation && backend.capabilities.writeIsolation && (grant.network || backend.capabilities.networkIsolation) && backend.capabilities.processTreeStop &&
+    (await backend.supports({ cwd: task.cwd!, grant })).supported) return backend;
+  throw permissionError('没有匹配当前目录、读写、网络及停止边界的已验证后端；未派发命令。可信本机执行需要用户明确授予。');
 }
 export async function checkFile(task: Task, path: string, mutation: boolean, dataDir: string, skillRoots: string[] = []): Promise<string> {
   const grant = requirePermission(task); const target = await physicalPath(resolve(task.cwd!, path));
@@ -36,9 +39,9 @@ export async function checkFile(task: Task, path: string, mutation: boolean, dat
   if (!roots.some(root => within(root, target))) throw permissionError('文件路径超出本工作授权目录');
   const data = await physicalPath(dataDir); const workspace = await physicalPath(task.cwd!);
   if (within(data, target) && (!within(join(data, 'workspaces'), workspace) || !within(workspace, target))) throw permissionError('不能读取或修改 Agent 持久数据');
-  if (mutation) {
-    try { const entry = await lstat(target); if (entry.isFile() && entry.nlink > 1) throw permissionError('不能修改有硬链接别名的文件'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  }
+  // A hardlink has no resolvable original path: even reads could expose history
+  // or another work's data through a name inside the granted directory.
+  try { const entry = await lstat(target); if (entry.isFile() && entry.nlink > 1) throw permissionError('不能读取或修改有硬链接别名的文件'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   return target;
 }
 const response = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: undefined });
@@ -78,12 +81,12 @@ export function createWorkTools(get: () => WorkToolContext, options: { dataDir: 
     parameters: Type.Object({ command: Type.String(), timeout: Type.Optional(Type.Number()) }),
     async execute(id, args, signal, update, context) {
       const work = get(); const task = work.current(); const grant = requirePermission(task);
-      const backend = grant.mode === 'restricted' ? selectBackend(task, options.backends) : undefined;
+      if (grant.mode === 'restricted') await selectBackend(task, options.backends);
       const action = { kind: 'command', target: task.cwd!, parameters: args, content: `本机命令可能删除原件或对外发送，实际继承权限：${args.command}` };
       return work.dispatch(id, action, async () => {
-        requirePermission(work.current());
-        if (backend) return response(await backend.execute({ command: args.command, cwd: task.cwd!, grant, signal, timeout: args.timeout }));
-        return createBashToolDefinition(task.cwd!, { shellPath: options.shellPath }).execute(id, args, signal, update, context);
+        const latest = work.current(); const currentGrant = requirePermission(latest);
+        if (currentGrant.mode === 'restricted') { const snapshot = permissionSnapshot(latest); const backend = await selectBackend(latest, options.backends); const actual = work.current(); assertPermissionSnapshot(actual, snapshot); return response(await backend.execute({ command: args.command, cwd: actual.cwd!, grant: requirePermission(actual), signal, timeout: args.timeout })); }
+        return createBashToolDefinition(latest.cwd!, { shellPath: options.shellPath }).execute(id, args, signal, update, context);
       });
     } }));
   tools.push(defineTool({ name: 'send_message', label: 'Explicit delivery', description: 'Report completion, blockage or a required decision to this work owner in the current conversation through durable Delivery. This never sends to other recipients or uploads files. Unknown delivery is never automatically resent.',

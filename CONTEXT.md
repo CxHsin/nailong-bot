@@ -1,6 +1,6 @@
 # Nailong Bot Agent Context
 
-Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI share a Host, with main conversation independent of durable Tasks. Current architecture: [ADR-0007](docs/adr/0007-personal-host-native-sessions.md).
+Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI share a Host; lightweight work uses the main Session and independent helpers return materials to it. Current architecture: [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md), with [implementation evidence and limits](docs/personal-agent-acceptance-20261013.md).
 
 ## Language
 
@@ -18,7 +18,7 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Conversation**: Durable identity selecting a main Pi Session and scoped Akasha sources. Actor identity separately authorizes task operations.
 
-**Task**: Durable user obligation: goal, current requirements and revision, resources, executor, status and result. Its identity survives attempts and restart. Avoid Run as a synonym.
+**Task**: Durable overall work or child delegation: goal, parent/root identity, current requirements and revision, resources, permission, executor, status and result. Its identity survives attempts and restart. Avoid Run as a synonym.
 
 **Attempt**: One executor invocation belonging to a Task, with actual execution identity and usage.
 
@@ -34,9 +34,17 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Action Authorization**: Exact action kind, target, parameters and content under a Task revision. A consumed approval cannot dispatch twice; changed scope needs confirmation.
 
+**Work Permission**: User-confirmed read/write roots, network access, expiry and restricted/trusted execution mode. A child can only narrow its parent's grant. Discovery and remembered instructions do not grant authority; trusted Shell inherits Host authority.
+
+**Work Event**: Durable material addressed to a parent work, with unique identity and Session injection/completion receipts. Child completion, overall completion and Delivery remain separate facts. An unknown effect pauses later dispatches even with a new call ID.
+
+**Research Source Receipt**: Actual provider-returned content and requested URL tied to a successful controlled retrieval, its digest, adapter version, owner and root work. Generated files and arbitrary returned metadata cannot authenticate remote retrieval; retrieval evidence does not establish a claim's truth.
+
+**Working Agreement**: Explicitly confirmed rule with work/project/global scope, revisions and revocation. Current instructions take precedence; ordinary conversation and memory do not create rules automatically or expand permission.
+
 **Plan**: Explicit user instruction with time/dependency trigger, timezone, deadline and missed-trigger policy. Consumption and Task creation are atomic.
 
-**Acceptance**: Independent inspection of actual artifacts and command evidence against current requirements. Idle and executor assertions alone cannot establish success.
+**Acceptance**: Purpose-specific inspection of actual research sources, file changes or coding artifacts and checks against current requirements. The main Session judges the overall goal; idle and executor assertions alone cannot establish success. Invalid declared sources preserve partial results even when another artifact is valid.
 
 **Delivery**: Durable text/file send with sent/rejected/unknown outcome, separate from Task success. Split pages have individual outcomes.
 

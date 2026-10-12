@@ -9,7 +9,8 @@ import { createPersonalMemory } from './memory.js';
 import { HerdrExecutor, type HerdrOptions } from './herdr.js';
 import { PersonalPlans } from './plans.js';
 import { VerificationChecks, type VerificationOptions } from './verification.js';
-import { requirePermission, permissionError } from './permissions.js';
+import { requirePermission, permissionError, permissionSnapshot, assertPermissionSnapshot, type ExecutionBackend } from './permissions.js';
+import { loadExecutionBackends } from './execution-backends.js';
 import { freezeArtifacts } from './artifacts.js';
 import { inspectMaterial } from './acceptance.js';
 import { migratePersonalHistory, readHistoricalSource } from './migration.js';
@@ -25,7 +26,8 @@ function retries(env: NodeJS.ProcessEnv) { const value = env.AGENT_MODEL_MAX_RET
 /** One production assembly shared by Telegram and CLI. No legacy replay executor. */
 export interface PersonalRuntimeDependencies {
   herdr?: Pick<HerdrOptions, 'cli' | 'executionPolicy' | 'confirmStopped' | 'pollMs'>;
-  verificationBackend?: { verified: boolean; runCommand: NonNullable<VerificationOptions['runCommand']> };
+  executionBackends?: ExecutionBackend[];
+  verificationBackend?: Pick<ExecutionBackend, 'verified' | 'identity' | 'capabilities' | 'supports'> & { runCommand: NonNullable<VerificationOptions['runCommand']> };
 }
 export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env, dependencies: PersonalRuntimeDependencies = {}) {
   const dataDir = resolve(env.AGENT_DATA_DIR?.trim() || 'data');
@@ -33,6 +35,8 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
   const capabilities = await capabilityEnvironment(env);
   const modelConfiguration = modelEnvironment(env);
   const models = createAgentModels({ modelConfiguration });
+  const backendRegistry = await loadExecutionBackends(env);
+  const executionBackends = dependencies.executionBackends ?? backendRegistry.backends;
   const store = new PersonalStore(dataDir);
   let pi: Awaited<ReturnType<typeof createPersonalPi>> | undefined;
   let memory: ReturnType<typeof createPersonalMemory> | undefined;
@@ -54,7 +58,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
         for (const task of store.listTasks(conversationId)) await pi?.reset(task.sessionId, 'forget');
       },
     });
-    pi = await createPersonalPi({ ...capabilities, dataDir, promptFile, modelConfiguration, memory,
+    pi = await createPersonalPi({ ...capabilities, dataDir, promptFile, modelConfiguration, memory, executionBackends,
       taskForIdentity: identity => store.getTask(String(identity.taskId)),
       workContext: (task, originId) => host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: originId, text: task.goal }, task.id),
       reserveModelCall: sessionId => host.reserveSessionModelCall(sessionId),
@@ -65,18 +69,21 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       limits: { timeoutMs: positive(env, 'AGENT_MODEL_TIMEOUT_MS', 120_000),
         maxTurns: positive(env, 'AGENT_MAX_TURNS', 40), maxTokens: positive(env, 'AGENT_MAX_TOKENS', 500_000), maxRetries: retries(env) } });
     const agent = pi;
+    const materialActions = (task: Task) => store.listActionDispatches().filter(action => action.taskId === task.id || store.getTask(action.taskId)?.rootTaskId === (task.rootTaskId ?? task.id));
     let plans!: PersonalPlans;
     const checks = new VerificationChecks(env.AGENT_VERIFICATION_CHECKS ? JSON.parse(env.AGENT_VERIFICATION_CHECKS) : [],
       { timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000),
         async runCommand(task, command, context) {
           const current = host.getTask(task.id) ?? task; const grant = requirePermission(current);
-          if (grant.mode !== 'trusted' && !dependencies.verificationBackend?.verified) throw permissionError('独立检查没有满足工作权限的已验证命令后端；未派发，不能绕过受限权限');
+          const matches = async (current: Task) => { const grant = requirePermission(current); const backend = dependencies.verificationBackend; return !!backend?.verified && !!backend.identity && backend.capabilities.readIsolation && backend.capabilities.writeIsolation && (grant.network || backend.capabilities.networkIsolation) && backend.capabilities.processTreeStop && (await backend.supports({ cwd: current.cwd!, grant })).supported; };
+          if (grant.mode !== 'trusted' && !await matches(current)) throw permissionError('独立检查没有匹配当前工作权限和身份的已验证命令后端；未派发');
           const work = host.workContext({ conversationId: task.conversationId, actorId: task.actorId, inputId: `verification:${task.revision}`, text: task.goal }, task.id);
           const callId = `check:${JSON.stringify(command)}`;
           return work.dispatch(callId, { kind: 'verification-command', target: task.cwd!, parameters: { command: command.command, args: command.args }, content: '已配置的独立检查，在明确授予的可信本机权限内运行' }, async () => {
-            if (grant.mode === 'restricted') return dependencies.verificationBackend!.runCommand(current, command, context);
+            const latest = work.current(); const latestGrant = requirePermission(latest);
+            if (latestGrant.mode === 'restricted') { const snapshot = permissionSnapshot(latest); if (!await matches(latest)) throw permissionError('独立检查权限范围或后端身份改变；未派发'); const actual = work.current(); assertPermissionSnapshot(actual, snapshot); return dependencies.verificationBackend!.runCommand(actual, command, context); }
             const trusted = new VerificationChecks([command], { preauthorized: true, timeoutMs: positive(env, 'AGENT_CHECK_TIMEOUT_MS', 120_000) });
-            return (await trusted.run(current, context))[0]!;
+            return (await trusted.run(latest, context))[0]!;
           });
         } });
     async function verifyCurrent(task: Task, evidence: Parameters<typeof agent.verify>[1], signal?: AbortSignal, onUsage?: (usage: Usage) => void) {
@@ -88,7 +95,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       if (current.purpose === 'coding' && (!result.checks.length || result.checks.some(check => check.status !== 'passed'))) { result.verified = false; result.partial = true; result.text += '\n编码成果缺少通过的实际测试检查凭据。'; }
       if ((host.getTask(task.id)?.revision ?? current.revision) !== current.revision)
         return { text: '验收期间要求发生变化，需按最新要求重新验收。', verified: false, partial: true };
-      return current.workKind === 'delegation' ? inspectMaterial(current, result, dataDir) : freezeArtifacts(dataDir, current, result);
+      return current.workKind === 'delegation' ? inspectMaterial(current, result, dataDir, materialActions(current)) : freezeArtifacts(dataDir, current, result);
     }
     const herdr = env.AGENT_HERDR_SESSION?.trim() ? new HerdrExecutor({ ...dependencies.herdr, session: env.AGENT_HERDR_SESSION.trim(),
       kind: env.AGENT_HERDR_KIND === 'claude' ? 'claude' : 'codex',
@@ -100,7 +107,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       async execute(request) {
         let execution: Usage = {};
         const result = await agent.executor.execute({ ...request, onUsage: usage => { execution = usage; request.onUsage(usage); } });
-        if (request.task.workKind === 'delegation' && request.task.purpose !== 'coding') return inspectMaterial(request.task, result, dataDir);
+        if (request.task.workKind === 'delegation' && request.task.purpose !== 'coding') return inspectMaterial(request.task, result, dataDir, materialActions(request.task));
         return verifyCurrent(request.task, result, request.signal, usage => request.onUsage({
           input: (execution.input ?? 0) + (usage.input ?? 0), output: (execution.output ?? 0) + (usage.output ?? 0), costKnown: false }));
       },
@@ -108,7 +115,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
         const state = await agent.executor.inspect?.(identity) ?? { state: 'unknown' as const };
         const task = store.getTask(String(identity.taskId));
         if (state.state !== 'completed' || !state.result || !task) return state;
-        if (task.workKind === 'delegation' && task.purpose !== 'coding') return { state: 'completed', result: await inspectMaterial(task, state.result, dataDir) };
+        if (task.workKind === 'delegation' && task.purpose !== 'coding') return { state: 'completed', result: await inspectMaterial(task, state.result, dataDir, materialActions(task)) };
         return { state: 'completed', result: await verifyCurrent(task, state.result) };
       } };
     const select = (kind: string) => kind === 'herdr' ? herdr : local;
@@ -136,7 +143,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       return agent.dialogue.decide(input, context);
     } };
     host = new PersonalHost({ store, dialogue, executor, maxConcurrent: positive(env, 'AGENT_MAX_CONCURRENT', 2),
-      acceptContinuation: async (task, result) => freezeArtifacts(dataDir, task, await inspectMaterial(task, result, dataDir)),
+      acceptContinuation: async (task, result) => freezeArtifacts(dataDir, task, await inspectMaterial(task, result, dataDir, materialActions(task))),
       maxDurationMs: positive(env, 'AGENT_TASK_TIMEOUT_MS', 30 * 60_000),
       maxTokens: positive(env, 'AGENT_MAX_TOKENS', 500_000),
       maxRootCalls: positive(env, 'AGENT_ROOT_MAX_CALLS', 100), maxGlobalCalls: positive(env, 'AGENT_DAILY_MAX_CALLS', 500), maxGlobalTokens: positive(env, 'AGENT_DAILY_MAX_TOKENS', 2_000_000), maxRework: positive(env, 'AGENT_MAX_REWORK', 3),
@@ -145,7 +152,7 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
       handleDecision: (input, decision) => plans.handle(input, decision) });
     plans = new PersonalPlans(host);
     await host.recover();
-    return { host, plans, pi: agent, memory, dataDir,
+    return { host, plans, pi: agent, memory, dataDir, backendDiagnostics: backendRegistry.diagnostics,
       async onDelivered(delivery: Delivery) {
         if (delivery.parentId || !delivery.learning || delivery.status !== 'sent') return;
         if (delivery.taskId && host.getTask(delivery.taskId)?.contextExcluded) return;

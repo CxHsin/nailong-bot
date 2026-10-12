@@ -2,7 +2,8 @@ export type TaskStatus = 'queued' | 'running' | 'stopping' | 'cancelled' | 'comp
 export interface ExecutorIdentity { kind: string; [key: string]: unknown }
 export interface Usage { input?: number; output?: number; cost?: number; costKnown?: boolean }
 export interface TaskResult { text: string; verified: boolean; artifacts?: string[]; artifactDigests?: Record<string, string>; partial?: boolean; producedRevision?: number;
-  sources?: Array<{ reference: string; excerpt: string; supports?: string[] }>;
+  sources?: Array<{ reference: string; excerpt: string; supports?: string[]; receiptId?: string; kind?: 'local' | 'remote'; provider?: string }>;
+  invalidMaterials?: Array<{ reference: string; reason: string }>;
   uncertainties?: string;
   operations?: Array<{ operation: string; before: Array<{ path: string; sha256: string | null }>; after: Array<{ path: string; sha256: string | null }> }>;
   manifest?: Array<{ path: string; bytes: number; sha256: string }>;

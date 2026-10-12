@@ -4,6 +4,8 @@ status: accepted
 
 # Personal Host with native Pi Sessions
 
+Historical #157 baseline. As of 2026-10-13, [ADR-0008](0008-personal-agent-orchestration-direction.md) supersedes peer executor ownership, per-command trusted Shell approvals and mandatory independent acceptance for all work. Current evidence and limitations: [#167 acceptance](../personal-agent-acceptance-20261013.md). The original decision and dated evidence below remain historical.
+
 Date: 2026-10-12. [Spec #157](https://github.com/CxHsin/nailong-bot/issues/157), tasks #158–#164.
 
 Telegram/CLI and explicit plans enter one persistent Host on Windows. Host owns Task/Attempt, concurrency, authorization, recovery, independent acceptance and plain Delivery. Pi owns native Sessions, tool turns and compaction. Local files/commands and sole coding delegation, a named herdr executor, produce actual evidence.

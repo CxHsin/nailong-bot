@@ -1,8 +1,8 @@
 # Nailong bot
 
-当前 Windows 电脑上的个人 Agent，通过 Telegram 私聊或 CLI 委托目标、补充要求、查询和停止任务。主对话与后台 Task 分开；互不冲突的任务可以并行，开发工作交给专用 herdr 会话中的 Codex，成果独立验收后交付。
+当前 Windows 电脑上的个人 Agent，通过 Telegram 私聊或 CLI 持续共事。本体直接处理轻量工作，研究、整理和编码交给独立帮手；材料回到本体复查并继续完整目标。用户可以插话、补充要求和停止整项工作或指定帮手。
 
-规格为 [#157](https://github.com/CxHsin/nailong-bot/issues/157)，架构边界见 [ADR-0007](docs/adr/0007-personal-host-native-sessions.md)，迁移与验收见 [操作说明](docs/personal-agent-operations.md)。本轮不增加浏览器、通用桌面控制或稳定偏好画像。
+当前规格为 [#167](https://github.com/CxHsin/nailong-bot/issues/167)，架构边界见 [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md)，迁移见 [操作说明](docs/personal-agent-operations.md)，证据与未验证项见 [本轮验收](docs/personal-agent-acceptance-20261013.md)。本轮不增加浏览器、通用桌面控制或稳定偏好画像。
 
 ## 使用
 
@@ -33,7 +33,7 @@ Telegram 使用普通消息和文件；长文分段，不显示流式草稿、�
 
 ## 责任与能力
 
-Host 直接保存 Task/Attempt、输入、授权、计划和 Delivery；Pi 原生 Session 保存模型交换和 compaction。Akasha 专注原话检索、图关联、遗忘及送达后学习，不在工具循环重放历史，不生成稳定偏好档案。
+Host 保存整体工作/子委派、Attempt、输入、事件回执、授权、计划和 Delivery；Pi 原生 Session 保存模型交换和 compaction。Akasha 在真实用户输入时自动召回一次相关原话，保留时间、角色与出处；工具续步和后台结果不新增自动召回。明确工作约定独立保存内容、作用域和撤销历史，当前要求优先，不生成稳定偏好档案。
 
 本体可直接处理授权范围内的文件，默认受限；缺少满足边界的已验证后端时命令受阻。一次工作明确授予可信本机权限后普通命令自主执行，实际继承 Host 权限；删除原件通过受控接口具体确认。原生发现不授予执行权限，MCP 独立检查边界和具体动作。详见 [能力与工作权限](docs/capabilities.md)。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
 
@@ -59,4 +59,4 @@ Host 直接保存 Task/Attempt、输入、授权、计划和 Delivery；Pi 原�
 
 `src/personal/` 为当前生产实现，Telegram/CLI 共享 runtime 工厂。旧全局 Run 队列、流式投影和自建在线上下文循环已退役。执行 `npm run typecheck`、`npm test`、`npm run build`、`npm run docs:check`。当前入口回归为 `test/personal-*.test.ts` 和实际 CLI 子进程测试。
 
-真实 Windows/herdr 已验证文件验收、进程树停止与同身份崩溃恢复；真实 Telegram 已验证文字入站/模型回复、消息/文件出站与修复后的结构化文件重试。完整交互矩阵仍待执行，详见 [Telegram 实机记录](docs/personal-telegram-acceptance-20261012.md)。覆盖、配置及回退边界见 [操作说明](docs/personal-agent-operations.md)。
+2026-10-12 的 Windows/herdr 与 Telegram 证据是 #157 历史基线，见 [原实机记录](docs/personal-telegram-acceptance-20261012.md)。#167 的原生发现、来源回执、父子续接和实际进程死亡恢复有公共夹具验证；本轮真实 Anthropic、Telegram 完整矩阵仍未验证。Codex unelevated 只有部分写边界，当前没有可执行的完整受限命令后端，详见 [本轮验收](docs/personal-agent-acceptance-20261013.md)。

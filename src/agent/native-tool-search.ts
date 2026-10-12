@@ -6,10 +6,11 @@ import { convertToLlm, defineTool, type ToolDefinition, type AgentSession, type 
 import { createAssistantMessageEventStream, type AssistantMessageEventStream, type AssistantMessage, type Context, type Message, type Model, type Api, type SimpleStreamOptions, type Usage } from '@mariozechner/pi-ai';
 import { streamNativeResponses } from './native-openai-responses.js';
 import { streamNativeAnthropic } from './native-anthropic.js';
+import type { RetrievalAdapter } from '../personal/research-receipts.js';
 
 export type CapabilityScope = { sessionId: string; conversationId?: string; cwd: string };
 export type CapabilityCall = CapabilityScope & { toolName: string; callId: string; arguments: Record<string, unknown>; definitionVersion: string };
-export type NativeCapability = { tool: ToolDefinition; definitionVersion?: string; authorize?: (call: CapabilityCall) => boolean | Promise<boolean> };
+export type NativeCapability = { tool: ToolDefinition; definitionVersion?: string; authorize?: (call: CapabilityCall) => boolean | Promise<boolean>; retrieval?: RetrievalAdapter };
 export type NativeSearchOptions = {
   mode?: 'client' | 'server'; maxPauseContinuations?: number; maxRequests?: number; maxTokens?: number;
   beforeRequest?: (event: CapabilityScope & { modelIdentity: string; requestNumber: number }) => void | Promise<void>;
@@ -36,7 +37,7 @@ export type NativeRuntime = {
 };
 export const modelIdentity = (model: Model<Api>) => `${model.provider}/${model.id}/${model.api}`;
 export function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`; if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(',')}}`; return JSON.stringify(value) ?? 'null'; }
-const fingerprint = (entry: NativeCapability) => createHash('sha256').update(canonical([entry.definitionVersion, entry.tool.name, entry.tool.description, entry.tool.parameters])).digest('hex');
+const fingerprint = (entry: NativeCapability) => createHash('sha256').update(canonical([entry.definitionVersion, entry.tool.name, entry.tool.description, entry.tool.parameters, entry.retrieval && [entry.retrieval.provider, entry.retrieval.version]])).digest('hex');
 
 /** An execution catalog is registered once; only native protocol discoveries expose deferred schemas. */
 export function nativeCapabilityRuntime(scope: CapabilityScope, resident: ToolDefinition[], deferred: NativeCapability[], policy: NativeSearchOptions = {}) {

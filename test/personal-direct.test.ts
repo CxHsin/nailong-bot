@@ -63,6 +63,8 @@ test('main direct files reject physical directory escapes and hardlink mutation 
   assert.equal(await readFile(outside, 'utf8'), 'original');
   const { link, symlink } = await import('node:fs/promises');
   await link(outside, join(work.cwd!, 'alias.txt'));
+  await f.call('read', { path: 'alias.txt' }); assert.match(f.output, /硬链接/);
+  assert.doesNotMatch(f.output, /original/);
   await f.call('edit', { path: 'alias.txt', oldText: 'original', newText: 'bad' }); assert.match(f.output, /硬链接/);
   await symlink(f.directory, join(work.cwd!, 'escape'), 'junction');
   await f.call('write', { path: 'escape/outside.txt', content: 'bad' }); assert.match(f.output, /授权目录/);

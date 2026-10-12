@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { createTestServer } from "./fixtures/http-server.js";
 import { sendChatCompletion } from './fixtures/chat-completion.js';
+import { PersonalStore } from '../src/personal/store.js';
 
 async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' = 'reply') {
   const dir = await mkdtemp(join(tmpdir(), "host-process-"));
@@ -26,10 +27,10 @@ async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' =
       if (wire.messages.at(-1)?.role === 'tool') return sendChatCompletion(res, '提议已提交');
       const user = JSON.stringify(wire.messages.at(-1)?.content);
       if (user.includes('查询任务')) {
-        const id = /查询任务 ([a-f0-9-]+)/.exec(user)?.[1];
+        const id = /查询任务 ([a-z0-9:-]+)/.exec(user)?.[1];
         return sendChatCompletion(res, '', [{ index: 0, id: 'query', type: 'function', function: { name: 'task_control', arguments: JSON.stringify({ kind: 'query', taskId: id }) } }]);
       }
-      return sendChatCompletion(res, '', [{ index: 0, id: 'start', type: 'function', function: { name: 'task_control', arguments: JSON.stringify({ kind: 'start', goal: '持久任务', cwd: join(dir, 'work') }) } }]);
+      return sendChatCompletion(res, '', [{ index: 0, id: 'start', type: 'function', function: { name: 'task_control', arguments: JSON.stringify({ kind: 'start', goal: '持久任务' }) } }]);
     }
     sendChatCompletion(res, 'done');
   });
@@ -84,9 +85,12 @@ test("a crashed CLI Host retains its task identity and waits when native executi
   const acknowledgement = await first.wait((event) => event.type === 'message' && event.taskId);
   await f.taskReady;
   first.child.kill(); await first.exit;
-  const second = f.start(); second.child.stdin!.write(`查询任务 ${acknowledgement.taskId}\n`);
+  const records = new PersonalStore(join(f.dir, 'data'));
+  const helper = records.listTasks().find(task => task.parentTaskId === acknowledgement.taskId);
+  records.close(); assert.ok(helper, 'the accepted overall work retains its helper identity');
+  const second = f.start(); second.child.stdin!.write(`查询任务 ${helper.id}\n`);
   const query = await second.wait(event => event.type === 'message' && event.text.includes('状态：'));
-  assert.equal(query.taskId, acknowledgement.taskId);
+  assert.equal(query.taskId, helper.id);
   assert.match(query.text, /状态：waiting/);
   assert.match(query.text, /不会重复启动|未知/);
   second.child.stdin!.end();

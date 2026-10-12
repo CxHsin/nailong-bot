@@ -22,6 +22,10 @@ test('typed material acceptance rejects invented research and verifies actual co
     const research = { text: 'Supported conclusion', verified: true, sources: [{ reference: 'original.txt', excerpt: 'Observed original evidence.', supports: ['The original describes observed evidence.'] }], uncertainties: 'No remote corroboration.' };
     assert.equal((await inspectMaterial(task, research, join(directory, 'data'))).verified, true);
     assert.equal((await inspectMaterial(task, { ...research, sources: [{ ...research.sources[0]!, excerpt: 'Invented evidence.' }] }, join(directory, 'data'))).verified, false);
+    const generic = { ...task, purpose: undefined };
+    const forged = await inspectMaterial(generic, { text: 'claim', verified: true, artifacts: ['original.txt'], sources: [{ reference: 'https://example.com', excerpt: 'invented', supports: ['claim'] }] }, join(directory, 'data'));
+    assert.equal(forged.verified, false); assert.equal(forged.partial, true);
+    assert.ok(forged.invalidMaterials?.length, 'declared invalid source must remain visible');
     task.purpose = 'organization'; store.putTask(task);
     assert.equal((await inspectMaterial(task, { text: 'organized', verified: true, artifacts: ['original.txt'] }, join(directory, 'data'))).verified, false);
     const move = createWorkTools(() => work, { dataDir: join(directory, 'data') }).find(tool => tool.name === 'file_operation')!;
@@ -67,7 +71,7 @@ test('production direct completion repairs a fsynced verdict after Host transact
   } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('production coding helper preserves herdr identity and actual test evidence before main overall completion', { timeout: 15000 }, async t => {
+for (const backendMatch of [true, false]) test(`production coding helper ${backendMatch ? 'preserves actual checks' : 'refuses a check backend for another scope'}`, { timeout: 15000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'personal-coding-resume-')); const promptFile = join(directory, 'prompt.md'); writeFileSync(promptFile, 'Help.'); let cwd = ''; let name = ''; let prompted = false; let created = 0; let checks = 0;
   const server = createTestServer(t, async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); if (sendMainContinuation(res, wire)) return; const last = wire.messages.at(-1); const names = wire.tools.map((tool: { function: { name: string } }) => tool.function.name);
     const call = (tool: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: tool, type: 'function', function: { name: tool, arguments: JSON.stringify(args) } }]);
@@ -76,14 +80,15 @@ test('production coding helper preserves herdr identity and actual test evidence
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
   const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions', MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, AGENT_HERDR_SESSION: 'fixture-only', AGENT_VERIFICATION_CHECKS: JSON.stringify([{ command: process.execPath, args: ['-e', 'require("node:assert/strict").equal(require("./answer.cjs"),42)'] }]) }, {
-    herdr: { pollMs: 1, executionPolicy: { verified: true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, cli: async args => {
+    herdr: { pollMs: 1, executionPolicy: { verified: true, identity: 'controlled-fixture-v1', supports: async () => true, readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true, args: ['--fixture-policy'] }, cli: async args => {
       if (args[1] === 'create') { created++; cwd = args[args.indexOf('--cwd') + 1]!; mkdirSync(cwd, { recursive: true }); return { result: { workspace: { workspace_id: 'fixture-w' }, root_pane: { pane_id: 'fixture-w:p' } } }; }
       if (args[1] === 'start') name = args[2]!; if (args[1] === 'prompt') { prompted = true; writeFileSync(join(cwd, 'answer.cjs'), 'module.exports=42;'); }
       if (args[1] === 'read') return { result: { text: 'Actual answer.cjs produced.' } };
       return { result: { agent: { pane_id: 'fixture-w:p', workspace_id: 'fixture-w', name, agent: 'codex', agent_status: args[1] === 'prompt' && prompted ? 'working' : 'idle', cwd } } };
-    } }, verificationBackend: { verified: true, async runCommand(task, command, context) { checks++; return (await new VerificationChecks([command], { preauthorized: true }).run(task, context))[0]!; } },
+    } }, verificationBackend: { verified: true, identity: 'controlled-fixture-v1', capabilities: { readIsolation: true, writeIsolation: true, networkIsolation: true, processTreeStop: true }, supports: async () => ({ supported: backendMatch, reasons: backendMatch ? [] : ['different scope'] }), async runCommand(task, command, context) { checks++; return (await new VerificationChecks([command], { preauthorized: true }).run(task, context))[0]!; } },
   });
   try { await runtime.host.submit({ conversationId: 'c', actorId: 'a', inputId: 'real-coding', text: 'Make the tested module' }); await runtime.host.waitForIdle(); const root = runtime.host.listTasks().find(task => task.direct)!; const child = runtime.host.listTasks().find(task => task.workKind === 'delegation')!;
+    if (!backendMatch) { assert.equal(checks, 0); assert.notEqual(root.status, 'completed'); assert.notEqual(child.status, 'completed'); assert.equal(runtime.host.store.listActionDispatches().some(action => action.action.kind === 'verification-command'), false); return; }
     assert.equal(root.status, 'completed', JSON.stringify(runtime.host.listTasks())); assert.equal(child.status, 'completed'); assert.equal(created, 1); assert.equal(checks, 1); assert.equal(runtime.host.store.listAttempts(child.id)[0]?.identity?.workspaceId, 'fixture-w'); assert.equal(root.result?.checks?.[0]?.taskId, child.id); assert.equal(root.result?.checks?.[0]?.revision, child.revision); assert.equal(root.result?.checks?.[0]?.parentRevision, root.revision); assert.equal(runtime.host.store.listDeliveries().some(delivery => delivery.taskId === child.id), false); assert.equal(readFileSync(root.result!.artifacts![0]!, 'utf8'), 'module.exports=42;'); assert.equal(runtime.host.store.getBudget(`root:${root.id}`)?.costKnown, false);
   } finally { await runtime.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); rmSync(directory, { recursive: true, force: true }); }
 });

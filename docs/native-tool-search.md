@@ -16,7 +16,7 @@ Anthropic 每次请求发送完整 deferred 目录。客户端发现使用标准
 
 `PersonalPiOptions.capabilityCatalog(scope)` 返回当前 Session 可执行的 `NativeCapability[]`。scope 包含 `sessionId`、`conversationId` 和 `cwd`。每项提供 `tool`、可选 `definitionVersion` 及 `authorize(call)`；即使 schema 未变，显式版本变化也使原发现失效。已有工具自身的文件/MCP/动作检查仍生效。
 
-`nativeSearch` 可配置 `mode`（默认 client）、`maxPauseContinuations`（默认 3）、`maxRequests`（默认 40）及 `maxTokens`（默认 200000，个人执行器 limits 可覆盖）。`beforeRequest` 提供实际 HTTP 次数并允许上层预算拒绝；`onUsage` 提供每个响应页的实际 token/cache/cost。上层持久工作预算仍应维护自身账本，不能把 Session 单输入预算视为完整全局/单项预算。
+`nativeSearch` 可配置 `mode`（默认 client）、`maxPauseContinuations`（默认 3）、`maxRequests`（默认 40）及 `maxTokens`（默认 200000，个人执行器 limits 可覆盖）。`beforeRequest` 提供实际 HTTP 次数并允许上层预算拒绝；`onUsage` 提供每个响应页的实际 token/cache/cost。Host 已维护持久全局/整体目标预算，不能把 Session 单输入预算视为完整全局/单项预算。
 
 deferred 工具的 `beforeDispatch` / `afterDispatch` 提供工作范围、callId、工具名、参数及定义版本，可接入动作账本与回执。它们不自动记录 Host ActionDispatch，也不替代工具原有授权。before 回调失败则无派发；实际执行失败产生 failed 回调；执行成功后的持久回执失败会保留异常，不能据此声称动作未发生。常驻工具原有授权路径继续使用，#170 / #171 按其具体副作用接入统一账本。
 
@@ -26,4 +26,4 @@ deferred 工具的 `beforeDispatch` / `afterDispatch` 提供工作范围、callI
 
 2026-10-13 对已配置代理 `gpt-6.1-sol` / OpenAI Responses 完成新适配器端到端探测：Host 输入 → 原生发现 → `probe_sum(2,3)` 实际纯工具执行 → 本体输出 5；3 次 HTTP、工具执行 1 次。三次 input tokens 分别 4918、5114、158，output tokens 为 41、23、5，第三次 cacheRead 为 4992。工具没有文件、网络或对外副作用；未修改 `.env`。临时证据脚本：`C:/Users/Cx/AppData/Local/Temp/nailong-native-adapter-live.mjs`。此路径属于本机临时证据，不是项目运行依赖。
 
-Anthropic 当前未配置可用真实端点，仅协议夹具通过，真实端到端验收未完成。Telegram、完整执行权限后端以及父子委派的全局预算/回执闭环仍由对应后续阶段验证，本文不把这些认定为已完成。
+Anthropic 当前未配置可用真实端点，仅协议夹具通过，真实端到端验收未完成。父子委派、持久预算与回执已有公共夹具及真实进程死亡恢复证据；网页/计划/约定均 deferred，普通端点不常驻专用定义。检索 adapter provider/version 参与定义指纹，受控来源仍从真实成功账本核验。完整受限命令后端、本轮真实 Telegram 与真实 Anthropic 仍未验证，见[本轮验收](personal-agent-acceptance-20261013.md)。
