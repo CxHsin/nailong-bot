@@ -64,6 +64,12 @@ ADR-0007 把本地 Pi 与 herdr 定义为平级 Task executor；目标方向要�
 
 区分请求传输目录与模型上下文：[OpenAI Responses tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) 的客户端搜索可通过 tool_search_output 返回原请求中未声明的工具；[Anthropic tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) 仍要求每次请求提供完整的 deferred 工具定义，API 按对话中的 tool_reference 展开定义。二者都按需加载并保持常驻前缀稳定，不能简单以普通文本 schema 替代原生调用结构。Pi/provider 对这些结构的支持尚待核对，未支持时的兼容方案不能冒充原生机制。
 
+## 后台结果与停止范围（已确认）
+
+后台结果先持久化，排队等待当前回复结束后交给本体续接。结果带明确工作身份，作为执行材料进入上下文；本体在完成、受阻或需要用户决定时发送消息。当前回复与后台事件处理的串行衔接、重启后未消费结果的续接需要实现验证。
+
+停止整项工作时取消其全部子委派，指定停止某个帮手时仅取消该帮手。已有成果保留，不自动回滚已发生的操作。外部进程未确认终止时显示正在停止并继续占用相关资源；其他独立工作继续。取消意图与迟到结果需核对，不能因结果返回而自动复活已停止的工作。
+
 ## 待决定
 
 - 工作约定管理接口，以及消息发送的恢复规则。
