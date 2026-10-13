@@ -5,71 +5,125 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 # herdr 帮手工作流
 
-由主会话读取本 skill，通过现有 `bash` 工具直接调用 herdr。此路径不使用固定 `HerdrExecutor` / `delegate_work` 编码入口；其他任务继续使用现有委派能力。herdr 服务和 CLI 是底层工具。当前 Host 对同一工作只允许一个未结算动作；每轮只发一个 Shell/写入工具调用，等回执后再发下一条。并行派发被拒绝时，先核对上一动作结果和工作状态，不把尚在执行误报为遗失结果。
+主会话选择工作方式，通过现有 Shell 派发、等待、独立验收并继续用户目标。herdr 是底层终端工具；固定 `HerdrExecutor` / `delegate_work` 编码入口已退役。
 
-## 先选择工作方式
+## 0. 兜底规则
 
-- **只读勘察、架构梳理、代码评审、研究**：普通 `workspace create --cwd PROJECT --no-focus`，直接读取当前目录；不建 worktree、不切分支、不安装 hooks。当前文件（包括未提交改动）就是默认勘察对象，不询问是否纳入；需要对比某个提交时按用户指定读取。报告说明检查的目录和基准，不能把当前目录说成已提交的 development 快照。
-- **修改代码**：独立 worktree，以 development 为基准，按下面的修改流程接回成果。只有这个分支才需要询问未提交改动是否纳入任务起点。
-- 用户已经明确指定 herdr/Codex/Claude 时直接落实；其他任务按工作量和独立上下文需求判断。上述工作区选择由任务性质决定，不作为每次派发的确认问题。目标或范围不明确时再询问。
+官方 skill 在 `~/.agents/skills/herdr-official/SKILL.md`，可用时读取。新命令、语法不确定、报错或生命周期不明时查对应 `herdr <cmd> --help`，以实际安装版本为准；无需每次读取全部帮助。
 
-## 准备
+- `idle` 表示就绪，`done` 是工作完成后的 idle，`blocked` 是审批或提问，`unknown` 无法分类。状态、完成标记和 prompt 回显都只是观察，实际成果由主会话验收。
+- 普通等待用 `agent wait`；等特定状态才用 `--until`。普通终端命令可用 `pane run` / `pane wait-output --match`；读结果优先 `recent-unwrapped`。
+- 使用专用 session 与唯一 agent 名称，记录 workspace/pane、执行目录、基准、prompt 和成果路径。每次调用带 `--session SESSION`。查询失败或 unknown 时保留现场、先对账。
 
-1. 明确项目、目标和验收条件；本体选择或生成本任务的 herdr 会话及唯一 agent 名称，不要求用户决定这些内部标识。先核对当前工作有效的 Work Permission；Shell 执行需要可信本机权限。`working_agreements` 中的项目约定可查看、修改和撤销，但约定、skill 加载及 `executionTool:true` 都不授予执行权限。沿用当前工作已有效的授权，缺失时通过 `work_permission` 提案与用户确认取得授权。只读勘察仅申请项目读取范围；prompt、传递脚本和报告写入当前工作已有的输出目录，不申请项目写权限。声明帮手只读、不修改项目。可信执行下这是行为约定，不是只读沙箱。代码勘察本身不需要网页访问，但外部 CLI 连接模型服务可能需要网络，按实际执行依赖填写，不能因为“只读”便宣称 CLI 无需网络。
-2. 选择当次明确指定 > 项目工作约定 > 已有全局默认 > Codex。模型与推理设置沿用所选 CLI 本机配置；明确覆盖时使用该版本支持的参数。指定 agent、模型或模式不可用时报告受阻。保持全局配置原样。
-3. 在授权的项目中，Codex 启动参数使用 `--sandbox danger-full-access --ask-for-approval never`，Claude 使用 `--permission-mode auto`。仅处理该项目已授权的启动信任提示。可信模式继承本机权限，项目边界是行为约定；发布、合并 main、外发和越界动作需相应明确授权。
-4. 核对本机版本；新命令、语法不确定、报错或生命周期状态不明确时查对应 `herdr <cmd> --help`，以 CLI 为准，不在每个任务重复读取全部帮助。诊断预期可能不存在的 pane/workspace/路径时，保存命令输出与真实退出码再判断，避免串联命令因预期缺失中止而丢掉后续对账证据。每次调用带 `--session <专用会话>`；先查 session/workspace/agent，确定没有本任务遗留运行。查询失败或 unknown 保留现场并报告，不能据此重新派发。
+## 1. 打开 workspace（修改才用 worktree）
 
-## 工作区与启动
+先明确目标仓库、范围和验收；目标不清楚时询问用户。用户已经指定帮手时按指定执行。
 
-按工作方式创建 workspace，记录路径与 workspace/pane/agent 标识。只读任务使用原目录，保存原有 Git 状态，报告结束后核对没有新增项目改动；已有脏工作区不妨碍读取，不提交或清理用户改动。
+**只读勘察、评审、研究**直接读取当前目录，包括未提交内容；保存原始 Git 状态，不询问是否纳入脏改动，不切分支、不装 hooks、不创建 worktree。报告标明实际目录与比较基准。
 
-以下 Git 集成规则只用于修改代码：核对项目 Git 状态，未提交改动是否纳入先询问用户；以已提交的 development 为基准创建独立 worktree，并记录基准 SHA。本项目新 checkout 执行 `npm run hooks:install`。
-
-本项目要求实质改动在 `development` 验证、提交和推送。独立 worktree 可准备补丁，但帮手不在临时分支提交；本体验收后接回 `development`。main 合并等待用户明确同意。依照项目 AGENTS.md 安排集成前同步 main，保留用户已有改动。
-
-本机 CLI 的命令形状如下；从创建与查询回执取得真实 ID，再替换占位符：
+**修改代码**先读目标仓库说明，询问未提交改动是否纳入（已有明确答复直接沿用），再创建隔离 worktree。基准和成果接回方式服从目标仓库规则；没有说明时以当前分支为基准，记录 SHA。已同意纳入的改动须完整保留，接回时核对用户工作。
 
 ```text
-# 只读勘察：直接打开当前目录
+# 只读：原目录普通 workspace
 herdr --session SESSION workspace create --cwd PROJECT --label LABEL --no-focus
-# 修改代码：才创建独立 worktree
-herdr --session SESSION worktree create --cwd PROJECT --branch BRANCH --base development --path WORKTREE --no-focus
+# 修改：BASE 来自目标仓库规则；无规则时来自当前分支
+herdr --session SESSION worktree create --cwd PROJECT --branch BRANCH --base BASE --path WORKTREE --no-focus
 herdr --session SESSION workspace get WORKSPACE_ID
-herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 30000 -- --sandbox danger-full-access --ask-for-approval never
-herdr --session SESSION agent get AGENT_NAME
+herdr --session SESSION pane list --workspace WORKSPACE_ID
 ```
 
-Claude 启动替换 `--kind claude` 和上述 Claude 参数。`agent start` 成功表示同一终端检测到预期 agent 且可输入；阻塞时先读终端并处理已授权信任提示，重新核对就绪。Windows 新终端可能缺少桌面应用临时加入的 Codex PATH；启动前在 pane 中核对可执行文件位置，必要时仅为本任务 pane 补 PATH。桌面版 Codex 若提示没有完整本地包，先核对该版本 `--help` 与 `--no-daemon` 支持，再使用本地无 daemon 模式；不安装或切换模型来绕过指定配置。回执区分请求与实际可核实的 agent、模型、目录和权限，无法核实项标明未知。
+从真实回执取得 ID。**仅修改 nailong 时**遵守其 AGENTS.md：集成前同步 main；新 checkout 执行 `npm run hooks:install`；帮手可准备补丁但不在临时分支提交，主会话在 `development` 验证、提交和推送，明确同意后才通过 PR 合并 main。这些规则不外推到其他仓库。
 
-## 完整传递与等待
+## 2. 启动 agent（90 秒，最多两次重试）
 
-将完整任务保存为授权目录内 UTF-8 文件：目标、约束、基准与工作目录、成果路径。只读任务写明不修改项目、读取当前未提交内容、报告需要引用的文件与证据；代码修改任务另写允许修改范围、验收命令和禁止自行提交的项目规则。文件是验收依据，不把多行中文任务插入 shell 命令字符串。
+配置按当次明确指定 > 项目约定 > 全局默认 > Codex 选择。模型与推理继承所选 CLI 配置；需要覆盖时按该版本帮助传参。保持 CLI 全局默认原样；指定配置不可用时报告受阻。
 
-Pi 的 `bash` 默认使用 Bash；在 Windows 需要 PowerShell 时，通过 `pwsh -NoProfile -File 'D:/授权目录/本任务.ps1'` 调用任务内脚本。脚本用参数数组和 `Get-Content -LiteralPath -Raw -Encoding utf8` 传递 prompt，检查每条原生命令退出码；不要假定 `AGENT_SHELL_PATH` 已是 PowerShell。
+```text
+herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never
+# Claude 用 --kind claude，CLI 参数替换为 --permission-mode auto
+herdr --session SESSION agent get AGENT_NAME
+herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 200
+```
+
+初次失败先读终端，处理已授权的项目信任或就绪提示，核对是否已存在同名 agent、实际进程和状态，再决定是否重试；初次之后最多两次启动重试，每次等待 90000 毫秒。仍无法就绪则报告受阻并保留现场，不更换指定配置，也不通过修改全局默认绕过提示。
+
+Windows pane 可能缺少桌面应用临时加入的 PATH。启动前核对 pane 内 CLI 可执行路径；必要时仅补该 pane 的 PATH，不硬编码本机临时包路径。桌面 Codex 缺少完整本地包时先查 `--help` 与 `--no-daemon` 支持，再使用本地启动适配。记录请求配置和实际可核实的 agent、模型、目录、权限；无法核实项写明未知。
+
+## 3. 从文件传递 prompt
+
+将完整任务保存为已有授权输出目录中的 UTF-8 文件，包含目标、工作目录、目标仓库约束、允许范围、成果路径和验收。只读任务明确读取当前未提交内容、引用真实文件、不修改项目；修改任务写明接回方式和约定检查。可请求独立完成标记作为辅助证据。
+
+发送前查询 agent 并读终端，确认已经就绪、没有旧任务混淆。`agent prompt --wait` 不绑定独立轮次；旧 working 状态可能误报新任务接收。
+
+Pi Shell 默认 Bash；Windows 下把传递放在任务内 PowerShell 脚本，通过 `pwsh -NoProfile -File 'D:/授权输出目录/send.ps1'` 调用。prompt 不插入多层 Shell 命令字符串：
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 $session = '已核对的专用会话'
 $agent = '已核对的帮手名称'
-$promptPath = 'D:/授权目录/task-prompt.txt'
-$taskPrompt = Get-Content -LiteralPath $promptPath -Raw -Encoding utf8
-& herdr --session $session agent prompt $agent $taskPrompt --wait --until working --timeout 5000
-if ($LASTEXITCODE -ne 0) { throw '派发未确认，先查询和读回，保留 prompt 文件' }
+$taskPrompt = Get-Content -LiteralPath 'D:/授权输出目录/task-prompt.txt' -Raw -Encoding utf8
+$promptArgs = @('--session', $session, 'agent', 'prompt', $agent, $taskPrompt,
+    '--wait', '--until', 'working', '--timeout', '5000')
+& herdr @promptArgs
+if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端，保留 prompt' }
 ```
 
-`prompt` 本机只接收 TEXT 参数，以上避免 Bash/PowerShell 两层插值。提交前确认 agent 就绪且没有旧轮次工作；`--wait` 不跟踪独立轮次，已 working 的旧轮次可能被误当作新轮次。结合终端读回核对本任务已接收；未确认接收、超时或 stalled 时先查询，避免盲目重复发送。
+结合终端读回确认本任务已接收；超时、stalled 或 Shell 等待被中断时先查 `agent get` 和 `agent read`，不盲目重发。参数形状随安装版本帮助核验。
 
-用 `agent wait AGENT_NAME --timeout 30000` 内置等待，随后 `agent get` 与 `agent read AGENT_NAME --source recent-unwrapped --lines 200` 读取状态和输出。尚在运行时继续有界等待并向用户报告必要进展。超时仅表示未等到状态；idle/done 只是观察，不等于验收。
+## 4. 等待、读结果、验收和清理
 
-## 验收、接回与停止
+```text
+herdr --session SESSION agent wait AGENT_NAME --timeout 30000
+herdr --session SESSION agent get AGENT_NAME
+herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 200
+```
 
-只读任务由主会话核对报告中的实际文件、引用和结论，并检查项目未新增改动；接回报告继续用户目标，不要求修改、测试、提交、推送或切换到 development。代码修改任务由主会话查看真实 diff、产物与帮手记录，运行约定检查并记录结果和测试条数。权限、数据迁移、核心流程变更或用户要求时增加独立评审。验收不通过最多返工两轮；仍失败则报告缺口，保留现场。
+用内置 wait 等待；仍在运行时继续有界等待并报告必要进展。超时不表示失败或停止，idle/done 不表示验收通过。长等待可放任务内后台脚本并保存日志，主会话接续时读回实际状态。
 
-代码修改验收通过后将成果接回 `development`，核对未覆盖用户工作，运行相关验证，按项目提交规范提交和推送，再继续整体目标。仅转发帮手结论不算完成。
+主会话独立验收：只读核对报告的文件引用、结论和原始 Git 状态，确认项目无新增修改；修改核对真实 diff、新产物与执行记录，运行约定检查、记录结果和测试条数。完成标记、帮手自评、旧验收记录不能替代本次证据。失败给出具体缺口，最多返工两轮，仍失败报告缺口并保留现场。
 
-停止指定帮手时先核对专用 session 与本任务 pane 的真实身份，使用 `herdr --session SESSION pane close PANE_ID`，再查询 pane/agent 及进程证据。退出、按键或关闭回执不能单独证明进程树已停止；无法核实则报告未知，保留成果，避免另起重复任务。
+通过后按目标仓库规则接回修改或报告，继续完整用户目标。保存本次 prompt、终端结果、验收证据及成果后，只清理本任务创建的资源：核对 pane 身份再 `pane close`，必要时按 help 关闭 workspace；修改任务成功接回且没有遗漏成果后按 help 执行 `worktree remove --workspace WORKSPACE_ID`。workspace 已消失时核对记录的 checkout 和成果，再从原仓库 `git worktree remove PATH`。用户文件和原项目目录保持完整。
 
-只读报告验收接回后，保存报告并关闭本任务创建的 pane/workspace，保留原项目目录及用户文件。代码修改成果验收并成功接回后，核对 worktree 无未接回成果，按本机 help 使用 `worktree remove --workspace WORKSPACE_ID` 清理本任务 checkout；最后一个 pane 关闭后 workspace 可能已消失，此时核对已记录的 checkout 路径和成果，再使用原仓库的 `git worktree remove PATH` 清理，不能仅凭 agent 消失宣布 worktree 已清理；失败、待决定或停止未知时保留现场。清理范围只限本任务，不停止主服务。
+失败、待决定或停止未知时保留现场。关闭回执不证明进程树停止，需查询 pane/agent 并核对进程证据；不能核实时报告未知，避免重复启动。不得停止 herdr 主服务。
 
-中断后从记录的 session/workspace/pane/agent、prompt 和成果路径查询实际状态，核对已产生影响后接续。直接 Shell 路径没有旧执行器的外部进程账本、跨重启自动恢复和 Host 统一停止保证。真实主 Session 闭环验收由 #179 负责；#180 验收通过后才退役旧执行器，本 skill 的配置成功不代表闭环已通过。
+## 5. 多阶段接力
+
+耦合且全部已授权、无中途检查点的阶段写入一个 prompt。分阶段或不同帮手使用任务内 relay 脚本与内置 waits，逐阶段独立验收后才推进。承诺继续接力时要实际安排 wait 或脚本，不能只承诺盯着；未经授权的阶段在检查点停止。
+
+以下每阶段调用一次的 relay 片段由主会话填入已经核对的 session、agent 和本阶段文件，前提是第 3 节的就绪检查已完成。不同阶段可以使用不同帮手；脚本只负责派发、等待和读回，主会话是验收闸门。
+
+```powershell
+param([string]$Session, [string]$Agent, [string]$PromptPath)
+$ErrorActionPreference = 'Stop'
+$taskPrompt = Get-Content -LiteralPath $PromptPath -Raw -Encoding utf8
+& herdr --session $Session agent prompt $Agent $taskPrompt --wait --until working --timeout 5000
+if ($LASTEXITCODE -ne 0) { throw '接收未确认，先查询与读回' }
+& herdr --session $Session agent wait $Agent --timeout 30000
+if ($LASTEXITCODE -ne 0) { throw '等待未确认，保留现场并核对状态' }
+& herdr --session $Session agent read $Agent --source recent-unwrapped --lines 200
+if ($LASTEXITCODE -ne 0) { throw '读回失败，保留现场' }
+```
+
+每次脚本返回后，主会话查询实际状态；blocked/unknown 或仍在工作时先对账或继续内置 wait。阶段 settled 后按第 4 节核对真实报告、diff、产物与约定检查：
+
+1. 通过：记录阶段验收证据，立即对下一已授权阶段调用脚本；遇到未授权检查点则停下等待。
+2. 失败：写入包含具体缺口的返工 prompt，核对就绪后对同一阶段再调用；最多两轮返工，仍失败报告缺口、保留现场，后续阶段不推进。
+3. Shell 中断：先核对实际进程、已产生影响和成果再接续，不把截断当作取消，也不自动重复派发。
+
+这是一份任务内脚本和主会话闸门，不新增后台任务框架或自动恢复保证。
+
+## 6. Host 权限与交付
+
+本 skill 通过现有 `skillSources` 接入，配置见[能力说明](../../../docs/capabilities.md)。执行需要当前工作有效的 Work Permission；skill、`working_agreements` 和 `executionTool:true` 均不授予权限。已有授权直接沿用；缺失时按现有 `work_permission` 提案与用户确认流程取得授权。当前 Host 同一工作只允许一个未结算动作，Shell/写入调用逐个等待回执；被拒绝时先核对上一动作。
+
+只读使用项目读取范围及已有输出目录写 prompt、脚本和报告，不申请项目写权限；CLI 连接模型服务的网络需求按真实依赖填写。Codex full access / Claude auto 在可信执行中继承本机权限，项目只读和目录范围是行为约定，不是强制沙箱。发布、外发、越界动作及合并须有对应授权。
+
+主会话用报告、补丁、代码或本地产物按用户目标交付，沿用现有成果能力；需要在线发布时先核对该动作授权。保留本地成果，不默认 HTML、R2 或公网发布。中断后从记录的 session/workspace/pane/agent、prompt、成果与验收证据人工对账；此路径不保证跨重启自动恢复或 Host 统一停止。
+
+## 上游对照
+
+基线：[上游 herdr-workflow](https://github.com/joyehuang/skills/blob/master/personal/herdr-workflow/SKILL.md)（2026-10-13 读取；规格 #183）。
+
+- **保留**：0–5 的兜底、workspace/worktree 分流、启动、文件 prompt、读回清理和接力结构；内置 wait、主会话验收、最多两轮返工、只清理自己的资源与本地保留成果。
+- **适配**：目标仓库决定基准与集成；只读包含脏改动；启动 90 秒且仅两次重试；CLI 配置继承、Windows pane/PATH 与 PowerShell 文件传递；Host 权限、人工中断对账和按任务交付。第 6 节仅表达现有 Host 边界。
+- **省略**：作者固定模型、永久权限默认设置及私有 `task_protocol.py` registry/runner、notifier、watchdog、签收与恢复协议、`publish-artifact`/R2 发布设施；不复制这些依赖，也不声称它们的保证。
