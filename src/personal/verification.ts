@@ -13,6 +13,9 @@ export interface CheckEvidence {
 export interface VerificationOptions {
   /** Only explicit operator configuration grants this permission; not model output. */
   preauthorized?: boolean; timeoutMs?: number; maxOutputBytes?: number;
+  /** Production must supply a task-permission backend; configured checks are not
+   * an escape hatch from the work's execution environment. */
+  runCommand?: (task: Task, command: VerificationCommand, context: VerificationContext) => Promise<CheckEvidence>;
 }
 export interface VerificationContext { signal?: AbortSignal; requestAction?: (action: ActionSpec) => Promise<boolean> }
 
@@ -36,6 +39,11 @@ export class VerificationChecks {
       // A fixed operator-configured project check cannot leak into another task.
       if (command.cwd && command.cwd.toLowerCase() !== cwd.toLowerCase()) continue;
       context.signal?.throwIfAborted();
+      if (this.options.runCommand) {
+        evidence.push(await this.options.runCommand(task, command, context));
+        if (evidence.at(-1)?.status !== 'passed') break;
+        continue;
+      }
       if (!this.options.preauthorized && !(await context.requestAction?.({ kind: 'verification-command', target: cwd,
         parameters: { command: command.command, args: command.args, cwd },
         content: `Run independent check with this process's local permissions: ${JSON.stringify([command.command, ...command.args])}` }))) throw attention('Independent check has not run; exact command and working directory need approval');

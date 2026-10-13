@@ -6,6 +6,7 @@ import type { Delivery, PersonalInput } from './types.js';
 /** Plain output with durable pages. A lost acknowledgement never authorizes a resend. */
 export function createPlainChannel(options: {
   host: PersonalHost; accepts: (conversationId: string) => boolean; maxChars?: number;
+  textPages?(text: string): Array<{ text: string; textFormat?: Delivery['textFormat'] }>;
   sendText(text: string, delivery: Delivery): Promise<string>;
   sendFile?(path: string, delivery: Delivery): Promise<string>;
   onDelivered?(delivery: Delivery): Promise<void>;
@@ -21,8 +22,9 @@ export function createPlainChannel(options: {
     if (old.length) return old;
     const points = Array.from(parent.text);
     const pages: Delivery[] = [];
-    for (let i = 0; i < points.length; i += chars) pages.push({ ...parent, id: `${parent.id}:text:${pages.length}`,
-      parentId: parent.id, text: points.slice(i, i + chars).join(''), kind: 'text', artifacts: undefined, status: 'pending' });
+    const textPages = options.textPages?.(parent.text) ?? Array.from({ length: Math.ceil(points.length / chars) }, (_, i) => ({ text: points.slice(i * chars, (i + 1) * chars).join('') }));
+    for (const page of textPages) pages.push({ ...parent, ...page, id: `${parent.id}:text:${pages.length}`,
+      parentId: parent.id, kind: 'text', artifacts: undefined, status: 'pending' });
     for (const [i, path] of (parent.artifacts ?? []).entries()) pages.push({ ...parent, id: `${parent.id}:file:${i}`,
       parentId: parent.id, kind: 'file', path, text: '', artifacts: undefined, status: 'pending' });
     host.store.transaction(() => { for (const page of pages) host.store.putDelivery(page); });

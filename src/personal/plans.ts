@@ -19,6 +19,7 @@ export class PersonalPlans {
         const prior = this.host.getTask(spec.afterTaskId);
         if (!prior || prior.contextExcluded || prior.conversationId !== input.conversationId || prior.actorId !== input.actorId)
           return { text: '请明确属于当前对话的前置任务。' };
+        spec.afterTaskId = prior.rootTaskId ?? prior.id;
         if (spec.intervalMs) return { text: '任务完成后的触发不能同时设置周期。' };
       }
       if (spec.deadline !== undefined && spec.dueAt !== undefined && spec.deadline < spec.dueAt)
@@ -91,7 +92,8 @@ export class PersonalPlans {
       const result = this.host.store.transaction(() => {
         const plan = this.host.store.getPlan<Plan>(candidate.id)!;
         if (plan.status !== 'active' || plan.contextExcluded) return;
-        const dependency = plan.afterTaskId ? this.host.getTask(plan.afterTaskId) : undefined;
+        const identified = plan.afterTaskId ? this.host.getTask(plan.afterTaskId) : undefined;
+        const dependency = identified ? this.host.getTask(identified.rootTaskId ?? identified.id) : undefined;
         if (plan.afterTaskId && (dependency?.status !== 'completed' || dependency.contextExcluded)) return;
         if (plan.dueAt !== undefined && plan.dueAt > now || !plan.afterTaskId && plan.dueAt === undefined) return;
         const due = plan.dueAt ?? dependency!.updatedAt;
@@ -111,7 +113,7 @@ export class PersonalPlans {
         if (plan.lastTrigger === trigger) return;
         // Synchronous enqueue participates in this same transaction; exceptions roll back consumption.
         const response = this.host.enqueueTask({ conversationId: plan.conversationId, actorId: plan.actorId,
-          text: plan.goal, inputId: `plan:${trigger}` },
+          text: plan.goal, inputId: `plan:${trigger}`, origin: 'plan' },
         { kind: 'start', goal: plan.goal, cwd: plan.cwd, resources: plan.resources, executor: plan.executor, deadline: plan.deadline });
         plan.lastTrigger = trigger;
         if (plan.intervalMs) plan.dueAt = due + (Math.floor((now - due) / plan.intervalMs) + 1) * plan.intervalMs;

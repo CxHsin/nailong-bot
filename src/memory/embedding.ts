@@ -1,7 +1,8 @@
 import { sourceDigest } from "../runtime/event-digest.js";
 import { openMemoryCache } from "./cache.js";
 
-export type EmbeddingConfig = { baseUrl: string; model: string; apiKey: string; timeoutMs?: number; maxInputChars?: number };
+export type EmbeddingConfig = { baseUrl: string; model: string; apiKey: string; timeoutMs?: number; maxInputChars?: number;
+  beforeRequest?: (event: { background: boolean }) => void | Promise<void>; maxBackgroundAttempts?: number };
 export function normalizeVector(vector: number[]): number[] {
   if (!vector.length || vector.some((value) => !Number.isFinite(value))) throw new Error("embedding 向量无效");
   const norm = Math.hypot(...vector);
@@ -20,7 +21,8 @@ export function averageVectors(vectors: number[][]): number[] | undefined {
 export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) {
   const timeoutMs = config.timeoutMs ?? 3000; const maxChars = config.maxInputChars ?? 6000;
   if (!config.model.trim() || !config.apiKey.trim() || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 ||
-    !Number.isSafeInteger(maxChars) || maxChars < 1) throw new Error("embedding 配置无效");
+    !Number.isSafeInteger(maxChars) || maxChars < 1 || config.maxBackgroundAttempts !== undefined &&
+    (!Number.isSafeInteger(config.maxBackgroundAttempts) || config.maxBackgroundAttempts < 1)) throw new Error("embedding 配置无效");
   const url = new URL(config.baseUrl.replace(/\/$/, "") + "/embeddings");
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("embedding 地址无效");
   const { db, recovered } = openMemoryCache(dataDir, "embedding");
@@ -33,7 +35,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
   const queued = new Map<string, Job>();
   const pending = new Map<string, Promise<number[]>>();
   let worker: Promise<void> | undefined; let stopped = false; let status: string | undefined;
-  let retry: ReturnType<typeof setTimeout> | undefined; let backoff = 100;
+  let retry: ReturnType<typeof setTimeout> | undefined; let backoff = 100; let backgroundAttempts = 0;
   let generation = 0; let activeGeneration = 0;
   let cacheEpoch = 0;
   const key = (text: string, kind = "message") => sourceDigest({ namespace: namespace(), kind, text });
@@ -67,6 +69,8 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
           }
           if (!batch.length) continue;
           if (background) timer = setTimeout(() => controller.abort(), timeoutMs);
+          try { await config.beforeRequest?.({ background }); }
+          catch (error) { const denied = new Error('embedding 请求预算已耗尽，未派发', { cause: error }); denied.name = 'EmbeddingBudgetError'; throw denied; }
           const response = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${config.apiKey}`, "content-type": "application/json" },
             body: JSON.stringify({ model: config.model, input: batch.map((entry) => entry.text) }), signal: controller.signal });
           if (!response.ok) throw new Error("embedding 服务不可用");
@@ -95,7 +99,7 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
           if (vectors[index]!.length && eligible[index] && epoch === cacheEpoch) storeVector(job.text, vectors[index]!, "message", responseNamespace);
         }
         status = undefined; return vectors;
-      } catch { status = "embedding_unavailable"; throw new Error("embedding 暂不可用"); }
+      } catch (error) { status = error instanceof Error && error.name === 'EmbeddingBudgetError' ? 'embedding_budget_exhausted' : "embedding_unavailable"; if (error instanceof Error && error.name === 'EmbeddingBudgetError') throw error; throw new Error("embedding 暂不可用"); }
       finally { clearTimeout(timer); controllers.delete(controller); }
   }
   function storeVector(text: string, vector: number[], kind = "message", targetNamespace = namespace()) {
@@ -128,10 +132,17 @@ export function createEmbeddingClient(dataDir: string, config: EmbeddingConfig) 
       while (queued.size && !stopped) {
         const batch = [...queued.entries()].slice(0, 16);
         try {
+          backgroundAttempts++;
           await compute(batch.map((entry) => entry[1]), true);
           for (const [identity, job] of batch) if (queued.get(identity) === job && (cached(job.text) || job.eligible && !await job.eligible())) queued.delete(identity);
-          backoff = 100;
-        } catch {
+          backoff = 100; backgroundAttempts = 0;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'EmbeddingBudgetError') { queued.clear(); backgroundAttempts = 0; break; }
+          if (backgroundAttempts >= (config.maxBackgroundAttempts ?? Infinity)) {
+            for (const [identity, job] of batch) if (queued.get(identity) === job) queued.delete(identity);
+            backgroundAttempts = 0; backoff = 100;
+            continue;
+          }
           if (!stopped) {
             retry = setTimeout(() => { retry = undefined; runWorker(); }, backoff);
             retry.unref(); backoff = Math.min(30_000, backoff * 2);

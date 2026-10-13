@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ExecutorIdentity, Task, TaskExecution, TaskExecutor, TaskResult } from './types.js';
 import { processTree, waitForTermination } from './process-control.js';
+import { requirePermission } from './permissions.js';
 
 export interface HerdrEvidence {
   identity: ExecutorIdentity; output: string; revision: number; signal?: AbortSignal;
@@ -23,6 +24,8 @@ export interface HerdrOptions {
   claudePolicy?: { args: string[]; verified: boolean };
   /** Closing a pane alone does not prove all external processes have stopped. */
   confirmStopped?: (identity: ExecutorIdentity) => Promise<boolean>;
+  /** Deployment-tested external-agent policy; a Shell backend does not constrain herdr. */
+  executionPolicy?: { verified: boolean; identity: string; supports(task: Task): Promise<boolean>; readIsolation: boolean; writeIsolation: boolean; networkIsolation: boolean; processTreeStop: boolean; args: string[] };
 }
 type RecordValue = Record<string, unknown>;
 function object(value: unknown): RecordValue {
@@ -63,6 +66,13 @@ export class HerdrExecutor implements TaskExecutor {
     request.onUsage({ costKnown: false });
     let task = { ...request.task, requirements: [...request.task.requirements] };
     if (!task.cwd) throw new Error('herdr delegation requires an explicit working directory');
+    const grant = requirePermission(task);
+    const authorizedSnapshot = JSON.stringify([task.revision, task.cwd, task.goal, task.requirements, grant]);
+    const checkSnapshot = (current: Task) => { if (JSON.stringify([current.revision, current.cwd, current.goal, current.requirements, requirePermission(current)]) !== authorizedSnapshot) throw attention('外部 Agent 目标、版本或执行权限改变，需要重新确认；未继续启动'); };
+    const policy = this.options.executionPolicy;
+    const permitted = async (current: Task) => !!policy?.verified && !!policy.identity && policy.readIsolation && policy.writeIsolation && (requirePermission(current).network || policy.networkIsolation) && policy.processTreeStop && await policy.supports(current);
+    if (grant.mode === 'restricted' && !await permitted(task)) throw attention('外部编码 Agent 没有匹配当前目录、权限与身份的已验证后端；未创建工作区');
+    if (grant.mode === 'trusted' && !await request.requestAction?.({ kind: 'external-agent', target: task.cwd, parameters: { goal: task.goal, requirements: task.requirements, executor: this.options.kind ?? 'codex' }, content: '外部 Agent 继承本机权限，可能修改、删除文件或对外访问；确认具体工作目标与影响。' })) throw attention('外部编码 Agent 尚未获明确动作授权；未创建工作区');
     const kind = this.options.kind ?? 'codex';
     if (kind === 'claude' && !this.options.claudePolicy?.verified) throw new Error('Claude execution policy is not verified; delegation requires configuration');
     const name = `nl-${createHash('sha256').update(attempt.id).digest('hex').slice(0, 20)}`;
@@ -76,10 +86,19 @@ export class HerdrExecutor implements TaskExecutor {
     // becomes unknown, recovery must ask instead of blindly creating another one.
     onIdentity(identity);
     const environment = !this.options.cli && process.env.PATH ? ['--env', `PATH=${process.env.PATH}`] : [];
-    const created = result(await this.cli(['workspace', 'create', '--cwd', task.cwd, '--label', name, '--no-focus', ...environment], signal));
+    task = this.options.taskForIdentity?.(identity) ?? task;
+    checkSnapshot(task);
+    if (requirePermission(task).mode === 'restricted' && !await permitted(task)) throw attention('外部 Agent 授权范围或后端身份改变；未创建工作区');
+    checkSnapshot(this.options.taskForIdentity?.(identity) ?? task);
+    const created = result(await this.cli(['workspace', 'create', '--cwd', task.cwd!, '--label', name, '--no-focus', ...environment], signal));
     identity = { ...identity, workspaceId: string(object(created.workspace).workspace_id), paneId: string(object(created.root_pane).pane_id), phase: 'starting' };
     onIdentity(identity);
-    const args = kind === 'codex'
+    task = this.options.taskForIdentity?.(identity) ?? task;
+    checkSnapshot(task);
+    const launchGrant = requirePermission(task);
+    if (launchGrant.mode === 'restricted' && !await permitted(task)) throw attention('外部 Agent 授权范围或后端身份改变；未启动 Agent');
+    checkSnapshot(this.options.taskForIdentity?.(identity) ?? task);
+    const args = launchGrant.mode === 'restricted' ? policy!.args : kind === 'codex'
       ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request', '--no-daemon', '--no-alt-screen']
       : this.options.claudePolicy!.args;
     const started = result(await this.cli(['agent', 'start', name, '--kind', kind, '--pane', string(identity.paneId), '--timeout', '30000', '--', ...args], signal));

@@ -1,5 +1,7 @@
 # Isolated Windows / herdr acceptance, 2026-10-12 Asia/Shanghai
 
+历史记录：本文保留 2026-10-12 的基准和当时证据，不表示 #167 统一工作流程已经实机复验。当前实现与未验证项见[2026-10-13 验收](personal-agent-acceptance-20261013.md)。
+
 Environment: Windows, herdr 0.8.2, Codex 0.162.0-alpha.17.2. Named session `nailong-accept-20261011`, temporary repo `C:/Users/Cx/AppData/Local/Temp/nailong-herdr-accept-20261011`. User's existing default session and production bot were not stopped or changed. No login credentials were read.
 
 ## Actual delegation
