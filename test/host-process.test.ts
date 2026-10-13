@@ -24,7 +24,14 @@ async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' =
     if (mode === 'task') {
       const main = wire.tools?.some((tool: { function: { name: string } }) => tool.function.name === 'task_control');
       if (!main) { taskCalls++; taskStarted(); res.writeHead(200, { 'content-type': 'text/event-stream' }); res.write(': waiting\n\n'); return; }
-      if (wire.messages.at(-1)?.role === 'tool') return sendChatCompletion(res, '提议已提交');
+      if (wire.messages.at(-1)?.role === 'tool') {
+        const result = wire.messages.at(-1);
+        if (result.tool_call_id === 'query') {
+          const task = JSON.parse(result.content);
+          return sendChatCompletion(res, `任务 ${task.id} 状态：${task.status} ${task.error ?? ''}`);
+        }
+        return sendChatCompletion(res, '提议已提交');
+      }
       const user = JSON.stringify(wire.messages.at(-1)?.content);
       if (user.includes('查询任务')) {
         const id = /查询任务 ([a-z0-9:-]+)/.exec(user)?.[1];
@@ -90,7 +97,7 @@ test("a crashed CLI Host retains its task identity and waits when native executi
   records.close(); assert.ok(helper, 'the accepted overall work retains its helper identity');
   const second = f.start(); second.child.stdin!.write(`查询任务 ${helper.id}\n`);
   const query = await second.wait(event => event.type === 'message' && event.text.includes('状态：'));
-  assert.equal(query.taskId, helper.id);
+  assert.match(query.text, new RegExp(helper.id));
   assert.match(query.text, /状态：waiting/);
   assert.match(query.text, /不会重复启动|未知/);
   second.child.stdin!.end();

@@ -81,7 +81,8 @@ test('Host resumes an interrupted migration without duplicating Session history 
     pi = await createPersonalPi({ dataDir: directory, promptFile, modelConfiguration: { defaultModel: 'local', models: [config] } });
     host = new PersonalHost({ store, dialogue: pi.dialogue, executor: pi.executor });
     await host.submit({ conversationId: 'c', actorId: 'a', inputId: '1', text: '继续遵守之前的约束' });
-    assert.equal(seesForgotten, false); assert.equal(retainedOccurrences, 1); assert.equal(host.listTasks().length, 0);
+    assert.equal(seesForgotten, false); assert.equal(retainedOccurrences, 1); assert.equal(host.listTasks().length, 1);
+    assert.equal(host.listTasks()[0]?.status, 'waiting');
     assert.equal(await readFile(join(directory, 'events.jsonl'), 'utf8'), source);
   } finally { if (host) await host.close(); else store.close(); await pi?.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); }
 });

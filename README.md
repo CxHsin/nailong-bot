@@ -2,7 +2,7 @@
 
 当前 Windows 电脑上的个人 Agent，通过 Telegram 私聊或 CLI 持续共事。本体直接处理轻量工作，研究、整理和编码交给独立帮手；材料回到本体复查并继续完整目标。用户可以插话、补充要求和停止整项工作或指定帮手。
 
-当前规格为 [#167](https://github.com/CxHsin/nailong-bot/issues/167)，架构边界见 [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md)，迁移见 [操作说明](docs/personal-agent-operations.md)，证据与未验证项见 [本轮验收](docs/personal-agent-acceptance-20261013.md)。本轮不增加浏览器、通用桌面控制或稳定偏好画像。
+当前底座规格为 [#189](https://github.com/CxHsin/nailong-bot/issues/189)，架构边界见 [ADR-0009](docs/adr/0009-runtime-work-context.md)与 [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md)，迁移见 [操作说明](docs/personal-agent-operations.md)，#167 的历史证据与未验证项见 [原验收](docs/personal-agent-acceptance-20261013.md)。
 
 ## 使用
 
@@ -12,6 +12,8 @@
 | --- | --- |
 | Telegram | `npm start` |
 | CLI 交互 | `npm run chat` |
+| 主动受限交互 | `npm run chat -- --restricted` |
+| 显式选择 full access | `npm run chat -- --full-access` |
 | 单次输入 | `npm run send -- "整理文件并交付结果"` |
 | 图片输入 | `npm run send -- "分析图片" --image photo.png` |
 | 指定会话 | `npm run send -- "继续" --conversation-id telegram:private:42` |
@@ -22,6 +24,7 @@
 | 命令 | 行为 |
 | --- | --- |
 | `/help` | 使用说明 |
+| `/steer TaskID 补充要求` | 显式保存补充要求，在当前工具轮次结束后呈现；普通回复仍由模型判断意图 |
 | `/model`、`/model 别名` | 查看或切换主对话模型 |
 | `/reset` | 作废主对话 Session，保留任务和记忆 |
 | `/memory 关键词` | 检索 Akasha 原始来源 |
@@ -29,13 +32,17 @@
 
 Telegram 私聊使用 Markdown 富消息和文件，支持标题、粗体、代码与表格；当前用户回复的正文通过临时草稿流式预览，最终通过正式消息交付。长文按 Markdown 块分页，超大块或格式拒绝时降级为原文文本；后台工具过程不逐条推送。未知送达不自动重发，用户确认重新交付只复用成果，不重做任务。接口与验收边界见 [Telegram 输出说明](docs/personal-agent-operations.md#telegram-回复渲染与预览174)。
 
-`AGENT_DATA_DIR` 默认 `data`，`AGENT_PROMPT_FILE` 默认 `system-prompt.md`。同一实际目录只允许一个 Host，CLI 不控制另一个进程中的 Telegram。跨入口续聊先停前一进程，并使用相同 conversationId 和 actorId；CLI actor 默认 `cli`，用 `AGENT_ACTOR_ID` 指定，Telegram actor 为 `telegram:<数字 ID>`。
+`AGENT_DATA_DIR` 默认 `data`，`AGENT_PROMPT_FILE` 默认 `system-prompt.md`。本地交互以启动目录建立新会话的工作目录，默认会话按项目区分；重开保存的会话使用原目录和模式。指定 `--conversation-id` 可续接原会话。两个模式标志互斥，仅用于 `chat`；`send`、Telegram 和计划不因此默认提权。
+
+同一实际数据目录只允许一个 Host，CLI 不控制另一个进程中的 Telegram。跨入口续聊先停前一进程，并使用相同 conversationId 和 actorId；CLI actor 默认 `cli`，用 `AGENT_ACTOR_ID` 指定，Telegram actor 为 `telegram:<数字 ID>`。
 
 ## 责任与能力
 
 Host 保存整体工作/子委派、Attempt、输入、事件回执、授权、计划和 Delivery；Pi 原生 Session 保存模型交换和 compaction。Akasha 在真实用户输入时自动召回一次相关原话，保留时间、角色与出处；工具续步和后台结果不新增自动召回。明确工作约定独立保存内容、作用域和撤销历史，当前要求优先，不生成稳定偏好档案。
 
-本体可直接处理授权范围内的文件，默认受限；缺少满足边界的已验证后端时命令受阻。一次工作明确授予可信本机权限后普通命令自主执行，实际继承 Host 权限；删除原件通过受控接口具体确认。原生发现不授予执行权限，MCP 独立检查边界和具体动作。详见 [能力与工作权限](docs/capabilities.md)。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
+本地交互默认 full access，文件与 Shell 使用启动账户的实际权限，工作目录是默认位置，不是沙箱；用户当前指令继续约束工作范围。主动受限模式及其他入口保留自己的授权，无满足边界的命令后端时返回错误。工具失败直接交给模型恢复或解释，不要求独立受阻报告表单。原生发现不授予执行权限。详见 [能力与工作权限](docs/capabilities.md)。
+
+Runtime 关联实际呈现的要求，Host 核对版本，模型不填写内部版本号。普通回复结束不会自动将 Task 标成成功；整体完成仍要明确提出并核验必要成果。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
 
 编码委托由项目 [herdr-workflow skill](.agents/skills/herdr-workflow/SKILL.md) 通过主会话 Shell 调用 herdr CLI，默认 Codex full access，Claude auto。配置见[能力说明](docs/capabilities.md)，真实闭环见[验收记录](docs/personal-herdr-skill-acceptance-20261013.md)。固定 HerdrExecutor 已退役；直接 CLI 帮手通过 skill 查询和停止，中断后核对实际状态，不承诺 Host 统一停止或自动恢复。
 

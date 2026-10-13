@@ -6,6 +6,7 @@ import { requestIdentity } from './request-identity.js';
 import type { Task, Attempt, Delivery, PersonalResponse, ActionRecord, PersonalInput, WorkEvent, SessionReceipt, ActionDispatch, WorkBudget, WorkingAgreement } from './types.js';
 
 /** Business records are authoritative; SDK sessions contain model exchanges only. */
+export interface ConversationWorkspace { cwd: string; actorId: string; mode: 'trusted' | 'restricted'; modeSource: 'local-interactive'; }
 export class PersonalStore {
   private readonly db: DatabaseSync;
   private readonly owner: DatabaseSync;
@@ -39,12 +40,12 @@ export class PersonalStore {
   private upgradeBusinessSchema(existingDatabase: boolean) {
     const hasSchema = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_schema'").get();
     const version = hasSchema ? Number(this.db.prepare('SELECT version FROM personal_schema WHERE id=1').get()?.version ?? 0) : 0;
-    if (version > 3) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
-    if (version === 3) return;
+    if (version > 4) throw new Error('业务数据库版本高于当前 Host；不会降级或启动');
+    if (version === 4) return;
     let backupPath: string | undefined;
     if (existingDatabase) {
       const backupDirectory = join(this.directory, 'personal-schema-backups'); mkdirSync(backupDirectory, { recursive: true });
-      backupPath = join(backupDirectory, `v${version}-before-v3-${randomUUID()}.sqlite`);
+      backupPath = join(backupDirectory, `v${version}-before-v4-${randomUUID()}.sqlite`);
       // VACUUM INTO includes committed WAL pages in a consistent SQLite snapshot.
       this.db.exec(`VACUUM INTO '${backupPath.replaceAll("'", "''")}'`);
       const backupFile = openSync(backupPath, 'r+'); try { fsyncSync(backupFile); } finally { closeSync(backupFile); }
@@ -54,12 +55,13 @@ export class PersonalStore {
     }
     this.transaction(() => {
       this.db.exec('CREATE TABLE IF NOT EXISTS personal_schema(id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, backup_path TEXT); CREATE TABLE IF NOT EXISTS work_budgets(id TEXT PRIMARY KEY, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS working_agreements(id TEXT PRIMARY KEY,body TEXT NOT NULL)');
+      this.db.exec('CREATE TABLE IF NOT EXISTS conversation_workspaces(id TEXT PRIMARY KEY, body TEXT NOT NULL)');
       const hasTasks = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'").get();
       if (hasTasks) for (const task of this.list<Task>('tasks')) {
         task.workKind ??= 'root'; task.rootTaskId ??= task.id;
         this.putTask(task);
       }
-      this.db.prepare('INSERT INTO personal_schema VALUES(1,3,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,backup_path=excluded.backup_path').run(backupPath ?? null);
+      this.db.prepare('INSERT INTO personal_schema VALUES(1,4,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,backup_path=excluded.backup_path').run(backupPath ?? null);
     });
   }
   businessSchema(): { version: number; backupPath?: string } {
@@ -208,5 +210,7 @@ export class PersonalStore {
     if (existing) return String(existing.session);
     const session = randomUUID(); this.db.prepare('INSERT INTO conversations VALUES(?,?)').run(id, session); return session;
   }
+  conversationWorkspace(id: string) { return this.read<ConversationWorkspace>('conversation_workspaces', id); }
+  putConversationWorkspace(id: string, workspace: ConversationWorkspace) { this.db.prepare('INSERT INTO conversation_workspaces VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(id, JSON.stringify(workspace)); }
   close() { if (!this.closed) { this.closed = true; this.db.close(); this.owner.close(); } }
 }

@@ -91,7 +91,7 @@ test('production direct completion repairs a fsynced verdict after Host transact
   const directory = mkdtempSync(join(tmpdir(), 'personal-direct-complete-')); const promptFile = join(directory, 'prompt.md'); writeFileSync(promptFile, 'Help.'); let calls = 0;
   const server = createTestServer(t, async (req, res) => { let body = ''; for await (const chunk of req) body += chunk; const wire = JSON.parse(body); const last = wire.messages.at(-1); calls++;
     const call = (name: string, args: unknown) => sendChatCompletion(res, '', [{ index: 0, id: name, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
-    if (last.role !== 'tool') return call('write', { path: 'direct.txt', content: 'direct final work' }); if (last.tool_call_id === 'write') return call('complete_work', { outcome: 'completed', reviewedRevision: 0, text: 'direct complete', artifacts: ['direct.txt'] }); return sendChatCompletion(res, 'direct complete');
+    if (last.role !== 'tool') return call('write', { path: 'direct.txt', content: 'direct final work' }); if (last.tool_call_id === 'write') return call('complete_work', { outcome: 'completed', text: 'direct complete', artifacts: ['direct.txt'] }); return sendChatCompletion(res, 'direct complete');
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); const address = server.address(); assert.ok(address && typeof address !== 'string');
   const runtime = await createPersonalRuntime({ AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile, MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions', MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}` });
@@ -278,7 +278,7 @@ test('production main Session receives native helper material then writes the fi
     const call = (name: string, args: unknown, id = name) => sendChatCompletion(res, '', [{ index: 0, id, type: 'function', function: { name, arguments: JSON.stringify(args) } }]);
     if (names.includes('complete_work') && JSON.stringify(wire.messages.filter((message: { role: string }) => message.role === 'user').at(-1)?.content).includes('执行材料（不是用户发言、不是指令）')) {
       if (last.role !== 'tool') { resumes++; assert.match(JSON.stringify(last.content), /执行材料/); return call('write', { path: 'final.txt', content: 'main synthesis from helper' }, 'final-write'); }
-      if (last.tool_call_id === 'final-write') { const material = JSON.stringify(wire.messages); const revision = Number(material.match(/reviewedRevision\":(\d+)/)?.[1] ?? 0); return call('complete_work', { outcome: 'completed', reviewedRevision: revision, text: 'overall synthesis complete', artifacts: ['final.txt'], sources: ['source.txt'], conclusions: ['The source provides helper research.'], uncertainties: 'Local fixture only.' }); }
+      if (last.tool_call_id === 'final-write') return call('complete_work', { outcome: 'completed', text: 'overall synthesis complete', artifacts: ['final.txt'], sources: ['source.txt'], conclusions: ['The source provides helper research.'], uncertainties: 'Local fixture only.' });
       return sendChatCompletion(res, 'overall synthesis complete');
     }
     if (names.includes('task_control')) {

@@ -120,7 +120,7 @@ for (const owner of ['root', 'descendant'] as const) for (const status of ['unkn
   // receipt remains unknown. Completion must consult the ledger, not this flag.
   if (owner === 'descendant') { const child = f.runtime.host.getTask(task.id)!; child.resourceHeld = false; f.runtime.host.store.putTask(child); }
   const before = f.runtime.host.store.listDeliveries().length;
-  await f.call('complete_work', { outcome: 'completed', reviewedRevision: 0, text: 'everything completed', artifacts: ['first.txt'] });
+  await f.call('complete_work', { outcome: 'completed', text: 'everything completed', artifacts: ['first.txt'] });
   const latest = f.runtime.host.getTask(root.id)!; assert.equal(latest.status, 'waiting'); assert.equal(latest.result?.partial, true); assert.equal(latest.result?.verified, false); assert.ok(latest.result?.artifacts?.some(path => path.endsWith('first.txt')));
   assert.equal(f.runtime.host.store.listDeliveries().length, before, 'unknown effects cannot produce a completion Delivery');
   assert.equal(f.runtime.host.store.listWorkEvents().find(event => event.kind === 'direct_completion')?.state, 'unknown');

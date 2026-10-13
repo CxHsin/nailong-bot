@@ -70,8 +70,6 @@ export class PersonalHost {
       if (taskId) throw new Error('工作不存在');
       task = this.createTask(input, { kind: 'start', goal: input.text });
       task.direct = true; task.originInputId = input.inputId; task.originInput = input; task.status = 'waiting'; task.sessionId = this.store.conversationSession(input.conversationId);
-      task.permission = { mode: 'restricted', readRoots: [task.cwd!], writeRoots: [task.cwd!], network: false,
-        expiresAt: this.now() + 86_400_000, revision: task.revision, sourceInputId: input.inputId };
       this.store.putTask(task);
     }
     const id = task.id;
@@ -81,7 +79,16 @@ export class PersonalHost {
       if (!latest || latest.actorId !== input.actorId || latest.conversationId !== input.conversationId || latest.cancelRequested || latest.contextExcluded || ['completed', 'cancelled', 'failed'].includes(latest.status)) throw new Error('工作已结束、取消或身份无效');
       return latest;
     };
-    return { task, eventId, current, requestAction: action => { current(); return this.requestAction(id, action); },
+    return { task, eventId, current, presentRequirements: (revision, receipt) => {
+      const latest = current();
+      if (receipt.sessionId !== latest.sessionId || revision > latest.revision || !Number.isInteger(revision)) throw new Error('工作要求呈现关联无效');
+      latest.presentedRequirements = { revision, receipt }; this.store.putTask(latest);
+    }, queryWork: taskId => {
+      const latest = taskId ? this.getTask(taskId) : current();
+      if (!latest || latest.actorId !== input.actorId || latest.conversationId !== input.conversationId || latest.contextExcluded) throw new Error('工作不属于此用户或对话');
+      if (eventId && latest.id !== id && latest.parentTaskId !== id) throw new Error('只能查询当前工作及直属帮手');
+      return latest;
+    }, requestAction: action => { current(); return this.requestAction(id, action); },
       agreements: () => this.agreements(id), proposeAgreement: change => { if (eventId || task!.workKind === 'delegation') throw new Error('后台材料或帮手不能保存用户约定，请由用户明确表达并确认'); return this.proposeAgreement(input, change); },
       requestContext: (callId, query) => {
         const child = current(); const parent = child.parentTaskId ? this.getTask(child.parentTaskId) : undefined;
@@ -148,9 +155,9 @@ export class PersonalHost {
         child.contextPacket = spec.contextPacket;
       }
       if (parent.permission) {
-      const grant = spec.permission ?? { ...parent.permission, mode: 'restricted' as const, readRoots: parent.permission.readRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], writeRoots: parent.permission.writeRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], network: false, deleteOriginal: false, externalSend: false };
+      const grant = spec.permission ?? (parent.permission.mode === 'trusted' ? { ...parent.permission } : { ...parent.permission, mode: 'restricted' as const, readRoots: parent.permission.readRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], writeRoots: parent.permission.writeRoots.filter(root => { const cwd = physicalResource(child.cwd!); const base = physicalResource(root); return cwd === base || cwd.startsWith(base + sep); }).length ? [child.cwd!] : [], network: false, deleteOriginal: false, externalSend: false });
         const within = (path: string, roots: string[]) => roots.some(root => { const actual = physicalResource(path); const base = physicalResource(root); return actual === base || actual.startsWith(base + sep); });
-        if (grant.expiresAt > parent.permission.expiresAt || grant.network && !parent.permission.network || grant.mode === 'trusted' && parent.permission.mode !== 'trusted' || grant.readRoots.some(path => !within(path, parent.permission!.readRoots)) || grant.writeRoots.some(path => !within(path, parent.permission!.writeRoots)) || grant.deleteOriginal && !parent.permission.deleteOriginal || grant.externalSend && !parent.permission.externalSend) throw new Error('子委派权限不能扩大父工作授权');
+        if (parent.permission.mode !== 'trusted' && (grant.expiresAt > parent.permission.expiresAt || grant.network && !parent.permission.network || grant.mode === 'trusted' || grant.readRoots.some(path => !within(path, parent.permission!.readRoots)) || grant.writeRoots.some(path => !within(path, parent.permission!.writeRoots)) || grant.deleteOriginal && !parent.permission.deleteOriginal || grant.externalSend && !parent.permission.externalSend)) throw new Error('子委派权限不能扩大父工作授权');
         child.permission = { ...grant, readRoots: grant.readRoots.map(physicalResource), writeRoots: grant.writeRoots.map(physicalResource), revision: 0 };
         child.resources = [...new Set([...child.resources, ...child.permission.readRoots, ...child.permission.writeRoots].flatMap(path => [path, ...(checkoutResource(path) ? [checkoutResource(path)!] : [])]))];
       }
@@ -258,6 +265,17 @@ export class PersonalHost {
     if (this.closing) return Promise.reject(new Error('Host closing'));
     const inputKey = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
     input = this.store.acceptInput(inputKey, { ...input, receivedAt: input.receivedAt ?? this.now() });
+    if (input.control === 'steer' && input.replyTaskId) {
+      const previous = this.store.getInput(inputKey); if (previous) return Promise.resolve(previous);
+      return this.updateRequirements(input, input.replyTaskId, input.text).then(response => {
+        const settled = this.store.transaction(() => {
+          const previous = this.store.getInput(inputKey); if (previous) return previous;
+          const delivery = this.makeDelivery(input, response.text, response.taskId); response.deliveryId = delivery.id;
+          this.store.putInput(inputKey, response); return response;
+        });
+        this.notify(this.delivery(settled.deliveryId!)!); return settled;
+      });
+    }
     const prior = this.conversations.get(input.conversationId) ?? Promise.resolve();
     const current = prior.catch(() => {}).then(async () => {
       const key = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
@@ -301,7 +319,7 @@ export class PersonalHost {
       const task = this.options.dialogue.resume ? this.workContext(input).task : this.createTask(input, decision);
       if (this.options.dialogue.resume) {
         task.goal = decision.goal; let authorized = true;
-        if (decision.cwd) { const cwd = physicalResource(decision.cwd); authorized = task.permission!.readRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)) && task.permission!.writeRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)); if (authorized) task.cwd = cwd;
+        if (decision.cwd) { const cwd = physicalResource(decision.cwd); authorized = task.permission!.mode === 'trusted' || task.permission!.readRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)) && task.permission!.writeRoots.some(root => cwd === physicalResource(root) || cwd.startsWith(physicalResource(root) + sep)); if (authorized) { task.cwd = cwd; task.resources = [...new Set([...task.resources, cwd])]; }
           else { task.error = '目标目录尚未授权；需确认具体工作范围后委派。'; this.store.putTask(task); void this.requestAction(task.id, { kind: 'permission-grant', target: task.id, parameters: { grant: { ...task.permission!, readRoots: [cwd], writeRoots: [cwd] }, proposedInputId: input.inputId, delegation: { goal: decision.goal, purpose: decision.executor === 'herdr' ? 'coding' : 'research', cwd, resources: decision.resources } }, content: `确认工作读写目录 ${cwd}；未授权前不会执行。` }); }
         }
         this.store.putTask(task); if (authorized) this.delegateWork(task.id, { goal: decision.goal, purpose: decision.executor === 'herdr' ? 'coding' : 'research', cwd: decision.cwd, resources: decision.resources }, `start:${input.inputId}`);
@@ -312,7 +330,9 @@ export class PersonalHost {
     queueMicrotask(() => { const delivery = this.delivery(response.deliveryId!); if (!this.closing && delivery) { this.notify(delivery); this.pump(); } }); return response;
   }
   private createTask(input: PersonalInput, decision: Extract<Decision, { kind: 'start' }>, id: string = randomUUID()): Task {
-    const cwd = physicalResource(decision.cwd ?? join(this.store.directory, 'workspaces', id));
+    const workspace = this.store.conversationWorkspace(input.conversationId);
+    if (workspace && workspace.actorId !== input.actorId) throw new Error('工作目录不属于此用户');
+    const cwd = resolve(decision.cwd ?? workspace?.cwd ?? join(this.store.directory, 'workspaces', id));
     const paths = [ ...(decision.resources ?? []), cwd ].map(physicalResource);
     const explicitProjectPaths = [ ...(decision.resources ?? []), ...(decision.cwd ? [cwd] : []) ].map(physicalResource);
     // Generated per-task workspaces have their own scope. They do not inherit
@@ -321,7 +341,8 @@ export class PersonalHost {
     const task: Task = { id, conversationId: input.conversationId, actorId: input.actorId, goal: decision.goal,
       resources: [...new Set([...paths, ...projects])],
       executor: decision.executor ?? 'local', cwd, sessionId: randomUUID(), status: 'queued', createdAt: this.now(), updatedAt: this.now(), requirements: [], revision: 0, resourceHeld: false, deadline: decision.deadline };
-    task.permission = { mode: 'restricted', readRoots: [cwd], writeRoots: [cwd], network: false, expiresAt: this.now() + 86_400_000, revision: 0, sourceInputId: input.inputId };
+    const localMode = input.origin === 'local-interactive' ? workspace?.mode : undefined;
+    task.permission = { mode: localMode ?? 'restricted', readRoots: [cwd], writeRoots: [cwd], network: localMode === 'trusted', expiresAt: localMode === 'trusted' ? Number.MAX_SAFE_INTEGER : this.now() + 86_400_000, revision: 0, sourceInputId: localMode ? `local-interactive:${input.conversationId}` : input.inputId };
     this.store.putTask(task); return task;
   }
   private async apply(input: PersonalInput, decision: Decision): Promise<PersonalResponse> {
@@ -349,7 +370,11 @@ export class PersonalHost {
       }
       return { text: '正在停止任务，已有影响未撤销。', taskId: task.id };
     }
-    const requirement = decision.text ?? input.text;
+    return this.updateRequirements(input, task.id, decision.text ?? input.text);
+  }
+  async updateRequirements(input: PersonalInput, taskId: string, requirement = input.text): Promise<PersonalResponse> {
+    const task = this.getTask(taskId);
+    if (!task || task.actorId !== input.actorId || task.conversationId !== input.conversationId || task.contextExcluded || task.cancelRequested) throw new Error('补充要求不属于此有效工作');
     if (!['queued', 'running', 'waiting'].includes(task.status)) return { text: '该任务已结束，请创建新任务。', taskId: task.id };
     const requirementInput = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
     if (task.requirementInputs?.includes(requirementInput)) return { text: '补充要求已接收；不会重复改向。执行状态可查询。', taskId: task.id };
@@ -386,7 +411,7 @@ export class PersonalHost {
     return this.store.listAgreements().filter(rule => rule.actorId === input.actorId && rule.state === 'active' && rule.scope.kind === 'global');
   }
   proposeAgreement(input: PersonalInput, change: AgreementChange): PersonalResponse {
-    if (input.origin || !['save', 'edit', 'revoke'].includes(change.operation)) throw new Error('工作约定只接受真实用户输入的明确操作');
+    if (input.origin === 'plan' || !['save', 'edit', 'revoke'].includes(change.operation)) throw new Error('工作约定只接受真实用户输入的明确操作');
     const task = this.workContext(input).current(); const existing = change.id ? this.store.listAgreements().find(rule => rule.id === change.id && rule.actorId === input.actorId && this.agreements(task.id).some(value => value.id === rule.id)) : undefined;
     if (change.operation !== 'save' && !existing) throw new Error('约定不存在、已撤销或不属于当前作用域');
     const scope = change.scope ?? existing?.scope ?? { kind: 'work' as const, id: task.rootTaskId ?? task.id };
@@ -408,7 +433,7 @@ export class PersonalHost {
     if (!record || !task || task.contextExcluded || task.actorId !== input.actorId || task.conversationId !== input.conversationId || record.revision !== task.revision || record.status !== 'pending') return { text: '确认已失效或不属于此对话，请核对具体动作。' };
     if (task.cancelRequested || record.proposedInputId === input.inputId) return { text: '权限提案必须等待用户后续明确确认，已取消工作不能扩大权限。' };
     if (record.action.kind === 'working-agreement') {
-      if (input.origin || approved && input.text.trim() !== `确认动作 ${record.id}` || !approved && input.text.trim() !== `拒绝动作 ${record.id}`) return { text: `请按所展示的内容和范围明确回复：确认动作 ${record.id}，或拒绝动作 ${record.id}` };
+      if (input.origin === 'plan' || approved && input.text.trim() !== `确认动作 ${record.id}` || !approved && input.text.trim() !== `拒绝动作 ${record.id}`) return { text: `请按所展示的内容和范围明确回复：确认动作 ${record.id}，或拒绝动作 ${record.id}` };
       if (!approved) { record.status = 'denied'; this.store.putAction(record); return { text: '已拒绝保存此工作约定。', taskId: task.id }; }
       const change = record.action.parameters as unknown as AgreementChange & { content: string; expectedRevision?: number };
       const prior = this.store.listAgreements().find(rule => rule.id === record.action.target);

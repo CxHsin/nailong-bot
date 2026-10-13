@@ -30,6 +30,7 @@ export interface Task {
   originInput?: PersonalInput;
   contextPacket?: ContextPacket;
   contextRequestId?: string;
+  presentedRequirements?: { revision: number; receipt: SessionReceipt };
 }
 export interface PermissionGrant {
   mode: 'restricted' | 'trusted'; readRoots: string[]; writeRoots: string[]; network: boolean;
@@ -38,6 +39,8 @@ export interface PermissionGrant {
 export interface WorkToolContext {
   task: Task; eventId?: string;
   current(): Task;
+  presentRequirements?(revision: number, receipt: SessionReceipt): void;
+  queryWork?(taskId?: string): Task;
   requestAction(action: ActionSpec): Promise<boolean>;
   proposePermission(grant: Omit<PermissionGrant, 'revision' | 'sourceInputId'>): Promise<boolean>;
   dispatch<T>(callId: string, action: ActionSpec, execute: () => Promise<T>): Promise<T>;
@@ -82,7 +85,8 @@ export interface ActionDispatch {
   startedAt: number; finishedAt?: number; evidence?: string;
 }
 export interface PersonalInput { conversationId: string; actorId: string; text: string; inputId: string; replyTaskId?: string;
-  origin?: 'plan';
+  control?: 'steer';
+  origin?: 'plan' | 'local-interactive';
   receivedAt?: number;
   images?: Array<{ type: 'image'; mimeType: string; data: string }>; }
 export interface Plan {

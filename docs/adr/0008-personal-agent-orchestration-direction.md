@@ -4,6 +4,8 @@ status: accepted
 
 # Personal Agent 统一组织工作
 
+2026-10-13 后续底座决定：[ADR-0009](0009-runtime-work-context.md) 与[规格 #189](https://github.com/CxHsin/nailong-bot/issues/189)替代下文对所有入口默认受限、模型手填要求版本及非成功报告的现行约束。本文保留 #167 的方向和当时实现证据；本地交互目录与模式、Runtime 要求呈现职责以 ADR-0009 为准。
+
 2026-10-12 方向讨论，2026-10-13 用户调用 to-spec 将已确认设计转为规格。[设计结论 #166](https://github.com/CxHsin/nailong-bot/issues/166)、[规格 #167](https://github.com/CxHsin/nailong-bot/issues/167) 是讨论及实现规格的权威记录。本方向已按 #168–#173 在 development 实现；实际保证和未验证项见下方实现记录及[本轮验收](../personal-agent-acceptance-20261013.md)。[ADR-0007](0007-personal-host-native-sessions.md) 保留 #157 历史基线。讨论源：[Grok Bot 架构文章](https://www.joyehuang.me/blog/20261011---alwaysonagents/post)、[Akasha 专项调研](../research/akasha-personal-memory-2026-10-12.md)。
 
 ## 已确认的方向

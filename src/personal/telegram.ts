@@ -1,7 +1,7 @@
 import { InputFile, type Bot } from 'grammy';
 import type { ImageContent } from '@mariozechner/pi-ai';
 import { registerTelegramInput } from '../telegram/telegram-input.js';
-import { createPlainChannel } from './channels.js';
+import { createPlainChannel, parseInputControl } from './channels.js';
 import type { PersonalHost } from './host.js';
 import type { Delivery } from './types.js';
 import { richReplyPages, textOnlyMarkdown } from '../telegram/rich-reply.js';
@@ -38,9 +38,10 @@ export function createPersonalTelegram(options: { bot: Bot; ownerId: number; hos
     onDelivered: options.onDelivered, reportFailure: options.reportFailure });
   const input = registerTelegramInput(bot, { ownerId, download: options.download, reportFailure: options.reportFailure,
     handle: async (update, started) => {
+      const control = parseInputControl(update.text ?? '请分析这张图片。');
       const pending = channel.receive({ conversationId, actorId: `telegram:${update.userId}`, inputId: String(update.messageId),
-        text: update.text ?? '请分析这张图片。', images: update.images,
-        replyTaskId: update.replyToMessageId === undefined ? undefined : host.resolveReply(conversationId, String(update.replyToMessageId)) });
+        ...control, images: update.images,
+        replyTaskId: control.replyTaskId ?? (update.replyToMessageId === undefined ? undefined : host.resolveReply(conversationId, String(update.replyToMessageId))) });
       started();
       await pending;
     } });

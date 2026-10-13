@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { capabilityEnvironment } from '../agent/capability-config.js';
 import { createAgentModels } from '../agent/agent-models.js';
 import { modelEnvironment } from '../agent/model-config.js';
@@ -145,6 +146,18 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
     plans = new PersonalPlans(host);
     await host.recover();
     return { host, plans, pi: agent, memory, dataDir, backendDiagnostics: backendRegistry.diagnostics,
+      openLocalConversation(options: { actorId: string; cwd?: string; conversationId?: string; mode?: 'trusted' | 'restricted' }) {
+        const cwd = resolve(options.cwd ?? process.cwd());
+        const conversationId = options.conversationId ?? `cli:${options.actorId}:${createHash('sha256').update(process.platform === 'win32' ? cwd.toLowerCase() : cwd).digest('hex').slice(0, 24)}`;
+        const existing = store.conversationWorkspace(conversationId);
+        if (existing && existing.actorId !== options.actorId) throw new Error('本地会话属于另一个用户');
+        const historical = store.listTasks(conversationId).find(task => task.actorId === options.actorId && task.cwd);
+        const workspace = existing ?? { actorId: options.actorId, cwd: historical?.cwd ?? cwd, mode: historical ? historical.permission?.mode ?? 'restricted' : options.mode ?? 'trusted', modeSource: 'local-interactive' as const };
+        // Explicit launch choices affect new work only; historical Task grants remain unchanged.
+        if (options.mode) workspace.mode = options.mode;
+        store.putConversationWorkspace(conversationId, workspace);
+        return conversationId;
+      },
       async onDelivered(delivery: Delivery) {
         if (delivery.parentId || !delivery.learning || delivery.status !== 'sent') return;
         if (delivery.taskId && host.getTask(delivery.taskId)?.contextExcluded) return;

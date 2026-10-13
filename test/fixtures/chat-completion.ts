@@ -29,7 +29,7 @@ export function sendMainContinuation(res: ServerResponse, wire: { tools?: Array<
   else if (last.tool_call_id === 'main_complete_work') sendChatCompletion(res, 'main reviewed');
   else {
     const denied = !artifact || text(last.content).includes('持久数据') || text(last.content).includes('授权目录');
-    call('complete_work', { outcome: stale || denied || !event.result?.verified ? 'blocked' : 'completed', reviewedRevision: root.revision,
+    call('complete_work', { outcome: stale || denied || !event.result?.verified ? 'blocked' : 'completed',
       text: stale ? '实际内容仍为 42，不满足最新要求 84；验收期间要求发生变化。' : event.result?.text ?? '工作受阻', artifacts: denied ? [] : [artifact], sources: event.result?.sources?.map((source: { reference: string }) => source.reference), uncertainties: event.result?.uncertainties });
   }
   return true;

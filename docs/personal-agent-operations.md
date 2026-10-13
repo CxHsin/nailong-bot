@@ -1,6 +1,18 @@
 # Personal Agent 操作与验收
 
-更新：2026-10-13，当前规格 [#167](https://github.com/CxHsin/nailong-bot/issues/167)，入口见 [README](../README.md)，当前证据见[本轮验收](personal-agent-acceptance-20261013.md)。2026-10-12 #157 的 `d03422048b6a22502e8ac1952ae3d3a434612bc1` 是历史重构基线。
+更新：2026-10-13，当前底座规格 [#189](https://github.com/CxHsin/nailong-bot/issues/189)，入口见 [README](../README.md)，工作上下文边界见 [ADR-0009](adr/0009-runtime-work-context.md)。[#167 验收](personal-agent-acceptance-20261013.md)与 2026-10-12 #157 的 `d03422048b6a22502e8ac1952ae3d3a434612bc1` 保留各自历史基准。
+
+## 本地交互工作上下文（#189）
+
+`npm run chat` 新会话使用启动目录，默认 full access；`--restricted` 主动选择受限模式，`--full-access` 显式选择可信模式，两者互斥且仅适用于 `chat`。默认会话按项目区分；显式 `--conversation-id` 重开保存的会话时，仍使用其原目录与模式。显式模式切换用于随后新 Task，既有 Task 保留授权。`send`、Telegram 和计划不因本地默认变更自动提权。
+
+提示中的 cwd、项目指令加载、文件相对路径、Shell 和默认帮手共用实际工作目录。Session 存储位置单独管理。full access 继承启动账户权限，不以目录根或授权有效期模拟隔离；受限模式继续检查物理路径及后端能力。用户的当前指令约束工作范围，full access 不等于用户已经交办所有可执行操作。
+
+Runtime 在实际模型请求上下文中关联工作要求并保留呈现凭据，模型不提交内部版本数字。补充要求先保存，在工具轮次结束后的请求中呈现；未呈现的新要求不能被旧完成意图结算，已有影响与材料保留。只读工作查询在当前工具循环中返回状态，可重复且不占变更提案。当前实现证据见 [#189 底座验收](personal-foundation-acceptance-20261013.md)。
+
+当前轮次运行中，可通过 CLI 或 Telegram 的 `/steer TaskID 补充要求` 明确提交补充；它直接持久保存，不需要先等本轮模型识别意图。普通文本及回复关联仍走已有意图处理，不把查询或停止误判为补充。TaskID 与 actor、conversation 的访问边界照常检查。
+
+工具错误直接返回模型，允许修正、继续或普通回复说明原因；失败说明不要求成果清单，也不为证明失败重新读取受阻目标。普通回答结束不自动完成 Task，需要持久生命周期的工作仍通过明确完成意图及必要成果检查落账。停止、未知效果、资源占用、预算和 Delivery 的恢复规则继续保留。Pi Durable 尚未接入，后续独立验证。
 
 ## 配置
 
@@ -52,6 +64,8 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 ### 业务 schema 升级（#168）
 
+#191 将业务 schema 升为版本 4，新增保存本地会话目录、actor、模式与模式来源的工作上下文。沿用一致备份升级；历史 Task 不因此换目录或扩大授权。下面保留版本 1–3 的演进说明。
+
 2026-10-13 新增独立 `personal_schema`；#168 引入版本 1，#171 升为版本 2，新增持久全局/整体目标预算；#172 升为版本 3，保存工作约定及修订。打开已有 `personal.sqlite` 时，Host 先取得数据目录所有权，再用 SQLite `VACUUM INTO` 将包含已提交 WAL 页的一致快照写入 `personal-schema-backups/`，同步备份文件并检查完整性后才提交升级。备份失败会关闭数据库并释放所有权；高于当前代码支持的版本拒绝启动。已成功升级的目录重启不再备份或重复迁移。
 
 旧 Task 增加整体工作身份及自身 root 身份；原 Task、Attempt、Plan、Session、Delivery、原文和排除记录保留。旧 Attempt 的实际要求版本与旧成果产生版本无法从当前 Task 修订号推知，因此保持未知。历史 Session 导入清单不参与业务升级，也不会重新导入。#172 独立 personal-memory.sqlite schema v1 使用相同一致快照机制保存召回、实际呈现及学习事实；业务备份不替代记忆备份。旧完成成果不创建新的交付；待交付及 unknown 记录保持。
@@ -64,7 +78,7 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 主 Session 的 `delegate_work` 创建研究或整理帮手。编码读取项目 herdr-workflow skill，通过现有 Shell 调用 CLI；配置与权限见[能力说明](capabilities.md)，真实验收见[记录](personal-herdr-skill-acceptance-20261013.md)。旧固定执行器已退役；历史 herdr Task 保留身份，未知状态不重派、不改派本地，不推断完成或停止。其他帮手的恢复和资源保证保留。
 
-结果先结算进唯一事件，再通过原生 `nailong_work_result` 自定义 Session 消息回本体。它保持执行材料身份，不进入 Host 用户输入、检索触发或学习轮次。已排队的真实用户消息先处理；同一主 Session 串行打开。整体补充要求创建持久 `requirements_changed` 事件，本体通过相关帮手控制工具选择目标，不广播全部孩子。整体完成由 `complete_work` 显式提出，Host 在实际材料检查后重读要求版本及取消/活跃孩子；旧版本只保留材料。轻量本体文件工作也通过该工具及实际用户 Session 条目/完成标记结算。
+结果先结算进唯一事件，再通过原生 `nailong_work_result` 自定义 Session 消息回本体。它保持执行材料身份，不进入 Host 用户输入、检索触发或学习轮次。已排队的真实用户消息先处理；同一主 Session 串行打开。整体补充要求创建持久 `requirements_changed` 事件，本体通过相关帮手控制工具选择目标，不广播全部孩子。整体完成由 `complete_work` 显式提出，Host 在实际材料检查后重读要求版本及取消/活跃孩子；旧版本只保留材料。需要整体完成的轻量文件工作通过该意图及实际 Session 呈现/完成回执结算；普通回答与失败解释无需提交该工具。
 
 研究使用 `submit_material` 提交本地原文路径或受控远端 receiptId、匹配的摘录、支持结论及不确定性；本地文件按 local 标记，不冒充远端来源。远端来源需成功受控检索回执，包含 URL 与真实 provider-returned payload 摘要，孩子及本体从同 root 账本核验；没有回执的 URL 或生成文件不构成远端证据。无效已声明材料保持 partial，不能被其他有效文件掩盖。整理通过受控文件移动/删除的前后路径、SHA256 与数量凭据检查实际变化；目录创建或任意 manifest 不能单独通过。编码验收保留实际检查与文件摘要、原始子任务修订号和父要求版本，文件在检查后改变或旧父要求不匹配时保持 partial。整体通过后冻结交付文件，本体最终交付才关联原始用户输入；计划触发不伪造用户学习轮次。
 
@@ -78,9 +92,9 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 working_agreements 按需原生发现，支持工作/项目/明确全局的内容、修订和撤销。保存前展示内容和范围，用户后续“确认动作 ID”或“拒绝动作 ID”处理，模型 approved 参数不能伪造用户确认；约定不扩大权限。计划专用操作同样通过原生发现 plan_control，不放进常驻 task_control schema。
 
-后端诊断通过 runtime.backendDiagnostics 返回候选身份和失败原因，配置/evidence 不来自模型。当前 unelevated 只有部分写边界，未实现完整受限 execute；默认受限命令继续受阻。Shell 与结构化独立检查分别核对当前范围、模式、版本与身份；supports 等待期间缩小授权会阻止派发，外部 Agent 目标变化需重新核验原授权。可信 Shell 仍继承本机权限。具体证据格式见 execution-backends.ts 的 CodexProbeEvidence，版本不支持/过期/文件 hash 或 OS release 变化不沿用证据。
+后端诊断通过 runtime.backendDiagnostics 返回候选身份和失败原因，配置/evidence 不来自模型。当前 unelevated 只有部分写边界，未实现完整受限 execute；主动受限及其他受限入口的命令继续受阻。Shell 与结构化独立检查分别核对当前范围、模式、版本与身份；supports 等待期间缩小授权会阻止派发，外部 Agent 目标变化需重新核验原授权。可信 Shell 仍继承本机权限。具体证据格式见 execution-backends.ts 的 CodexProbeEvidence，版本不支持/过期/文件 hash 或 OS release 变化不沿用证据。
 
-unknown/dispatching 保持工作占用，新 callId 和新委派不能重复未知效果。人工先核对既有结果、实际执行身份及 Delivery；确认没有效果之后仍需通过明确恢复决策继续，不能删除账本或篡改回执把 unknown 改成成功。没有完全验证的终止结果不能释放资源。默认新目标不继承旧可信权限。
+unknown/dispatching 保持工作占用，新 callId 和新委派不能重复未知效果。人工先核对既有结果、实际执行身份及 Delivery；确认没有效果之后仍需通过明确恢复决策继续，不能删除账本或篡改回执把 unknown 改成成功。没有完全验证的终止结果不能释放资源。新目标不继承无关旧 Task 的可信权限；本地交互的新 Task 使用该会话明确保存的启动模式。
 
 ## 验证证据
 

@@ -1,6 +1,6 @@
 # Nailong Bot Agent Context
 
-Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI share a Host; lightweight work uses the main Session and independent helpers return materials to it. Current architecture: [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md), with [implementation evidence and limits](docs/personal-agent-acceptance-20261013.md).
+Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI share a Host; lightweight work uses the main Session and independent helpers return materials to it. Work-context boundaries: [ADR-0009](docs/adr/0009-runtime-work-context.md), extending [ADR-0008](docs/adr/0008-personal-agent-orchestration-direction.md). Earlier implementation evidence: [#167 acceptance](docs/personal-agent-acceptance-20261013.md).
 
 ## Language
 
@@ -14,9 +14,13 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Host**: Channel-independent owner of durable inputs, Tasks, scheduling, authorization, recovery, acceptance and Delivery. Business records are direct SQLite state.
 
+**Runtime**: The agent execution loop that assembles model context, invokes the model and executes tools. It associates each result with the work requirements actually presented; receiving a requirement is separate from presenting it.
+
 **Channel**: Authenticates input and delivers text or files. Telegram renders Markdown rich messages and temporary public reply previews; previews are not Delivery facts. Owns no agent loop or task state.
 
-**Conversation**: Durable identity selecting a main Pi Session and scoped Akasha sources. Actor identity separately authorizes task operations.
+**Conversation**: Durable identity selecting a main Pi Session, saved work directory and execution mode, and scoped Akasha sources. Actor identity separately authorizes task operations.
+
+**Work Directory**: The directory used to interpret relative work paths and project instructions. Local interactive work starts from the launch directory; reopening existing work preserves its directory. It is separate from Session storage and is not itself a permission boundary.
 
 **Task**: Durable overall work or child delegation: goal, parent/root identity, current requirements and revision, resources, permission, executor, status and result. Its identity survives attempts and restart. Avoid Run as a synonym.
 
@@ -34,7 +38,7 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Action Authorization**: Exact action kind, target, parameters and content under a Task revision. A consumed approval cannot dispatch twice; changed scope needs confirmation.
 
-**Work Permission**: User-confirmed read/write roots, network access, expiry and restricted/trusted execution mode. A child can only narrow its parent's grant. Discovery and remembered instructions do not grant authority; trusted Shell inherits Host authority.
+**Work Permission**: The execution authority granted to work: restricted read/write roots, network access and expiry, or trusted local access. Local interactive startup defaults to full access; other entries and saved work keep their own grants. A child can only narrow its parent's grant. Discovery and remembered instructions do not grant authority; trusted execution inherits the starting account's authority.
 
 **Work Event**: Durable material addressed to a parent work, with unique identity and Session injection/completion receipts. Child completion, overall completion and Delivery remain separate facts. An unknown effect pauses later dispatches even with a new call ID.
 
@@ -45,6 +49,8 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 **Plan**: Explicit user instruction with time/dependency trigger, timezone, deadline and missed-trigger policy. Consumption and Task creation are atomic.
 
 **Acceptance**: Purpose-specific inspection of actual research sources, file changes or coding artifacts and checks against current requirements. The main Session judges the overall goal; idle and executor assertions alone cannot establish success. Invalid declared sources preserve partial results even when another artifact is valid.
+
+**Completion Intent**: An explicit judgment that an overall Task is complete, associated by Runtime with the presented requirements and checked by Host. An ordinary answer ending, a tool error explanation and a child result do not establish overall completion.
 
 **Delivery**: Durable text/file send with sent/rejected/unknown outcome, separate from Task success. Split pages have individual outcomes.
 

@@ -173,8 +173,9 @@ test('confirmed delivery learns the presented originals after restart once', asy
   assert.equal(evidence.length, 1); assert.equal((evidence[0]!.activated as unknown[]).length, 1);
 });
 
-test('working agreements require exact human confirmation, persist scope, and never grant permissions', async t => {
+for (const origin of [undefined, 'local-interactive'] as const) test(`working agreements require exact human confirmation, persist scope, and never grant permissions (${origin ?? 'channel'})`, async t => {
   const run = await fixture(t, (_wire, response) => sendChatCompletion(response, 'done'));
+  Object.assign(run.input, { origin });
   await run.host.submit(run.input);
   const work = run.host.workContext(run.input); const before = work.current().permission;
   const proposal = run.host.proposeAgreement(run.input, { operation: 'save', content: '报告使用中文', scope: { kind: 'work', id: work.task.id } });

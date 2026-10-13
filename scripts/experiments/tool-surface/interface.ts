@@ -7,7 +7,7 @@ import type { PersonalPiOptions } from '../../../src/personal/pi.js';
 import { checkFile } from '../../../src/personal/permissions.js';
 
 export type Variant = 'independent' | 'skill_cli';
-export type Trace = { sessionId: string; operation: string; status: 'ok' | 'error' };
+export type Trace = { sessionId: string; operation: string; status: 'ok' | 'error'; target?: string };
 export type Surface = { sessionId: string; names: string[]; schemaBytes: number; instructionBytes: number };
 const hidden = new Set(['file_operation', 'work_permission', 'send_message', 'task_control', 'delegate_work', 'complete_work', 'child_control', 'memory_search', 'memory_read']);
 const commands: Record<string, [string, Record<string, unknown>]> = {
@@ -40,7 +40,7 @@ function words(command: string) {
 }
 
 export function experimentInterface(options: {
-  variant: Variant; root: string; dataDir: string; skillFile: string; surfaces: Surface[]; trace: Trace[];
+  variant: Variant; root: string; dataDir: string; skillFile: string; workflow?: 'inline' | 'skill'; surfaces: Surface[]; trace: Trace[];
   confirmPending: () => Promise<boolean>;
 }): NonNullable<PersonalPiOptions['sessionInterface']> {
   return setup => {
@@ -48,7 +48,7 @@ export function experimentInterface(options: {
     if (!setup.work || !setup.tools.some(tool => tool.name === 'complete_work')) return { tools: setup.tools, instructions: setup.instructions };
     const getWork = setup.work;
     const originals = new Map(setup.tools.map(tool => [tool.name, tool]));
-    async function invoke(name: string, args: Record<string, unknown>, callId: string, signal: Parameters<ToolDefinition['execute']>[2], update: Parameters<ToolDefinition['execute']>[3], context: Parameters<ToolDefinition['execute']>[4], automatic = options.variant === 'skill_cli') {
+    async function invoke(name: string, args: Record<string, unknown>, callId: string, signal: Parameters<ToolDefinition['execute']>[2], update: Parameters<ToolDefinition['execute']>[3], context: Parameters<ToolDefinition['execute']>[4], automatic = true) {
       try {
       const tool = originals.get(name); if (!tool) throw new Error(`Unavailable operation: ${name}`);
       if (!Value.Check(tool.parameters, args)) throw new Error(`Invalid arguments for ${name}`);
@@ -81,7 +81,7 @@ export function experimentInterface(options: {
           const approved = await options.confirmPending();
           result = reply(JSON.stringify({ granted: approved, note: approved ? '用户已批准本次具体权限；当前工作权限已更新' : '用户拒绝本次权限提案；权限未扩大' }));
         }
-        options.trace.push({ sessionId: setup.scope.sessionId, operation: name, status: 'ok' }); return result;
+        options.trace.push({ sessionId: setup.scope.sessionId, operation: name, status: 'ok', ...(name === 'read' ? { target: await physical(resolve(getWork().current().cwd!, String(args.path))) } : {}) }); return result;
       } catch (error) { options.trace.push({ sessionId: setup.scope.sessionId, operation: name, status: 'error' }); throw error; }
     }
     const originalBash = originals.get('bash')!;
@@ -119,7 +119,8 @@ export function experimentInterface(options: {
     const instructions = options.variant === 'independent' ? setup.instructions : setup.instructions
       .replace(/默认受限，没有满足边界的命令后端时受阻；可信模式仅通过向用户展示具体 work_permission 提案并获得随后明确确认授予。可信 Shell 继承 Host 权限，不能保证禁止删除或外发；删除原件和外发使用受控工具获得明确授权。/g, '实验终端执行帮助列出的有界命令。文件权限扩展由系统根据具体操作提出，获得用户确认后继续。')
       .replace(/delegate_work/g, 'agentctl work delegate').replace(/complete_work/g, 'agentctl work complete')
-      + `\n实验工作接口：文件、历史、委派及结算按需读取 ${options.skillFile}。使用技能里的 agentctl 命令；权限由系统根据具体操作提出，不能自行授权。`;
+      + (options.workflow === 'skill' ? `\n实验工作接口：文件、历史、委派及结算按需读取 ${options.skillFile}。` : '\n实验工作接口：agentctl GROUP OPERATION \'JSON_OBJECT\'；用 agentctl work --help 或 agentctl memory --help 获取对应参数。')
+      + '\n权限由系统根据具体操作提出，不能自行授权。';
     options.surfaces.push({ sessionId: setup.scope.sessionId, names: tools.map(tool => tool.name), schemaBytes: Buffer.byteLength(JSON.stringify(tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters })))), instructionBytes: Buffer.byteLength(instructions) });
     return { tools, instructions };
   };

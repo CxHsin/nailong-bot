@@ -100,5 +100,13 @@ export function createPlainChannel(options: {
 }
 
 export function cliInput(text: string, conversationId: string, actorId: string): PersonalInput {
-  return { text, conversationId, actorId, inputId: randomUUID() };
+  return { ...parseInputControl(text), conversationId, actorId, inputId: randomUUID(), origin: 'local-interactive' };
+}
+
+/** Explicit control syntax is shared by channels; ordinary replies remain model input. */
+export function parseInputControl(text: string): Pick<PersonalInput, 'text' | 'replyTaskId' | 'control'> {
+  const match = /^\/steer\s+(\S+)\s+([\s\S]+)$/.exec(text.trim());
+  if (match) return { text: match[2]!, replyTaskId: match[1]!, control: 'steer' };
+  if (/^\/steer(?:\s|$)/.test(text.trim())) throw new Error('用法：/steer TASK_ID 补充要求');
+  return { text };
 }

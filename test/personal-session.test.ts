@@ -123,10 +123,11 @@ test('Host gates exact commands, resumes files once, and keeps opaque cancellati
     const wire = JSON.parse(body);
     if (sendMainContinuation(response, wire)) return;
     if (wire.tools?.some((tool: { function: { name: string } }) => tool.function.name === 'task_control')) {
-      const current = JSON.stringify(wire.messages.at(-1)?.content);
+      const content = wire.messages.at(-1)?.content;
+      const current = (typeof content === 'string' ? content : content?.map((part: { text?: string }) => part.text ?? '').join('\n') ?? '').split('用户输入：\n').at(-1)!;
       if (wire.messages.at(-1)?.role === 'tool') return sendChatCompletion(response, '已提交');
-      if (/用户输入：\\n停止任务 /.test(current)) return toolCall(response, 'task_control', { kind: 'cancel', taskId: /停止任务 ([a-f0-9-]+)/.exec(current)?.[1] });
-      if (/用户输入：\\n确认动作 /.test(current)) {
+      if (/^停止任务 /.test(current)) return toolCall(response, 'task_control', { kind: 'cancel', taskId: /停止任务 ([a-f0-9-]+)/.exec(current)?.[1] });
+      if (/^确认动作 /.test(current)) {
         const id = /确认动作 ([a-f0-9-]+)/.exec(current)?.[1];
         return toolCall(response, 'task_control', { kind: 'authorize', actionId: id, approved: true });
       }

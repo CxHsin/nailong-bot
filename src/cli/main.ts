@@ -8,8 +8,9 @@ import { parseCliArgs } from './cli-channel.js';
 async function main() {
   const args = parseCliArgs(process.argv.slice(2));
   const actorId = process.env.AGENT_ACTOR_ID?.trim() || 'cli';
-  const conversationId = args.conversationId ?? `cli:${actorId}`;
   const runtime = await createPersonalRuntime();
+  try {
+  const conversationId = args.command === 'chat' ? runtime.openLocalConversation({ actorId, conversationId: args.conversationId, mode: args.mode }) : args.conversationId ?? `cli:${actorId}`;
   const channel = createPlainChannel({ host: runtime.host, accepts: id => id === conversationId,
     sendText: async (text, delivery) => { stdout.write(`${args.json ? JSON.stringify({ type: 'message', ...delivery, text }) : text}\n`); return delivery.id; },
     sendFile: async (path, delivery) => { stdout.write(`${args.json ? JSON.stringify({ type: 'file', path, taskId: delivery.taskId }) : `文件：${path}`}\n`); return delivery.id; },
@@ -20,7 +21,7 @@ async function main() {
   try {
     await channel.recover();
     if (args.command === 'send') {
-      const input = cliInput(args.text ?? '', conversationId, actorId);
+      const input = cliInput(args.text ?? '', conversationId, actorId); input.origin = undefined;
       if (args.imagePath) {
         const bytes = await readFile(args.imagePath);
         input.images = [{ type: 'image', mimeType: args.imagePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg', data: bytes.toString('base64') }];
@@ -40,7 +41,8 @@ async function main() {
       } finally { reader.off('SIGINT', interrupt); reader.close(); }
     }
     await channel.flush();
-  } finally { clearInterval(timer); await tickTail; await channel.close(); await runtime.close(); }
+  } finally { clearInterval(timer); await tickTail; await channel.close(); }
+  } finally { await runtime.close(); }
 }
 
 main().catch(error => { stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; });
