@@ -9,6 +9,21 @@ import { PersonalStore } from '../src/personal/store.js';
 import { PersonalHost } from '../src/personal/host.js';
 import type { Decision, TaskExecution } from '../src/personal/types.js';
 
+test('retired fixed herdr start creates no task and legacy queued herdr never redispatches', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'personal-retired-herdr-'));
+  const store = new PersonalStore(directory); let executions = 0;
+  const host = new PersonalHost({ store, dialogue: { async decide() { return { kind: 'start', goal: 'code', executor: 'herdr' }; } },
+    executor: { async execute() { executions++; return { text: 'wrong executor', verified: true }; } } });
+  try {
+    await host.submit({ conversationId: 'c', actorId: 'a', inputId: 'new', text: 'code' });
+    await host.waitForIdle(); assert.equal(host.listTasks().length, 0); assert.equal(executions, 0);
+    store.putTask({ id: 'legacy', conversationId: 'c', actorId: 'a', goal: 'old code', executor: 'herdr', sessionId: 'old', status: 'queued', resources: [], requirements: [], revision: 0, createdAt: 1, updatedAt: 1 });
+    await host.recover(); await host.waitForIdle();
+    assert.equal(executions, 0); assert.equal(host.getTask('legacy')?.status, 'waiting');
+    assert.equal(store.listAttempts('legacy').length, 0); assert.equal(host.getTask('legacy')?.result, undefined);
+  } finally { await host.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('Host accepts a goal and makes verified results retrievable without replay', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'personal-host-'));
   const store = new PersonalStore(directory);

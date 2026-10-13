@@ -10,6 +10,25 @@ import { sendChatCompletion, sendMainContinuation } from './fixtures/chat-comple
 import { createTestServer } from './fixtures/http-server.js';
 import type { PersonalHost } from '../src/personal/host.js';
 
+test('production reopening preserves legacy herdr identity without local execution or confirmed cancellation', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nailong-retired-runtime-'));
+  const promptFile = join(directory, 'prompt.md'); await writeFile(promptFile, 'Help.');
+  const env = { AGENT_DATA_DIR: join(directory, 'data'), AGENT_PROMPT_FILE: promptFile,
+    MODEL_NAMES: 'test', MODEL_DEFAULT: 'test', MODEL_TEST_API_KEY: 'test', MODEL_TEST_API: 'openai-completions', MODEL_TEST_MODEL: 'test', MODEL_TEST_BASE_URL: 'http://127.0.0.1:1' };
+  let runtime = await createPersonalRuntime(env);
+  const identity = { kind: 'herdr', session: 'old', paneId: 'old:p1', agentName: 'old-agent', taskId: 'legacy' };
+  try {
+    runtime.host.store.putTask({ id: 'legacy', conversationId: 'c', actorId: 'a', goal: 'legacy coding', executor: 'herdr', sessionId: 'legacy-session', status: 'running', resources: [directory], resourceHeld: true, requirements: [], revision: 0, createdAt: 1, updatedAt: 1 });
+    runtime.host.store.putAttempt({ id: 'old-attempt', taskId: 'legacy', sessionId: 'legacy-session', status: 'running', startedAt: 1, identity });
+    await runtime.close(); runtime = await createPersonalRuntime(env);
+    assert.equal(runtime.host.getTask('legacy')?.status, 'waiting'); assert.equal(runtime.host.getTask('legacy')?.resourceHeld, true);
+    assert.equal(runtime.host.getTask('legacy')?.result, undefined); assert.deepEqual(runtime.host.store.listAttempts('legacy')[0]?.identity, identity);
+    assert.equal(runtime.host.store.listAttempts('legacy').length, 1);
+    await runtime.host.cancelWork('legacy');
+    assert.notEqual(runtime.host.getTask('legacy')?.status, 'cancelled'); assert.equal(runtime.host.getTask('legacy')?.resourceHeld, true);
+  } finally { await runtime.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 function confirmScope(host: PersonalHost) {
   for (const action of host.store.listActions().filter(action => action.status === 'pending' && action.action.kind === 'permission-grant')) { const task = host.getTask(action.taskId)!; host.authorizeAction({ conversationId: task.conversationId, actorId: task.actorId, inputId: `explicit-scope-confirmation:${action.id}`, text: 'Confirm this exact scope' }, action.id, true); }
 }

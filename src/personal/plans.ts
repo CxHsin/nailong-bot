@@ -9,6 +9,7 @@ export class PersonalPlans {
   async handle(input: PersonalInput, decision: Decision): Promise<PersonalResponse> {
     if (decision.kind === 'schedule') {
       const spec = decision.plan;
+      if (spec.executor === 'herdr') return { text: '固定 herdr 计划入口已退役；编码委托使用项目 skill，旧计划需人工核实。' };
       try { if (typeof spec.timezone !== 'string' || !spec.timezone.trim()) throw new Error(); new Intl.DateTimeFormat('en', { timeZone: spec.timezone }).format(); }
       catch { return { text: '请明确有效时区后再创建计划。' }; }
       if (!spec.goal?.trim() || (!Number.isFinite(spec.dueAt) && !spec.afterTaskId) ||
@@ -42,6 +43,7 @@ export class PersonalPlans {
       if (!plan || plan.conversationId !== input.conversationId || plan.actorId !== input.actorId) return { text: '请明确要操作的计划。' };
       if (plan.contextExcluded && decision.action !== 'cancel') return { text: '计划上下文已因遗忘排除，请以新输入说明可使用的目标。' };
       if (decision.action === 'query') return { text: `${plan.id}：${plan.goal}\n状态：${plan.status}\n时区：${plan.timezone}` };
+      if (plan.executor === 'herdr' && ['resume', 'change'].includes(decision.action)) return { text: '固定 herdr 计划入口已退役；保留原记录，需人工核实。' };
       const operationInput = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
       if (plan.operationInputs?.includes(operationInput)) return { text: `计划操作已保存：${plan.status}；不会重复修改。` };
       if (plan.status === 'cancelled' || plan.status === 'completed') return { text: '计划已结束，请创建新计划。' };
@@ -92,6 +94,7 @@ export class PersonalPlans {
       const result = this.host.store.transaction(() => {
         const plan = this.host.store.getPlan<Plan>(candidate.id)!;
         if (plan.status !== 'active' || plan.contextExcluded) return;
+        if (plan.executor === 'herdr') { plan.status = 'waiting'; this.host.store.putPlan(plan); return; }
         const identified = plan.afterTaskId ? this.host.getTask(plan.afterTaskId) : undefined;
         const dependency = identified ? this.host.getTask(identified.rootTaskId ?? identified.id) : undefined;
         if (plan.afterTaskId && (dependency?.status !== 'completed' || dependency.contextExcluded)) return;

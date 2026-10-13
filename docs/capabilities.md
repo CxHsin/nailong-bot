@@ -14,6 +14,14 @@
 
 MCP 支持 Streamable HTTP 或 stdio，url/command 二选一；支持 headers 或 env/args。来源名不得重复或复用 local/memory/tinyfish。连接失败使启动失败并清理已建立连接。连接和列出目录不是任何工作的执行授权，关闭 Host 时释放连接。
 
+### 项目 herdr skill（#178）
+
+[配置示例](../config/capabilities.herdr.example.json) 登记 [herdr-workflow](../.agents/skills/herdr-workflow/SKILL.md)。设置 `AGENT_CAPABILITIES_FILE=config/capabilities.herdr.example.json`；已有配置时合并 `skillSources` 条目并保留其他能力。路径相对配置文件解析，移动配置文件时调整路径。主会话发现 skill 后读取完整文件，通过现有 `bash` 调用 herdr；不新建加载器或编排程序。
+
+`executionTool` 是可选的本地帮手能力开关，主会话 Shell 已提供；执行仍需当前工作的有效 Work Permission；项目可信约定通过现有 `working_agreements` 查看与撤销，约定不会直接授予 Shell 权限。Windows 默认 Pi Shell 为 Bash，skill 中的 PowerShell 片段通过 `pwsh -NoProfile -File` 运行。事先核对 Bash、pwsh、herdr 与所选编码 CLI 在 Host 环境可用，不改 CLI 全局默认。
+
+本次真实主 Session 闭环已通过，见[验收记录](personal-herdr-skill-acceptance-20261013.md)。固定 `HerdrExecutor` 已退役，保留 herdr 服务和 CLI；直接 CLI 帮手由 skill 查询和停止，Host 停止不自动代表外部进程已停止。历史 Task 保留实际身份并保守报告未知，不改派或重做。
+
 本体轻量文件操作懒创建持久的整体工作；每个新输入默认独立范围，只有明确回复关联的工作才复用权限。整体工作复用主 Session，但文件工具的相对路径指向独立工作目录。read/write/edit 和 file_operation 的 mkdir、移动普通文件验证实际物理路径、硬链接及运行数据保护。读写均保守拒绝多硬链接普通文件，防止目录内别名读取范围外原文或 Agent 持久数据。移动不覆盖已有目标。删除原件需具体对象确认；用户可在范围内自主读取和修改文件。
 
 work_permission 展示具体工作读目录、写目录、网络及有效期的提案。提案本身无权授予权限，只有随后由同一用户在同一对话确认具体动作后，Host 才持久保存；取消、过期及越界拒绝执行。工作补充要求保留既有目录和网络范围，旧具体动作批准仍因要求版本变化失效。普通新目标不继承其他工作的可信授权。
@@ -22,7 +30,7 @@ work_permission 展示具体工作读目录、写目录、网络及有效期的�
 
 一次工作明确获得可信本机权限后，普通 Shell 命令在该工作内自主执行，无需逐条命令确认。**可信 Shell 继承 Host 本机权限，不能强制保证不删除原件或不对外发送。** 本体应使用受控删除和发送接口获得相应明确授权；不能把目录写权限或提示词描述成语义隔离。配置 executionTool:true 仅允许 Task 提供命令工具，不替代工作权限。配置的独立检查以结构化 command/args 执行，同样匹配身份、当前目录/授权及能力；异步 supports 后再次核对权限快照。配置检查不构成受限权限绕过入口。
 
-远端 MCP 与 Shell 分开检查，未分类连接器需可信权限、网络授权及具体工具动作确认；其权限不由 Shell 沙箱提供。配置代码提供的受控能力适配器须有明确 authorizer，自行落实该工具的边界；这不是把发现记录当作授权。herdr 没有独立验证过的受限执行策略时，在创建外部工作区前阻止派发；可信执行仍需明确外部 Agent 的目标与影响。
+远端 MCP 与 Shell 分开检查，未分类连接器需可信权限、网络授权及具体工具动作确认；其权限不由 Shell 沙箱提供。配置代码提供的受控能力适配器须有明确 authorizer，自行落实该工具的边界；这不是把发现记录当作授权。项目 skill 直接调用 herdr 前须取得有效可信 Shell 权限，并明确外部 Agent 目标与影响。
 
 send_message 只向当前工作所属用户的当前对话报告完成、受阻或需决定的信息，不支持其他收件人或文件上传，无需重复审批普通本对话回复。它走持久 Delivery；unknown 保留待核对，不自动重发，分页与明确重交付继续由 Channel/Host 处理。子成果已通过工作事件回到主 Session，子完成不直接发送 Delivery。
 

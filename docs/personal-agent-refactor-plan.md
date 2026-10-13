@@ -1,5 +1,7 @@
 # Personal Agent 首轮落地核验与改动计划
 
+历史记录：固定执行器已由项目 skill 取代；当前入口见 [能力说明](capabilities.md)。旧实现基准见 [HerdrExecutor](https://github.com/CxHsin/nailong-bot/blob/3a7760bea6c7d85e233c3f0eae3eb592b144a958/src/personal/herdr.ts)。
+
 历史记录：本文保留 2026-10-12 的基准和当时证据，不表示 #167 统一工作流程已经实机复验。当前实现与未验证项见[2026-10-13 验收](personal-agent-acceptance-20261013.md)。
 
 2026-10-12，核验基准 development cceb6b8；本文新增前 HEAD 为 cceb6b8。目标及已确认行为见 [ADR-0008](adr/0008-personal-agent-orchestration-direction.md)。这是实现前方案，不表示运行时已经迁移，也不替代现有 [ADR-0007](adr/0007-personal-host-native-sessions.md) 的当前实现说明。

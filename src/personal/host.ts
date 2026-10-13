@@ -120,6 +120,7 @@ export class PersonalHost {
     };
   }
   delegateWork(parentId: string, spec: DelegationSpec, callId: string): Task {
+    if (spec.purpose === 'coding') throw new Error('编码委托使用项目 herdr-workflow skill 与 Shell；固定入口已退役。');
     const task = this.store.transaction(() => {
       const parent = this.getTask(parentId);
       if (!parent || parent.cancelRequested || parent.contextExcluded || ['completed', 'cancelled', 'failed'].includes(parent.status)) throw new Error('父工作已结束或取消');
@@ -138,7 +139,7 @@ export class PersonalHost {
       }
       if (!spec.goal.trim() || !['research', 'organization', 'coding'].includes(spec.purpose) || (spec.background?.length ?? 0) > 16_000) throw new Error('委派目标、成果类型或背景预算无效');
       const child = this.createTask({ conversationId: parent.conversationId, actorId: parent.actorId, inputId: parent.originInputId ?? id, text: spec.goal },
-        { kind: 'start', goal: spec.goal, cwd: spec.cwd ?? parent.cwd, resources: spec.resources, executor: spec.purpose === 'coding' ? 'herdr' : 'local', deadline: parent.deadline }, id);
+        { kind: 'start', goal: spec.goal, cwd: spec.cwd ?? parent.cwd, resources: spec.resources, executor: 'local', deadline: parent.deadline }, id);
       child.workKind = 'delegation'; child.parentTaskId = parent.id; child.rootTaskId = parent.rootTaskId ?? parent.id;
       child.delegationIdentity = identity;
       child.purpose = spec.purpose; child.parentRevision = parent.revision; child.background = spec.background;
@@ -293,6 +294,7 @@ export class PersonalHost {
     return this.enqueueTask(input, decision);
   }
   enqueueTask(input: PersonalInput, decision: Extract<Decision, { kind: 'start' }>): PersonalResponse {
+    if (decision.executor === 'herdr') return { text: '固定 herdr 入口已退役；编码工作使用项目 herdr-workflow skill 与 Shell。' };
     const key = JSON.stringify([input.conversationId, input.actorId, input.inputId]);
     const response = this.store.transaction(() => {
       const previous = this.store.getInput(key); if (previous) return previous;
@@ -449,6 +451,7 @@ export class PersonalHost {
       if (occupied >= (this.options.maxConcurrent ?? 2)) break;
       if (task.direct || this.active.has(task.id) || task.status !== 'queued' || this.conflicts(task)) continue;
       if (task.contextExcluded) continue;
+      if (task.executor === 'herdr') { task.status = 'waiting'; task.error = '固定 herdr 入口已退役；保留旧任务现场，需人工核实，不会重新派发。'; this.store.putTask(task); continue; }
       if (task.deadline !== undefined && this.now() >= task.deadline) { task.status = 'waiting'; task.error = '任务期限已过，不会执行。'; this.store.putTask(task); this.publishNotification(task, task.error, task.id); continue; }
       const abort = new AbortController();
       const promise = Promise.resolve().then(() => this.execute(task, abort)).finally(() => { this.active.delete(task.id); this.pump(); });

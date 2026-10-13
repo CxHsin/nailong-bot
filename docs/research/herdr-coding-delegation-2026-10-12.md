@@ -1,5 +1,7 @@
 # 外部编码委派在 Personal Agent 中的定位
 
+历史记录：固定执行器已由项目 skill 取代；当前入口见 [能力说明](../capabilities.md)。旧实现基准见 [HerdrExecutor](https://github.com/CxHsin/nailong-bot/blob/3a7760bea6c7d85e233c3f0eae3eb592b144a958/src/personal/herdr.ts)。
+
 调研日期：2026-10-12。以下是当日官方主分支文档/源码快照；不是已验证本项目实现的迁移规格。
 
 ## 结论

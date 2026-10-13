@@ -8,6 +8,24 @@ import { PersonalStore } from '../src/personal/store.js';
 import { PersonalPlans } from '../src/personal/plans.js';
 import type { Decision } from '../src/personal/types.js';
 
+test('retired herdr plans cannot be created, resumed or consume a legacy trigger', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nailong-retired-plan-'));
+  const host = new PersonalHost({ store: new PersonalStore(directory), dialogue: { decide: async () => ({ kind: 'reply', text: 'ok' }) }, executor: { execute: async () => { throw new Error('must not execute'); } } });
+  const plans = new PersonalPlans(host, () => 1000);
+  const input = { conversationId: 'c', actorId: 'a', inputId: 'one', text: 'schedule' };
+  const spec = { goal: 'old coding', executor: 'herdr' as const, dueAt: 1000, timezone: 'Asia/Shanghai', missed: 'run' as const };
+  try {
+    await plans.handle(input, { kind: 'schedule', plan: spec }); assert.equal(plans.list('c').length, 0);
+    host.store.putPlan({ ...spec, id: 'legacy-plan', conversationId: 'c', actorId: 'a', status: 'active', version: 1, createdAt: 1 });
+    await plans.tick(); await plans.tick(); assert.equal(host.listTasks().length, 0);
+    const prior = plans.list('c')[0]!; assert.equal(prior.status, 'waiting'); assert.equal(prior.lastTrigger, undefined);
+    await plans.handle({ ...input, inputId: 'resume' }, { kind: 'plan', planId: prior.id, action: 'resume' });
+    assert.equal(plans.list('c')[0]?.status, 'waiting');
+    await plans.handle({ ...input, inputId: 'change' }, { kind: 'plan', planId: prior.id, action: 'change', goal: 'new' });
+    assert.equal(plans.list('c')[0]?.goal, spec.goal);
+  } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('CLI → Host persists a one-time plan across restart and consumes its trigger only once', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nailong-plan-'));
   let now = 1000;

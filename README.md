@@ -37,7 +37,7 @@ Host 保存整体工作/子委派、Attempt、输入、事件回执、授权、�
 
 本体可直接处理授权范围内的文件，默认受限；缺少满足边界的已验证后端时命令受阻。一次工作明确授予可信本机权限后普通命令自主执行，实际继承 Host 权限；删除原件通过受控接口具体确认。原生发现不授予执行权限，MCP 独立检查边界和具体动作。详见 [能力与工作权限](docs/capabilities.md)。会话结束不能证明外部动作已停止，无法核实时保持未知占用。
 
-`AGENT_HERDR_SESSION` 必须指定专用具名会话。herdr 在创建工作区前检查实际权限；没有满足工作边界的已验证策略或明确可信授权时受阻。可信模式下 Codex 使用 workspace-write/on-request，但不将这些参数描述为完整读取隔离。Claude 缺少 verified policy 时拒绝启动。Host 读取真实成果并检查，idle/done 不算成功。
+编码委托由项目 [herdr-workflow skill](.agents/skills/herdr-workflow/SKILL.md) 通过主会话 Shell 调用 herdr CLI，默认 Codex full access，Claude auto。配置见[能力说明](docs/capabilities.md)，真实闭环见[验收记录](docs/personal-herdr-skill-acceptance-20261013.md)。固定 HerdrExecutor 已退役；直接 CLI 帮手通过 skill 查询和停止，中断后核对实际状态，不承诺 Host 统一停止或自动恢复。
 
 计划只接受用户明确要求，包含目标、时间或前置任务、时区和 missed skip/run/ask 策略。支持查询、修改、暂停、恢复、取消。触发消费与创建 Task 同一事务，重启不重复触发。服务停机期间不执行，重启按错过策略处理。
 

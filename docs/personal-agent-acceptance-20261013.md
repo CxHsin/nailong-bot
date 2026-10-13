@@ -1,5 +1,7 @@
 # #167 当前实现与验收：2026-10-13
 
+本文保留 #167/#173 当时验收矩阵和固定执行器基线，不代表当前编码入口。#177 项目 skill 的现行闭环证据见[最新验收](personal-herdr-skill-acceptance-20261013.md)。固定执行器代码与测试以 [3a7760b](https://github.com/CxHsin/nailong-bot/tree/3a7760bea6c7d85e233c3f0eae3eb592b144a958) 为历史基准。
+
 实施分支 development；#173 受检基础提交 `dcc8152`，其上包含本文所列实现，受检内容随本文件所在提交保存。本文记录实际已跑证据，不表示已合并、部署或完成真实端点矩阵。需求及六项责任见 [规格 #167](https://github.com/CxHsin/nailong-bot/issues/167)；架构见 [ADR-0008](adr/0008-personal-agent-orchestration-direction.md)。
 
 集成负责人收齐全部写入者 STOPPED 后，对稳定暂存内容运行 `npm test`：196/196 通过，零失败、取消或跳过；`npm run typecheck`、`npm run build`、`npm run docs:check`（49文档/95链接）和 `git diff --cached --check` 通过。完整日志 `C:/Users/Cx/AppData/Local/Temp/nailong-173-parent-full-final.log`。首次全套检查发现旧 CLI 崩溃夹具指定未授权目录并仍假设整体身份是实际执行身份，导致超时；改用默认授权目录、核对持久帮手身份后 CLI 4/4 及全套通过，未放宽生产权限。

@@ -41,7 +41,7 @@ async function processFixture(t: TestContext, mode: 'reply' | 'task' | 'inbox' =
     const child = spawn(process.execPath, ["--import", "tsx", "src/cli/main.ts", "chat", "--json"], {
       cwd: resolve("."), stdio: ["pipe", "pipe", "pipe"], env: { ...process.env,
         AGENT_DATA_DIR: dataDir, AGENT_PROMPT_FILE: promptFile, AGENT_CAPABILITIES_FILE: "", TINYFISH_API_KEY: "",
-        AGENT_HERDR_SESSION: '', EMBEDDING_API_KEY: '', AGENT_VERIFICATION_CHECKS: '',
+        EMBEDDING_API_KEY: '', AGENT_VERIFICATION_CHECKS: '',
         MODEL_NAMES: "test", MODEL_DEFAULT: "test", MODEL_TEST_API_KEY: "test", MODEL_TEST_API: "openai-completions",
         MODEL_TEST_MODEL: "test", MODEL_TEST_BASE_URL: `http://127.0.0.1:${address.port}`, CONTEXT_COMPACTION: "" } });
     children.push(child);

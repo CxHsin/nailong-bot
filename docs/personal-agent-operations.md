@@ -20,8 +20,6 @@
 | `AGENT_DAILY_MAX_TOKENS` | 2000000，UTC 日全局实际可得 token 预算 |
 | `AGENT_MAX_REWORK` | 3，关联返工及同目标重复委派上限 |
 | `AGENT_MODEL_MAX_RETRIES` | 2，SDK 模型重试上限；可设为 0 |
-| `AGENT_HERDR_SESSION` | 具名专用会话，必填才能委派 |
-| `AGENT_HERDR_KIND` | codex；Claude 缺少 verified policy 时拒绝 |
 | `AGENT_SHELL_PATH` | 可选 Pi shell |
 | `AGENT_VERIFICATION_CHECKS` | JSON 数组，确切 command/args/cwd，部署者预先授权 |
 | `AGENT_CHECK_TIMEOUT_MS` | 120000，检查命令上限 |
@@ -64,7 +62,7 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 ### 本体与帮手续接（#171）
 
-主 Session 的 `delegate_work` 立即创建有独立身份的研究、整理或 herdr 编码帮手。本体等待释放执行槽及资源；真实存活或终止未知的帮手继续计入占用。默认子权限只覆盖自己的工作目录，不继承网络、可信 Shell、删除或外发；显式 scope 只能缩小父授权。`task_control start` 的模型 cwd 超出现有授权时，只展示具体范围提案，等待同一用户后续明确确认后才委派。
+主 Session 的 `delegate_work` 创建研究或整理帮手。编码读取项目 herdr-workflow skill，通过现有 Shell 调用 CLI；配置与权限见[能力说明](capabilities.md)，真实验收见[记录](personal-herdr-skill-acceptance-20261013.md)。旧固定执行器已退役；历史 herdr Task 保留身份，未知状态不重派、不改派本地，不推断完成或停止。其他帮手的恢复和资源保证保留。
 
 结果先结算进唯一事件，再通过原生 `nailong_work_result` 自定义 Session 消息回本体。它保持执行材料身份，不进入 Host 用户输入、检索触发或学习轮次。已排队的真实用户消息先处理；同一主 Session 串行打开。整体补充要求创建持久 `requirements_changed` 事件，本体通过相关帮手控制工具选择目标，不广播全部孩子。整体完成由 `complete_work` 显式提出，Host 在实际材料检查后重读要求版本及取消/活跃孩子；旧版本只保留材料。轻量本体文件工作也通过该工具及实际用户 Session 条目/完成标记结算。
 
@@ -72,7 +70,7 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 父停止先持久标记后代再终止；只停帮手仅影响该分支。终止未知显示正在停止并占资源，不声称撤销已有影响。恢复先核对 Session 真实条目、完成标记、事件和派发账本。已确认工具结果可复用；同一工作有 unknown/dispatching 动作时，新 callId 或新委派也不能绕过暂停。Session 完成标记已 fsync、Host 事务未提交的轻量完成可直接修复，不再调用模型。此机制不承诺模型和工具 exactly once。
 
-全局/整体调用及 token 预算跨重启持久；普通对话在工作尚未建立前归全局预算。每个可观测模型 HTTP 尝试（含重试及 provider 续接）在派发前预留调用，SDK 实际可得用量和成本字段记账；herdr 内部调用、token 或成本不可见时保留 unknown，只计 Host 启动及已观察用量，不假定免费。达限保存材料、暂停并生成一次预算通知，不自动扩额。独立命令后端、herdr 隔离策略及真实进程终止仍需部署验证；测试注入后端只证明公共契约。
+全局/整体调用及 token 预算跨重启持久；普通对话在工作尚未建立前归全局预算。每个可观测模型 HTTP 尝试（含重试及 provider 续接）在派发前预留调用，SDK 实际可得用量和成本字段记账；herdr 内部调用、token 或成本不可见时保留 unknown，只计 Host 启动及已观察用量，不假定免费。达限保存材料、暂停并生成一次预算通知，不自动扩额。独立命令后端及真实进程终止仍需部署验证；直接 herdr CLI 不纳入 Host 外部任务账本；测试注入后端只证明公共契约。
 
 ## 召回、约定与权限诊断
 
@@ -80,7 +78,7 @@ Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel�
 
 working_agreements 按需原生发现，支持工作/项目/明确全局的内容、修订和撤销。保存前展示内容和范围，用户后续“确认动作 ID”或“拒绝动作 ID”处理，模型 approved 参数不能伪造用户确认；约定不扩大权限。计划专用操作同样通过原生发现 plan_control，不放进常驻 task_control schema。
 
-后端诊断通过 runtime.backendDiagnostics 返回候选身份和失败原因，配置/evidence 不来自模型。当前 unelevated 只有部分写边界，未实现完整受限 execute；默认受限命令继续受阻。Shell、结构化独立检查和 herdr 分别核对当前范围、模式、版本与身份；supports 等待期间缩小授权会阻止派发，外部 Agent 目标变化需重新核验原授权。可信 Shell 仍继承本机权限。具体证据格式见 execution-backends.ts 的 CodexProbeEvidence，版本不支持/过期/文件 hash 或 OS release 变化不沿用证据。
+后端诊断通过 runtime.backendDiagnostics 返回候选身份和失败原因，配置/evidence 不来自模型。当前 unelevated 只有部分写边界，未实现完整受限 execute；默认受限命令继续受阻。Shell 与结构化独立检查分别核对当前范围、模式、版本与身份；supports 等待期间缩小授权会阻止派发，外部 Agent 目标变化需重新核验原授权。可信 Shell 仍继承本机权限。具体证据格式见 execution-backends.ts 的 CodexProbeEvidence，版本不支持/过期/文件 hash 或 OS release 变化不沿用证据。
 
 unknown/dispatching 保持工作占用，新 callId 和新委派不能重复未知效果。人工先核对既有结果、实际执行身份及 Delivery；确认没有效果之后仍需通过明确恢复决策继续，不能删除账本或篡改回执把 unknown 改成成功。没有完全验证的终止结果不能释放资源。默认新目标不继承旧可信权限。
 
@@ -96,8 +94,8 @@ unknown/dispatching 保持工作占用，新 callId 和新委派不能重复未�
 | 命令退出码/超时/进程树停止 | personal-verification，真实本机进程 |
 | 只读导入、排除、坏边界/reset/restart | personal-migration |
 | 所有权、崩溃、收件箱和未知恢复 | host-process，实际生产 CLI 子进程 |
-| herdr 身份、改向和验收契约 | personal-herdr |
-| 本体/帮手结果闭环、类型验收、选择性改向、预算及崩溃窗口 | personal-orchestration，生产 Pi HTTP/受控 herdr CLI 和真实 Node 检查 |
+| 固定入口退役、历史任务不重派 | personal-host，personal-runtime |
+| 本体/帮手结果闭环、类型验收、选择性改向、预算及崩溃窗口 | personal-orchestration，生产 Pi HTTP 和实际成果检查 |
 
 2026-10-12 #157 历史 Windows/herdr/Codex 已验证：实际文件42/64；计数进程停止于33，父子 PID 消失；崩溃窗口后同 Task 验收128且无新 prompt。临时具名会话已清理，默认会话未操作。详见[实机记录](personal-herdr-acceptance-20261012.md)。它不证明真实 Telegram 闭环。
 

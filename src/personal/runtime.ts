@@ -6,7 +6,6 @@ import { PersonalStore } from './store.js';
 import { PersonalHost } from './host.js';
 import { createPersonalPi } from './pi.js';
 import { createPersonalMemory } from './memory.js';
-import { HerdrExecutor, type HerdrOptions } from './herdr.js';
 import { PersonalPlans } from './plans.js';
 import { VerificationChecks, type VerificationOptions } from './verification.js';
 import { requirePermission, permissionError, permissionSnapshot, assertPermissionSnapshot, matchesExecutionBackend, type ExecutionBackend } from './permissions.js';
@@ -25,7 +24,6 @@ function retries(env: NodeJS.ProcessEnv) { const value = env.AGENT_MODEL_MAX_RET
 
 /** One production assembly shared by Telegram and CLI. No legacy replay executor. */
 export interface PersonalRuntimeDependencies {
-  herdr?: Pick<HerdrOptions, 'cli' | 'executionPolicy' | 'confirmStopped' | 'pollMs'>;
   executionBackends?: ExecutionBackend[];
   verificationBackend?: Pick<ExecutionBackend, 'verified' | 'identity' | 'capabilities' | 'supports'> & { runCommand: NonNullable<VerificationOptions['runCommand']> };
 }
@@ -97,12 +95,6 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
         return { text: '验收期间要求发生变化，需按最新要求重新验收。', verified: false, partial: true };
       return current.workKind === 'delegation' ? inspectMaterial(current, result, dataDir, materialActions(current)) : freezeArtifacts(dataDir, current, result);
     }
-    const herdr = env.AGENT_HERDR_SESSION?.trim() ? new HerdrExecutor({ ...dependencies.herdr, session: env.AGENT_HERDR_SESSION.trim(),
-      kind: env.AGENT_HERDR_KIND === 'claude' ? 'claude' : 'codex',
-      maxDurationMs: positive(env, 'AGENT_TASK_TIMEOUT_MS', 30 * 60_000),
-      verify: (task, evidence) => verifyCurrent(task, evidence, evidence.signal),
-      taskForIdentity: identity => host.getTask(String(identity.taskId)),
-    }) : undefined;
     const local: TaskExecutor = { ...agent.executor,
       async execute(request) {
         let execution: Usage = {};
@@ -118,11 +110,11 @@ export async function createPersonalRuntime(env: NodeJS.ProcessEnv = process.env
         if (task.workKind === 'delegation' && task.purpose !== 'coding') return { state: 'completed', result: await inspectMaterial(task, state.result, dataDir, materialActions(task)) };
         return { state: 'completed', result: await verifyCurrent(task, state.result) };
       } };
-    const select = (kind: string) => kind === 'herdr' ? herdr : local;
+    const select = (kind: string) => kind === 'herdr' ? undefined : local;
     const executor: TaskExecutor = {
       execute: request => {
         const selected = select(request.task.executor);
-        if (!selected) { const error = new Error('未配置专用 AGENT_HERDR_SESSION，开发委派等待接入。'); error.name = 'ExecutorAttentionError'; throw error; }
+        if (!selected) { const error = new Error('固定 herdr 执行入口已退役；旧任务保留现场，需人工查询实际状态。'); error.name = 'ExecutorAttentionError'; throw error; }
         return selected.execute(request);
       },
       steer: async (id, text) => select(host.getTask(id)?.executor ?? 'local')?.steer?.(id, text) ?? false,
