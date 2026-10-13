@@ -20,7 +20,7 @@ MCP 支持 Streamable HTTP 或 stdio，url/command 二选一；支持 headers �
 
 `executionTool` 是可选的本地帮手能力开关，主会话 Shell 已提供；执行仍需当前工作的有效 Work Permission；项目可信约定通过现有 `working_agreements` 查看与撤销，约定不会直接授予 Shell 权限。Windows 默认 Pi Shell 为 Bash，skill 中的 PowerShell 片段通过 `pwsh -NoProfile -File` 运行。事先核对 Bash、pwsh、herdr 与所选编码 CLI 在 Host 环境可用，不改 CLI 全局默认。
 
-#177 的第一版真实主 Session 闭环已通过，见[历史验收记录](personal-herdr-skill-acceptance-20261013.md)；该记录不证明 #183 改写后的场景已通过。固定 `HerdrExecutor` 已退役，保留 herdr 服务和 CLI；直接 CLI 帮手由 skill 查询和停止，Host 停止不自动代表外部进程已停止。历史 Task 保留实际身份并保守报告未知，不改派或重做。
+#177 的第一版真实主 Session 闭环见[历史验收记录](personal-herdr-skill-acceptance-20261013.md)；#183 上游流程改写后的实际场景、人工介入及未验证项见[本轮记录](herdr-upstream-acceptance-20261013.md)。固定 `HerdrExecutor` 已退役，保留 herdr 服务和 CLI；直接 CLI 帮手由 skill 查询和停止，Host 停止不自动代表外部进程已停止。历史 Task 保留实际身份并保守报告未知，不改派或重做。
 
 本体轻量文件操作懒创建持久的整体工作；每个新输入默认独立范围，只有明确回复关联的工作才复用权限。整体工作复用主 Session，但文件工具的相对路径指向独立工作目录。read/write/edit 和 file_operation 的 mkdir、移动普通文件验证实际物理路径、硬链接及运行数据保护。读写均保守拒绝多硬链接普通文件，防止目录内别名读取范围外原文或 Agent 持久数据。移动不覆盖已有目标。删除原件需具体对象确认；用户可在范围内自主读取和修改文件。
 

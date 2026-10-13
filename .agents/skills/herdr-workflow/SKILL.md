@@ -13,7 +13,9 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 - `idle` 表示就绪，`done` 是工作完成后的 idle，`blocked` 是审批或提问，`unknown` 无法分类。状态、完成标记和 prompt 回显都只是观察，实际成果由主会话验收。
 - 普通等待用 `agent wait`；等特定状态才用 `--until`。普通终端命令可用 `pane run` / `pane wait-output --match`；读结果优先 `recent-unwrapped`。
-- 使用专用 session 与唯一 agent 名称，记录 workspace/pane、执行目录、基准、prompt 和成果路径。每次调用带 `--session SESSION`。查询失败或 unknown 时保留现场、先对账。
+- 使用专用 session 与唯一 agent 名称，记录 workspace/pane、执行目录、基准、prompt 和成果路径。workspace/pane/agent 命令带 `--session SESSION`；session 管理命令按对应 help 调用（本机 `session attach NAME` 不接受全局 `--session`）。查询失败或 unknown 时保留现场、先对账。
+- 先核对专用 session 是否运行。`session attach` 是持续前台客户端，不作为普通同步 Shell 命令等待退出；需要启动时按本机帮助在后台运行。Windows 任务脚本使用 `Start-Process -WindowStyle Hidden`，记录本任务客户端 PID 与日志，再查询 session 确认就绪。客户端与 server 分别核对，保留其他会话及主服务。
+- 诊断命令保存原生命令输出和真实退出码再判断；预期失败可由任务脚本捕获并明确报告，不能把管道后续命令的退出码当作 herdr 成功，也不能因 Shell 返回成功而忽略回执中的错误。
 
 ## 1. 打开 workspace（修改才用 worktree）
 
