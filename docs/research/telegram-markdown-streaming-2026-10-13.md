@@ -38,7 +38,7 @@ InputRichMessage 的 `markdown`、`html`、`blocks` 必须三选一。Rich Markd
 
 来源：[FAQ 限速](https://core.telegram.org/bots/faq#my-bot-is-hitting-limits-how-do-i-avoid-this)、[ResponseParameters](https://core.telegram.org/bots/api#responseparameters)。
 
-## 本项目现状与接入建议
+## 调研时项目现状与接入建议
 
 检查基准：`32fb3c1`，development。
 
@@ -56,3 +56,5 @@ ADR-0007 历史正文选择过 plain Telegram 并替代 drafts；本次提出恢
 来源：[当前上下文](../../CONTEXT.md)、[ADR-0007](../adr/0007-personal-host-native-sessions.md)、[ADR-0008](../adr/0008-personal-agent-orchestration-direction.md)。
 
 本轮仅完成接口调研；真实 Telegram 渲染、客户端兼容性、草稿刷新频率、停止按钮及重启/失败行为尚未验收。
+
+后续实现（#174）已在 development 接入富消息与正文草稿；以上源码现状描述保留 `32fb3c1` 调研基线，当前行为和验证边界见 [操作说明](../personal-agent-operations.md#telegram-回复渲染与预览174)。

@@ -91,7 +91,7 @@ test('CLI → Host sends ordinary answers, persists split delivery, and does not
   } finally { await channel.close(); await host.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test('Telegram → Host authenticates input, answers during file work, and delivers files without drafts or tool reports', async () => {
+test('Telegram → Host authenticates input, answers during file work, and delivers rich replies and files without background drafts', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nailong-telegram-'));
   const visible: Array<{ method: string; text?: string }> = [];
   let release!: () => void;
@@ -104,9 +104,9 @@ test('Telegram → Host authenticates input, answers during file work, and deliv
     can_manage_bots: false, supports_join_request_queries: false },
     client: { fetch: async (url, init) => {
       const method = new URL(String(url)).pathname.split('/').at(-1)!;
-      if (method !== 'sendMessage' && method !== 'sendDocument') throw new Error(`Unexpected UI operation: ${method}`);
-      const payload = method === 'sendMessage' ? JSON.parse(String(init?.body)) : undefined;
-      visible.push({ method, text: payload?.text });
+      if (method !== 'sendRichMessage' && method !== 'sendDocument') throw new Error(`Unexpected UI operation: ${method}`);
+      const payload = method === 'sendRichMessage' ? JSON.parse(String(init?.body)) : undefined;
+      visible.push({ method, text: payload?.rich_message?.markdown });
       return new ApiResponse(JSON.stringify({ ok: true, result: { message_id: visible.length, date: 0, chat: { id: 42, type: 'private' } } }));
     } } });
   const channel = createPersonalTelegram({ bot, ownerId: 42, host, download: async () => { throw new Error('unused'); }, reportFailure: error => { throw error; } });
@@ -124,6 +124,6 @@ test('Telegram → Host authenticates input, answers during file work, and deliv
     release(); await host.waitForIdle(); await channel.flush();
     assert.equal(visible.filter(item => item.method === 'sendDocument').length, 1);
     assert.equal(visible.filter(item => item.text?.startsWith('已接收任务')).length, 1);
-    assert.deepEqual(new Set(visible.map(item => item.method)), new Set(['sendMessage', 'sendDocument']));
+    assert.deepEqual(new Set(visible.map(item => item.method)), new Set(['sendRichMessage', 'sendDocument']));
   } finally { release(); await channel.close(); await host.close(); await rm(directory, { recursive: true, force: true }); }
 });

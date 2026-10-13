@@ -104,7 +104,8 @@ export type Decision = { kind: 'reply'; text: string } | { kind: 'complete'; tas
   { kind: 'schedule'; plan: Omit<Plan, 'id' | 'conversationId' | 'actorId' | 'status' | 'version' | 'lastTrigger' | 'pendingTrigger' | 'createdAt'> } |
   { kind: 'plan'; planId?: string; action: 'pause' | 'cancel' | 'resume' | 'query' | 'change'; dueAt?: number; deadline?: number; goal?: string; intervalMs?: number | null; timezone?: string; missed?: 'skip' | 'run' | 'ask' } |
   { kind: 'redeliver'; taskId?: string; confirmUnknown?: boolean };
-export interface Dialogue { decide(input: PersonalInput, context: { tasks: Task[]; sessionId: string; plans?: Plan[]; actions?: ActionRecord[]; work?: () => WorkToolContext }): Promise<Decision>;
+export interface ReplyPreview { conversationId: string; replyId: string; text?: string }
+export interface Dialogue { decide(input: PersonalInput, context: { tasks: Task[]; sessionId: string; plans?: Plan[]; actions?: ActionRecord[]; work?: () => WorkToolContext; onText?: (text: string) => void }): Promise<Decision>;
   resume?(event: WorkEvent, context: ContinuationContext): Promise<ContinuationOutcome>;
   inspectContinuation?(event: WorkEvent, sessionId: string): Promise<{ state: 'absent' | 'injected' | 'completed' | 'unknown'; injection?: SessionReceipt; outcome?: ContinuationOutcome }>;
 }
@@ -124,6 +125,7 @@ export interface Delivery {
   id: string; conversationId: string; actorId: string; taskId?: string; text: string; artifacts?: string[];
   status: 'pending' | 'sending' | 'sent' | 'rejected' | 'unknown'; providerMessageId?: string; createdAt: number;
   parentId?: string; kind?: 'text' | 'file'; path?: string;
+  textFormat?: 'markdown' | 'plain';
   artifactDigests?: Record<string, string>;
   attempts?: number; learningRecorded?: boolean;
   learning?: { id: string; input: string; answer: string; recallId?: string; originInputId?: string; inputAt?: number };

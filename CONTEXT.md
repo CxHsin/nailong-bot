@@ -14,7 +14,7 @@ Nailong Bot is a personal agent on the user's Windows computer. Telegram and CLI
 
 **Host**: Channel-independent owner of durable inputs, Tasks, scheduling, authorization, recovery, acceptance and Delivery. Business records are direct SQLite state.
 
-**Channel**: Authenticates input and delivers plain text or files. Owns no agent loop or task state.
+**Channel**: Authenticates input and delivers text or files. Telegram renders Markdown rich messages and temporary public reply previews; previews are not Delivery facts. Owns no agent loop or task state.
 
 **Conversation**: Durable identity selecting a main Pi Session and scoped Akasha sources. Actor identity separately authorizes task operations.
 

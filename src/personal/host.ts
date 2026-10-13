@@ -24,6 +24,7 @@ function checkoutResource(path: string): string | undefined {
 export class PersonalHost {
   readonly store: PersonalStore;
   private readonly listeners = new Set<(delivery: Delivery) => void>();
+  private readonly previewListeners = new Set<(preview: import('./types.js').ReplyPreview) => void>();
   private readonly active = new Map<string, { abort: AbortController; promise: Promise<void> }>();
   private readonly conversations = new Map<string, Promise<unknown>>();
   private readonly appliedRevisions = new Map<string, number>();
@@ -240,6 +241,8 @@ export class PersonalHost {
     this.pump(); return { text: '停止意图已保存；正在核实帮手终止状态，已有影响未撤销。', taskId };
   }
   subscribe(listener: (delivery: Delivery) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  subscribePreviews(listener: (preview: import('./types.js').ReplyPreview) => void) { this.previewListeners.add(listener); return () => { this.previewListeners.delete(listener); }; }
+  private preview(preview: import('./types.js').ReplyPreview) { for (const listener of this.previewListeners) { try { listener(preview); } catch { /* A transient preview cannot fail durable work. */ } } }
   delivery(id: string) { return this.store.getDelivery(id); }
   pendingDeliveries(conversationId?: string) { return this.store.listDeliveries(conversationId).filter(d => d.status === 'pending'); }
   beginDelivery(id: string) {
@@ -261,7 +264,9 @@ export class PersonalHost {
       if (this.store.inputAttempts(key) >= (this.options.maxDialogueAttempts ?? 3)) throw new Error('输入处理尝试次数已达上限；输入已保存，请检查故障后发送新消息。');
       this.store.beginInput(key);
       this.modelWork.delete(this.store.conversationSession(input.conversationId));
-      const decision = await this.options.dialogue.decide(input, { tasks: this.listTasks(input.conversationId).filter(task => task.actorId === input.actorId && !task.contextExcluded), sessionId: this.store.conversationSession(input.conversationId), work: () => this.workContext(input), plans: this.store.listPlans<Plan>().filter(p => p.conversationId === input.conversationId && p.actorId === input.actorId && !p.contextExcluded), actions: this.store.listActions().filter(a => { const task = this.getTask(a.taskId); return task?.conversationId === input.conversationId && task.actorId === input.actorId && !task.contextExcluded; }) }).catch(error => { this.store.inputFailure(key, String(error)); throw error; });
+      const replyId = randomUUID();
+      const onText = input.origin === 'plan' ? undefined : (text: string) => this.preview({ conversationId: input.conversationId, replyId, text });
+      const decision = await this.options.dialogue.decide(input, { onText, tasks: this.listTasks(input.conversationId).filter(task => task.actorId === input.actorId && !task.contextExcluded), sessionId: this.store.conversationSession(input.conversationId), work: () => this.workContext(input), plans: this.store.listPlans<Plan>().filter(p => p.conversationId === input.conversationId && p.actorId === input.actorId && !p.contextExcluded), actions: this.store.listActions().filter(a => { const task = this.getTask(a.taskId); return task?.conversationId === input.conversationId && task.actorId === input.actorId && !task.contextExcluded; }) }).catch(error => { this.store.inputFailure(key, String(error)); throw error; }).finally(() => { if (onText) this.preview({ conversationId: input.conversationId, replyId }); });
       if (this.closing) throw new Error('Host shutdown; accepted input retained');
       if (decision.kind === 'start') return this.enqueueTask(input, decision);
       if (decision.kind === 'complete') {

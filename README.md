@@ -27,7 +27,7 @@
 | `/memory 关键词` | 检索 Akasha 原始来源 |
 | `/forget 节点引用` | 排除来源并作废此会话上下文；保守停止旧任务、暂停计划，未知停止仍需核实 |
 
-Telegram 使用普通消息和文件；长文分段，不显示流式草稿、工具过程或等待计时。未知送达不自动重发，用户确认重新交付只复用成果，不重做任务。
+Telegram 私聊使用 Markdown 富消息和文件，支持标题、粗体、代码与表格；当前用户回复的正文通过临时草稿流式预览，最终通过正式消息交付。长文按 Markdown 块分页，超大块或格式拒绝时降级为原文文本；后台工具过程不逐条推送。未知送达不自动重发，用户确认重新交付只复用成果，不重做任务。接口与验收边界见 [Telegram 输出说明](docs/personal-agent-operations.md#telegram-回复渲染与预览174)。
 
 `AGENT_DATA_DIR` 默认 `data`，`AGENT_PROMPT_FILE` 默认 `system-prompt.md`。同一实际目录只允许一个 Host，CLI 不控制另一个进程中的 Telegram。跨入口续聊先停前一进程，并使用相同 conversationId 和 actorId；CLI actor 默认 `cli`，用 `AGENT_ACTOR_ID` 指定，Telegram actor 为 `telegram:<数字 ID>`。
 

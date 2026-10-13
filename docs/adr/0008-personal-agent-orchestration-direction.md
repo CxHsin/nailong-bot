@@ -92,6 +92,8 @@ ADR-0007 把本地 Pi 与 herdr 定义为平级 Task executor；目标方向要�
 
 ## 实现记录（2026-10-13）
 
+Telegram 输出按用户后续确认的 #174 接入 Rich Markdown 正式消息和当前用户回复的正文草稿，调整 ADR-0007 历史 plain Telegram 选择。草稿仅为 Channel 临时预览，公开正文由 Pi 经 Host 通知，后台输出与工具参数不直接广播；正式 Delivery、消息关联、记忆学习和未知发送不重发保证继续保留。结构分页、格式降级及当前验证边界见 [输出说明](../personal-agent-operations.md#telegram-回复渲染与预览174)。
+
 Host 以整体工作、独立子委派、WorkEvent 和动作账本为业务真相；Pi 主 Session 接回帮手材料，按最新要求继续整体目标。子完成不直接 Delivery。原生发现保持常驻前缀稳定，网页、plan_control、working_agreements 和连接器专用定义按需加载；普通端点明确缺失，通用文件/工作控制继续可用。
 
 自动召回只由真实用户输入触发，持久 started/ready/unavailable/excluded 与呈现出处防止重启重复召回。孩子只接收本体选定原文/必要约定，额外背景请求是执行材料。工作约定通过独立修订事实及用户后续明确确认保存。

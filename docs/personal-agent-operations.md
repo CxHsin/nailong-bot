@@ -30,6 +30,18 @@
 
 本地执行与验收模型用量合并进入 Attempt 预算；herdr 外部执行用量未知，不能推定免费。验收受模型超时与 Task 取消信号约束。未知动作消费不能当作可安全重试。计划停机期间不运行，恢复按持久错过策略处理。
 
+## Telegram 回复渲染与预览（#174）
+
+私聊正式文字使用 `sendRichMessage` 的 Rich Markdown，支持标题、列表、代码块和表格。Channel 将完整 Markdown 块组合为不超过 8000 UTF-8 字节、保守块数预算的页面；超大单块按 Unicode 字符分页为原文文本，不保证超大表格仍保持表格布局。无法解析的格式仅在 Telegram 明确返回格式拒绝时降级为纯文字富消息块；网络超时、未知发送和限速不触发另一种格式的重复发送。回复中的远程图片及 HTML 媒体语法显示为文字，不因渲染而上传附件；验收文件仍走独立文件交付。
+
+Pi 当前用户对话的 assistant 正文快照经 Host 进入 Telegram Channel，思考、工具参数、后台续接和计划输入不进入预览。草稿使用 `sendRichMessageDraft`，同一回复使用同一个非零 draft_id，默认每秒最多一次更新并合并增量；429 按 retry_after 等待。长回复预览最新页面。未闭合或不合法的格式遇明确解析拒绝时预览原文文本；其他草稿错误停止该回复的预览，不阻断正式交付。
+
+草稿仅为 30 秒临时预览，生成结束或失败即停止更新；正式消息及文件发送前等待在途草稿请求，并暂停新的草稿派发。关闭 Channel 会清除定时器并等待在途预览。没有启用 Telegram 停止生成按钮；任务停止继续使用已有工作控制入口。草稿不持久化，不产生消息回复关联，不触发记忆学习，重启不恢复草稿。正式分页成功后才记录各页消息 ID；既有 unknown 不重发规则继续适用。
+
+受控验收覆盖 Pi SSE → Host → grammY 在模型结束前出现草稿、最终表格正文、正式发送后学习，以及合并增量、限速、草稿/正式消息竞态、格式降级和网络未知不重复。真实 Telegram 客户端的显示、版本兼容性及实际限速尚未验收；本轮未部署生产 bot。研究依据见 [接口调研](research/telegram-markdown-streaming-2026-10-13.md)。
+
+2026-10-13 验证：`npm test` 218/218 通过（新增 `test/telegram-rich-reply.test.ts` 11 个用例）；`npm run typecheck`、`npm run build`、`npm run docs:check` 均通过。临时移除 Pi 正文回调接线后，`actual Pi SSE → Host → grammY previews before generation finishes and learns only formal delivery` 用例按预期以 `No preview before model finished` 失败；恢复实现后完整回归通过。
+
 ## 切换与回退
 
 1. 停止旧 writer，对完整数据目录做外部备份，不同时运行新旧入口。
