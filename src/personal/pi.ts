@@ -36,6 +36,8 @@ export type PersonalPiOptions = ModelOptions & CapabilityConfig & {
   executionBackends?: ExecutionBackend[]; workContext?: (task: Task, originId: string) => WorkToolContext;
   reserveModelCall?: (sessionId: string) => void;
   accountModelUsage?: (sessionId: string, usage: Usage) => void;
+  /** Programmatic experiment seam; never read from production environment configuration. */
+  sessionInterface?: (input: { scope: CapabilityScope; tools: ToolDefinition[]; instructions: string; work?: () => WorkToolContext }) => { tools: ToolDefinition[]; instructions: string };
 };
 
 const reply = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: undefined });
@@ -102,6 +104,10 @@ export async function createPersonalPi(options: PersonalPiOptions) {
     const alias = selectedModels.get(id) ?? (rememberedModel?.type === 'custom' && typeof rememberedModel.data === 'string' ? rememberedModel.data : undefined);
     const selected = models.select(alias);
     const scope = { sessionId: id, cwd, conversationId };
+    if (options.sessionInterface) {
+      const prepared = options.sessionInterface({ scope, tools, instructions, work });
+      tools = prepared.tools; instructions = prepared.instructions;
+    }
     const additional = (await options.capabilityCatalog?.(scope) ?? []).map(entry => ({ ...entry, tool: entry.retrieval && work ? controlledRetrievalTool({ tool: entry.tool, retrieval: entry.retrieval }, work) : externalTool(entry.tool, work, !!entry.authorize) }));
     const native = selected.native ? nativeCapabilityRuntime(scope,
       tools.filter(residentTool),
