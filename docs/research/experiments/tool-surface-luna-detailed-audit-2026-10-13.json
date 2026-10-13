@@ -1,0 +1,1661 @@
+[
+  {
+    "number": 1,
+    "variant": "independent",
+    "scenario": "organize",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:07:08.852Z",
+      "last": "2026-10-13T10:10:46.041Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "session_workspace"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "task_control",
+        "ordinal": 1,
+        "taskControlKind": "query",
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "read",
+        "ordinal": 2,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "file_operation",
+        "ordinal": 3,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 4,
+        "pathClass": "other",
+        "status": "error",
+        "errorCategory": "not_found"
+      },
+      {
+        "operation": "file_operation",
+        "ordinal": 5,
+        "pathClass": "session_workspace",
+        "status": "error",
+        "errorCategory": "path_outside_grant"
+      },
+      {
+        "operation": "work_permission",
+        "ordinal": 6,
+        "status": "ok"
+      },
+      {
+        "operation": "file_operation",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 8,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 9,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 10,
+        "pathClass": "other",
+        "status": "error",
+        "errorCategory": "not_found"
+      },
+      {
+        "operation": "read",
+        "ordinal": 11,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 12,
+        "outcomeClass": "completed",
+        "submittedRevision": 1,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "latest_revision"
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 13,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 14,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 2,
+    "variant": "skill_cli",
+    "scenario": "organize",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:10:46.102Z",
+      "last": "2026-10-13T10:13:56.679Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "task_workspace",
+          "session_workspace"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 2,
+        "pathClass": "session_workspace",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      },
+      {
+        "operation": "read",
+        "ordinal": 3,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "bash",
+        "ordinal": 4,
+        "status": "ok"
+      },
+      {
+        "operation": "bash",
+        "ordinal": 5,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 6,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 8,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 9,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 10,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 11,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 12,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 3,
+    "variant": "independent",
+    "scenario": "approval",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:13:56.746Z",
+      "last": "2026-10-13T10:14:47.456Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "protected_directory"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "work_permission",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 2,
+        "outcomeClass": "blocked",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "path_outside_grant"
+      }
+    ]
+  },
+  {
+    "number": 4,
+    "variant": "skill_cli",
+    "scenario": "approval",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:14:47.513Z",
+      "last": "2026-10-13T10:16:42.148Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": true,
+        "pathClasses": [
+          "task_workspace",
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 3,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 4,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 5,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 6,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 7,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 5,
+    "variant": "independent",
+    "scenario": "denial",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:16:42.210Z",
+      "last": "2026-10-13T10:17:27.801Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "protected_directory"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "work_permission",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 2,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "path_outside_grant"
+      }
+    ]
+  },
+  {
+    "number": 6,
+    "variant": "skill_cli",
+    "scenario": "denial",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:17:27.863Z",
+      "last": "2026-10-13T10:18:27.064Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "task_workspace",
+          "protected_file"
+        ]
+      },
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "task_workspace",
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 2,
+        "pathClass": "protected_file",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      },
+      {
+        "operation": "read",
+        "ordinal": 3,
+        "pathClass": "protected_file",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      }
+    ]
+  },
+  {
+    "number": 7,
+    "variant": "independent",
+    "scenario": "memory",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:18:27.119Z",
+      "last": "2026-10-13T10:20:11.266Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "memory_read",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 2,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 3,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "not_found"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 4,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "ok"
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 5,
+        "taskControlKind": "query",
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "send_message",
+        "ordinal": 6,
+        "status": "ok"
+      }
+    ]
+  },
+  {
+    "number": 8,
+    "variant": "skill_cli",
+    "scenario": "memory",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:20:11.336Z",
+      "last": "2026-10-13T10:22:59.367Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl memory --help",
+        "ordinal": 3,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 4,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl memory search",
+        "ordinal": 5,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl memory read",
+        "ordinal": 6,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 8,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 9,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 10,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 9,
+    "variant": "independent",
+    "scenario": "delegation",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:22:59.432Z",
+      "last": "2026-10-13T10:24:43.209Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [
+      {
+        "status": "completed",
+        "directoryClass": "task_workspace",
+        "readRootCount": 1,
+        "writeRootCount": 1,
+        "helperExists": true
+      }
+    ],
+    "timeline": [
+      {
+        "operation": "delegate_work",
+        "ordinal": 1,
+        "directoryClass": "session_workspace",
+        "hasExplicitScope": true,
+        "requestedReadRootCount": 1,
+        "requestedWriteRootCount": 1,
+        "status": "error",
+        "errorCategory": "child_permission_expansion"
+      },
+      {
+        "operation": "delegate_work",
+        "ordinal": 2,
+        "directoryClass": "omitted",
+        "hasExplicitScope": false,
+        "status": "ok",
+        "childParentRevision": 0
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 3,
+        "taskControlKind": "query",
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 4,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "read",
+        "ordinal": 5,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 6,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      }
+    ]
+  },
+  {
+    "number": 10,
+    "variant": "skill_cli",
+    "scenario": "delegation",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:24:43.276Z",
+      "last": "2026-10-13T10:27:02.705Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [
+      {
+        "status": "completed",
+        "directoryClass": "task_workspace",
+        "readRootCount": 1,
+        "writeRootCount": 1,
+        "helperExists": true
+      }
+    ],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 3,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work delegate",
+        "ordinal": 4,
+        "directoryClass": "omitted",
+        "hasExplicitScope": false,
+        "status": "ok",
+        "childParentRevision": 0
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 5,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 6,
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "read",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 8,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      }
+    ]
+  },
+  {
+    "number": 11,
+    "variant": "skill_cli",
+    "scenario": "organize",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:27:02.769Z",
+      "last": "2026-10-13T10:30:01.729Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 3,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "read",
+        "ordinal": 4,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "bash",
+        "ordinal": 5,
+        "status": "ok"
+      },
+      {
+        "operation": "bash",
+        "ordinal": 6,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 8,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 9,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 10,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 11,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 12,
+    "variant": "independent",
+    "scenario": "organize",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:30:01.806Z",
+      "last": "2026-10-13T10:34:03.309Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [
+      {
+        "status": "completed",
+        "directoryClass": "task_workspace",
+        "readRootCount": 1,
+        "writeRootCount": 1,
+        "helperExists": true
+      }
+    ],
+    "timeline": [
+      {
+        "operation": "task_control",
+        "ordinal": 1,
+        "taskControlKind": "start",
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "read",
+        "ordinal": 2,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "bash",
+        "ordinal": 3,
+        "status": "ok"
+      },
+      {
+        "operation": "file_operation",
+        "ordinal": 4,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 5,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 6,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 8,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 9,
+        "outcomeClass": "completed",
+        "submittedRevision": 1,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "latest_revision"
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 10,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "continuation_injection",
+        "revisionVisible": true,
+        "cwdVisible": true
+      },
+      {
+        "operation": "read",
+        "ordinal": 12,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 13,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 14,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 15,
+        "outcomeClass": "completed",
+        "submittedRevision": 1,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "error",
+        "errorCategory": "latest_revision"
+      }
+    ]
+  },
+  {
+    "number": 13,
+    "variant": "skill_cli",
+    "scenario": "approval",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:34:03.373Z",
+      "last": "2026-10-13T10:35:59.236Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": true,
+        "pathClasses": [
+          "task_workspace",
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 3,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 4,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "read",
+        "ordinal": 5,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 6,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 7,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 14,
+    "variant": "independent",
+    "scenario": "approval",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:35:59.313Z",
+      "last": "2026-10-13T10:37:16.705Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": true,
+        "pathClasses": [
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "work_permission",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 2,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 3,
+        "pathClass": "protected_file",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 4,
+        "outcomeClass": "completed",
+        "submittedRevision": 1,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "latest_revision"
+      }
+    ]
+  },
+  {
+    "number": 15,
+    "variant": "skill_cli",
+    "scenario": "denial",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:37:16.771Z",
+      "last": "2026-10-13T10:37:59.807Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "task_workspace",
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "read",
+        "ordinal": 2,
+        "pathClass": "protected_file",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      }
+    ]
+  },
+  {
+    "number": 16,
+    "variant": "independent",
+    "scenario": "denial",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:37:59.872Z",
+      "last": "2026-10-13T10:38:47.398Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "protected_file"
+        ]
+      }
+    ],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "work_permission",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 2,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "path_outside_grant"
+      }
+    ]
+  },
+  {
+    "number": 17,
+    "variant": "skill_cli",
+    "scenario": "memory",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:38:47.464Z",
+      "last": "2026-10-13T10:41:19.116Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl memory --help",
+        "ordinal": 3,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl memory search",
+        "ordinal": 4,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl memory read",
+        "ordinal": 5,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 6,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 7,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 8,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 9,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      }
+    ]
+  },
+  {
+    "number": 18,
+    "variant": "independent",
+    "scenario": "memory",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:41:19.194Z",
+      "last": "2026-10-13T10:42:34.259Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [],
+    "timeline": [
+      {
+        "operation": "memory_search",
+        "ordinal": 1,
+        "status": "ok"
+      },
+      {
+        "operation": "memory_read",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "write",
+        "ordinal": 3,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 4,
+        "outcomeClass": "completed",
+        "submittedRevision": 1,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": false,
+        "status": "error",
+        "errorCategory": "latest_revision"
+      }
+    ]
+  },
+  {
+    "number": 19,
+    "variant": "skill_cli",
+    "scenario": "delegation",
+    "rootRevision": 0,
+    "rootStatus": "waiting",
+    "sessionSpan": {
+      "first": "2026-10-13T10:42:34.324Z",
+      "last": "2026-10-13T10:46:18.415Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [
+      {
+        "kind": "permission-grant",
+        "approved": false,
+        "pathClasses": [
+          "task_workspace",
+          "session_workspace"
+        ]
+      }
+    ],
+    "children": [
+      {
+        "status": "completed",
+        "directoryClass": "session_workspace",
+        "readRootCount": 0,
+        "writeRootCount": 0,
+        "helperExists": true
+      }
+    ],
+    "timeline": [
+      {
+        "operation": "read",
+        "ordinal": 1,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl --help",
+        "ordinal": 2,
+        "status": "ok"
+      },
+      {
+        "operation": "agentctl work --help",
+        "ordinal": 3,
+        "status": "ok",
+        "currentParentRevision": 0
+      },
+      {
+        "operation": "agentctl work delegate",
+        "ordinal": 4,
+        "directoryClass": "session_workspace",
+        "hasExplicitScope": true,
+        "requestedReadRootCount": 1,
+        "requestedWriteRootCount": 1,
+        "status": "error",
+        "errorCategory": "child_permission_expansion"
+      },
+      {
+        "operation": "agentctl work delegate",
+        "ordinal": 5,
+        "directoryClass": "session_workspace",
+        "hasExplicitScope": false,
+        "status": "ok",
+        "childParentRevision": 0
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 6,
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "agentctl work query",
+        "ordinal": 7,
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "read",
+        "ordinal": 8,
+        "pathClass": "session_workspace",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 9,
+        "outcomeClass": "waiting",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "continuation_injection",
+        "revisionVisible": true,
+        "cwdVisible": true
+      },
+      {
+        "operation": "read",
+        "ordinal": 11,
+        "pathClass": "session_workspace",
+        "status": "error",
+        "errorCategory": "scripted_approval_declined"
+      },
+      {
+        "operation": "read",
+        "ordinal": 12,
+        "pathClass": "other",
+        "status": "error",
+        "errorCategory": "not_found"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 13,
+        "outcomeClass": "blocked",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "error",
+        "errorCategory": "path_outside_grant"
+      },
+      {
+        "operation": "agentctl work complete",
+        "ordinal": 14,
+        "outcomeClass": "blocked",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      }
+    ]
+  },
+  {
+    "number": 20,
+    "variant": "independent",
+    "scenario": "delegation",
+    "rootRevision": 0,
+    "rootStatus": "completed",
+    "sessionSpan": {
+      "first": "2026-10-13T10:46:18.479Z",
+      "last": "2026-10-13T10:48:32.994Z"
+    },
+    "modelStops": [
+      "toolUse",
+      "stop"
+    ],
+    "initialFacts": [
+      {
+        "hasRoot": true,
+        "revisionVisible": false,
+        "cwdVisible": false
+      }
+    ],
+    "approvals": [],
+    "children": [
+      {
+        "status": "completed",
+        "directoryClass": "task_workspace",
+        "readRootCount": 0,
+        "writeRootCount": 0,
+        "helperExists": true
+      }
+    ],
+    "timeline": [
+      {
+        "operation": "delegate_work",
+        "ordinal": 1,
+        "directoryClass": "omitted",
+        "hasExplicitScope": true,
+        "requestedReadRootCount": 0,
+        "requestedWriteRootCount": 0,
+        "status": "ok",
+        "childParentRevision": 0
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 2,
+        "taskControlKind": "query",
+        "status": "ok",
+        "proposalOnly": true,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 3,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "task_control",
+        "ordinal": 4,
+        "taskControlKind": "query",
+        "status": "error",
+        "errorCategory": "one_task_proposal_limit",
+        "proposalOnly": false,
+        "resultHasRevision": false
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 5,
+        "outcomeClass": "waiting",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      },
+      {
+        "operation": "continuation_injection",
+        "revisionVisible": true,
+        "cwdVisible": true
+      },
+      {
+        "operation": "read",
+        "ordinal": 7,
+        "pathClass": "other",
+        "status": "ok"
+      },
+      {
+        "operation": "complete_work",
+        "ordinal": 8,
+        "outcomeClass": "completed",
+        "submittedRevision": 0,
+        "persistedRootRevision": 0,
+        "parentRevisionVisibleBeforeCall": true,
+        "status": "ok"
+      }
+    ]
+  }
+]
