@@ -1,0 +1,663 @@
+[
+  {
+    "number": 1,
+    "variant": "independent",
+    "scenario": "organize",
+    "failed": [
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "read",
+        "category": "not_found"
+      },
+      {
+        "tool": "file_operation",
+        "category": "permission"
+      },
+      {
+        "tool": "read",
+        "category": "not_found"
+      },
+      {
+        "tool": "complete_work",
+        "category": "latest_revision"
+      },
+      {
+        "tool": "task_control",
+        "category": "other"
+      },
+      {
+        "tool": "task_control",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-g6a4df\\state\\workspaces\\7ac47e76-dd02-4c58-980f-5d5ec2d1bbbb",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 2,
+    "variant": "skill_cli",
+    "scenario": "organize",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "read",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-62ozuw\\state\\workspaces\\2dd5f544-9ab2-4307-9422-c736ee662f2f",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 3,
+    "variant": "independent",
+    "scenario": "approval",
+    "failed": [
+      "changed",
+      "confirmed",
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "permission"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-qzxabs\\state\\workspaces\\4fff4c86-a045-4a13-8585-8f8ed4a46f6b",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 4,
+    "variant": "skill_cli",
+    "scenario": "approval",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-idziq3\\state\\workspaces\\6ad2c774-45bf-48cf-87b9-4935f419be84",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 5,
+    "variant": "independent",
+    "scenario": "denial",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "permission"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-kzrhp3\\state\\workspaces\\572a2969-71c3-4558-b247-8a05f09b7798",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 6,
+    "variant": "skill_cli",
+    "scenario": "denial",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "write",
+        "category": "other"
+      },
+      {
+        "tool": "read",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-6cz547\\state\\workspaces\\a76a2978-3139-44bb-9b14-a8dc68dfc677",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 7,
+    "variant": "independent",
+    "scenario": "memory",
+    "failed": [
+      "searched"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "not_found"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-l7k4cc\\state\\workspaces\\1565460b-f886-4504-ba26-82137aeb3fe0",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 8,
+    "variant": "skill_cli",
+    "scenario": "memory",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [],
+    "helpCalls": 3,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-fihtfs\\state\\workspaces\\3578974c-7f00-43e8-ae0f-68a12d5ca7ca",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 9,
+    "variant": "independent",
+    "scenario": "delegation",
+    "failed": [
+      "eventConsumed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "delegate_work",
+        "category": "permission"
+      },
+      {
+        "tool": "task_control",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-efmbqs\\state\\workspaces\\12046e8c-5e98-4541-9ce6-25e28ee8fcbc",
+        "status": "completed"
+      },
+      {
+        "parent": true,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-efmbqs\\state\\workspaces\\12046e8c-5e98-4541-9ce6-25e28ee8fcbc",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "delegation_result",
+        "state": "blocked"
+      },
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 10,
+    "variant": "skill_cli",
+    "scenario": "delegation",
+    "failed": [
+      "eventConsumed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "bash",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-0h4rnt\\state\\workspaces\\b8af07a8-b9c1-413f-b450-2bf072be7878",
+        "status": "completed"
+      },
+      {
+        "parent": true,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-0h4rnt\\state\\workspaces\\b8af07a8-b9c1-413f-b450-2bf072be7878",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "delegation_result",
+        "state": "blocked"
+      },
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 11,
+    "variant": "skill_cli",
+    "scenario": "organize",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-zl6pqt\\state\\workspaces\\b8ce3bc2-855c-4987-a123-1649292049e2",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 12,
+    "variant": "independent",
+    "scenario": "organize",
+    "failed": [
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "task_control",
+        "category": "other"
+      },
+      {
+        "tool": "complete_work",
+        "category": "latest_revision"
+      },
+      {
+        "tool": "task_control",
+        "category": "other"
+      },
+      {
+        "tool": "complete_work",
+        "category": "latest_revision"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-qcyhlj\\state\\workspaces\\235ed625-cbc1-4088-8798-2b6a4a20037d",
+        "status": "waiting"
+      },
+      {
+        "parent": true,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-qcyhlj\\state\\workspaces\\235ed625-cbc1-4088-8798-2b6a4a20037d",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "delegation_result",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 13,
+    "variant": "skill_cli",
+    "scenario": "approval",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-oxrr6k\\state\\workspaces\\f1c14f59-e4ce-4884-80c7-81e2b203caed",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 14,
+    "variant": "independent",
+    "scenario": "approval",
+    "failed": [
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "latest_revision"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-yrgmbv\\state\\workspaces\\37648c06-e9ef-4fdf-937e-7d339eb57db2",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 15,
+    "variant": "skill_cli",
+    "scenario": "denial",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "read",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-vvp3nv\\state\\workspaces\\6cf98dac-a349-4963-8e97-f451ba589d9f",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 16,
+    "variant": "independent",
+    "scenario": "denial",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "permission"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-2oudce\\state\\workspaces\\b5747fc6-3c82-4e1a-87c9-b0577641bf03",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 17,
+    "variant": "skill_cli",
+    "scenario": "memory",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [],
+    "helpCalls": 3,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-b0slal\\state\\workspaces\\8a10503f-9273-4b1c-9872-8e8b83538a2b",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 18,
+    "variant": "independent",
+    "scenario": "memory",
+    "failed": [
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "complete_work",
+        "category": "latest_revision"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-nyoe4x\\state\\workspaces\\b43e2eab-a4fd-4e4f-9ed4-094aed67ed5b",
+        "status": "waiting"
+      }
+    ],
+    "events": []
+  },
+  {
+    "number": 19,
+    "variant": "skill_cli",
+    "scenario": "delegation",
+    "failed": [
+      "helperMaterial",
+      "completed"
+    ],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "bash",
+        "category": "permission"
+      },
+      {
+        "tool": "bash",
+        "category": "other"
+      },
+      {
+        "tool": "read",
+        "category": "other"
+      },
+      {
+        "tool": "read",
+        "category": "other"
+      },
+      {
+        "tool": "read",
+        "category": "not_found"
+      },
+      {
+        "tool": "bash",
+        "category": "permission"
+      }
+    ],
+    "helpCalls": 2,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-wsq0d6\\state\\workspaces\\e10edb31-1a4c-4a22-b81f-14a939fa5575",
+        "status": "waiting"
+      },
+      {
+        "parent": true,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-wsq0d6\\state\\workspaces\\main-20bf1caf1b1c4302",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "delegation_result",
+        "state": "consumed"
+      },
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  },
+  {
+    "number": 20,
+    "variant": "independent",
+    "scenario": "delegation",
+    "failed": [],
+    "models": [
+      "gpt-5.6-luna"
+    ],
+    "errors": [
+      {
+        "tool": "task_control",
+        "category": "other"
+      },
+      {
+        "tool": "task_control",
+        "category": "other"
+      }
+    ],
+    "helpCalls": 0,
+    "searchCalls": 0,
+    "taskDirectories": [
+      {
+        "parent": false,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-ltxpmx\\state\\workspaces\\4e087d56-7a6e-4870-b4b0-87e13f2b0aa3",
+        "status": "completed"
+      },
+      {
+        "parent": true,
+        "cwd": "c:\\users\\cx\\appdata\\local\\temp\\nailong-tool-experiment-ltxpmx\\state\\workspaces\\4e087d56-7a6e-4870-b4b0-87e13f2b0aa3",
+        "status": "completed"
+      }
+    ],
+    "events": [
+      {
+        "kind": "delegation_result",
+        "state": "consumed"
+      },
+      {
+        "kind": "direct_completion",
+        "state": "consumed"
+      }
+    ]
+  }
+]

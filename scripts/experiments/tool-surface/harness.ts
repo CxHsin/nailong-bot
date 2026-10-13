@@ -15,10 +15,11 @@ import { experimentInterface, type Variant, type Surface, type Trace } from './i
 export const scenarios = ['organize', 'approval', 'denial', 'memory', 'delegation', 'stale'] as const;
 export type Scenario = typeof scenarios[number];
 const originalMemory = '我们之前讨论出行。'.repeat(40) + '用户原话：周六乘火车，不坐飞机。';
+const pathKey = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path);
 export const skillFile = fileURLToPath(new URL('./skill/SKILL.md', import.meta.url));
 export type RunReport = {
   variant: Variant; scenario: Scenario; mode: 'fixture' | 'live'; root: string; passed: boolean; checks: Record<string, boolean>;
-  elapsedMs: number; requests: number; usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: null };
+  elapsedMs: number; pacingMs: number; limits: { timeoutMs: number; maxTurns: number; maxTokens: number }; requests: number; usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: null };
   surfaces: Surface[]; trace: Trace[]; approvals: Array<{ kind: string; approved: boolean; paths: string[] }>;
   wireTools: string[][]; wireToolBytes: number[]; tasks: Array<Pick<Task, 'id' | 'status' | 'revision' | 'parentTaskId'>>; error?: string;
 };
@@ -31,12 +32,13 @@ function send(res: ServerResponse, n: number, item: Record<string, unknown>) {
 }
 type Step = { name: string; args: Record<string, unknown> } | string;
 
-export async function runExperiment(variant: Variant, scenario: Scenario, liveModel?: ModelConfig): Promise<RunReport> {
+export async function runExperiment(variant: Variant, scenario: Scenario, liveModel?: ModelConfig, beforeLiveRequest?: () => Promise<number>): Promise<RunReport> {
   const root = await mkdtemp(join(tmpdir(), 'nailong-tool-experiment-')); const dataDir = join(root, 'state');
   await mkdir(dataDir); await mkdir(join(root, 'project')); await mkdir(join(root, 'protected'));
   const protectedFile = join(root, 'protected', 'note.txt'); await writeFile(protectedFile, 'original');
   const promptFile = join(root, 'prompt.md'); await writeFile(promptFile, '你是个人助手。完成用户明确交办的目标，按实际成果回答；操作保持在本实验合成材料范围内。');
-  const report: RunReport = { variant, scenario, mode: liveModel ? 'live' : 'fixture', root, passed: false, checks: {}, elapsedMs: 0, requests: 0,
+  const limits = { timeoutMs: liveModel ? 360_000 : 5000, maxTurns: 20, maxTokens: liveModel ? 200_000 : 60_000 };
+  const report: RunReport = { variant, scenario, mode: liveModel ? 'live' : 'fixture', root, passed: false, checks: {}, elapsedMs: 0, pacingMs: 0, limits, requests: 0,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: null }, surfaces: [], trace: [], approvals: [], wireTools: [], wireToolBytes: [], tasks: [] };
   const memory = createPersonalMemory({ dataDir, invalidateSessions: async () => {} });
   await memory.recordDeliveredTurn({ id: 'travel', actorId: 'experiment', userText: originalMemory, assistantText: '已记录出行原话。', inputAt: Date.parse('2026-10-01T00:00:00+08:00') });
@@ -53,13 +55,14 @@ export async function runExperiment(variant: Variant, scenario: Scenario, liveMo
       variant === 'skill_cli' ? { name: 'bash', args: { command: 'mv source.txt archive/source.txt' } } : { name: 'file_operation', args: { operation: 'move', path: 'source.txt', destination: 'archive/source.txt' } },
       { name: 'write', args: { path: 'result.txt', content: '归档完成：archive/source.txt' } }, complete(), '已完成归档。'];
     if (scenario === 'approval' || scenario === 'denial') return [...prefix, ...(variant === 'independent' ? [{ name: 'work_permission', args: { mode: 'restricted', readRoots: [task.cwd!, protectedFile], writeRoots: [task.cwd!, protectedFile], network: false, expiresAt: task.permission!.expiresAt } }] : []),
+      ...(scenario === 'approval' ? [{ name: 'read', args: { path: protectedFile } }] : []),
       { name: 'write', args: { path: protectedFile, content: 'updated' } }, ...(scenario === 'denial' ? ['操作被拒绝，原件保留。'] : [complete({ artifacts: [protectedFile] }), '已更新合成文件。'])];
     if (scenario === 'memory') {
       const node = (await memory.nodes('experiment')).find(node => node.id === 'travel')!;
       const search = { query: '出行', limit: 5 }; const read = { nodeId: node.id, messageId: node.messages[0]!.id, offset: 250, limit: 1000 };
       return [...prefix, variant === 'skill_cli' ? command('memory', 'search', search) : { name: 'memory_search', args: search },
         variant === 'skill_cli' ? command('memory', 'read', read) : { name: 'memory_read', args: read },
-        { name: 'write', args: { path: 'result.txt', content: 'user：周六乘火车，不坐飞机。' } }, complete(), '已读取历史原话。'];
+        { name: 'write', args: { path: 'result.txt', content: variant === 'skill_cli' ? '角色：user\n原话：周六乘火车，不坐飞机。' : 'user：周六乘火车，不坐飞机。' } }, complete(), '已读取历史原话。'];
     }
     if (scenario === 'stale') return [...prefix, complete({ reviewedRevision: 0 }), '提交的版本已过期，需要复查最新要求。'];
     const delegation = { goal: '整理合成资料，写出 helper.txt，内容为 helper-result', purpose: 'organization', cwd: task.cwd! };
@@ -88,7 +91,7 @@ export async function runExperiment(variant: Variant, scenario: Scenario, liveMo
     for (const action of pending) {
       const grant = action.action.parameters.grant as { readRoots: string[]; writeRoots: string[]; network: boolean; mode: string } | undefined;
       const paths = grant ? [...grant.readRoots, ...grant.writeRoots] : [action.action.target];
-      const approved = scenario !== 'denial' && !!grant && grant.mode === 'restricted' && !grant.network && paths.every(path => [resolve(task.cwd!), resolve(protectedFile)].includes(resolve(path)));
+      const approved = scenario !== 'denial' && !!grant && grant.mode === 'restricted' && !grant.network && paths.every(path => [pathKey(task.cwd!), pathKey(protectedFile)].includes(pathKey(path)));
       // This is a scripted human response to exact synthetic scope, separate from model calls.
       host.authorizeAction({ conversationId: 'experiment', actorId: 'experiment', inputId: `human-${action.id}`, text: approved ? '批准本次合成范围' : '拒绝本次动作' }, action.id, approved);
       report.approvals.push({ kind: action.action.kind, approved, paths: paths.map(path => relative(root, path)) }); allowed ||= approved;
@@ -97,9 +100,9 @@ export async function runExperiment(variant: Variant, scenario: Scenario, liveMo
   };
   const pi = await createPersonalPi({ dataDir, promptFile, projectDir: join(root, 'project'), memory,
     modelConfiguration: { defaultModel: model.alias, models: [model] }, skillSources: variant === 'skill_cli' ? [{ name: 'experimental-workflow', path: dirname(skillFile) }] : [],
-    limits: { timeoutMs: liveModel ? 60_000 : 5000, maxRetries: 0, maxTurns: 20, maxTokens: 60_000 },
+    limits: { ...limits, maxRetries: 0 },
     // Custom endpoint profiles carry zero placeholder prices, not billing evidence.
-    nativeSearch: { beforeRequest() { report.requests++; }, onUsage({ usage }) { for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) report.usage[key] += usage[key]; } },
+    nativeSearch: { async beforeRequest() { if (liveModel && beforeLiveRequest) report.pacingMs += await beforeLiveRequest(); report.requests++; }, onUsage({ usage }) { for (const key of ['input', 'output', 'cacheRead', 'cacheWrite'] as const) report.usage[key] += usage[key]; } },
     reserveModelCall: sessionId => host.reserveSessionModelCall(sessionId), accountModelUsage: (sessionId, usage) => host.accountSessionModelUsage(sessionId, usage),
     sessionInterface: experimentInterface({ variant, root, dataDir, skillFile, surfaces: report.surfaces, trace: report.trace, confirmPending }),
   });
@@ -108,7 +111,7 @@ export async function runExperiment(variant: Variant, scenario: Scenario, liveMo
     const file = join(child.cwd!, 'helper.txt'); await writeFile(file, 'helper-result');
     return { text: '合成帮手材料已保存', verified: true, artifacts: [file], producedRevision: child.revision };
   } };
-  host = new PersonalHost({ store: new PersonalStore(dataDir), dialogue: pi.dialogue, executor, maxRootCalls: 24, maxGlobalCalls: 30, maxGlobalTokens: 100_000, maxDurationMs: 120_000 });
+  host = new PersonalHost({ store: new PersonalStore(dataDir), dialogue: pi.dialogue, executor, maxRootCalls: 24, maxGlobalCalls: 30, maxGlobalTokens: liveModel ? 300_000 : 100_000, maxDurationMs: liveModel ? 360_000 : 120_000 });
   const texts: Record<Scenario, string> = {
     organize: '把当前工作目录的 source.txt 移入 archive，保留原文，在 result.txt 写归档位置。核对成果后结算工作。',
     approval: `将合成文件 ${protectedFile} 改为 updated。该文件当前尚未授权，先走系统确认，成功后结算工作。`,
@@ -129,7 +132,10 @@ export async function runExperiment(variant: Variant, scenario: Scenario, liveMo
     if (scenario === 'organize') Object.assign(report.checks, { destination: await content(join(task.cwd!, 'archive', 'source.txt')) === 'synthetic-source', sourceMoved: await content(join(task.cwd!, 'source.txt')) === undefined, completed: actual.status === 'completed' });
     if (scenario === 'approval') Object.assign(report.checks, { changed: await content(protectedFile) === 'updated', confirmed: report.approvals.some(approval => approval.approved), completed: actual.status === 'completed' });
     if (scenario === 'denial') Object.assign(report.checks, { unchanged: await content(protectedFile) === 'original', denied: report.approvals.some(approval => !approval.approved), notCompleted: actual.status !== 'completed' });
-    if (scenario === 'memory') Object.assign(report.checks, { quoteAndRole: (await content(join(task.cwd!, 'result.txt')))?.includes('user：周六乘火车，不坐飞机。') === true, searched: report.trace.some(trace => trace.operation === 'memory_search' && trace.status === 'ok'), readOriginal: report.trace.some(trace => trace.operation === 'memory_read' && trace.status === 'ok'), completed: actual.status === 'completed' });
+    if (scenario === 'memory') {
+      const answer = await content(join(task.cwd!, 'result.txt')) ?? '';
+      Object.assign(report.checks, { quoteAndRole: answer.includes('周六乘火车，不坐飞机。') && /\buser\b|用户/i.test(answer), searched: report.trace.some(trace => trace.operation === 'memory_search' && trace.status === 'ok'), readOriginal: report.trace.some(trace => trace.operation === 'memory_read' && trace.status === 'ok'), completed: actual.status === 'completed' });
+    }
     if (scenario === 'delegation') Object.assign(report.checks, { helperMaterial: await content(join(task.cwd!, 'helper.txt')) === 'helper-result', childCompleted: host.listTasks().some(child => child.parentTaskId === task.id && child.status === 'completed'), eventConsumed: host.store.listWorkEvents().some(event => event.kind === 'delegation_result' && event.state === 'consumed'), completed: actual.status === 'completed' });
     if (scenario === 'stale') Object.assign(report.checks, { notCompleted: actual.status !== 'completed', latestRevision: actual.revision === 1, rejected: report.trace.some(trace => trace.operation === 'complete_work' && trace.status === 'error') });
     report.passed = Object.values(report.checks).every(Boolean);

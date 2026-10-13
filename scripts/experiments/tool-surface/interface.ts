@@ -77,7 +77,10 @@ export function experimentInterface(options: {
           if (name !== 'file_operation' || args.operation !== 'delete' || !await options.confirmPending()) throw error;
           result = await tool.execute(callId, args, signal, update, context);
         }
-        if (name === 'work_permission') await options.confirmPending();
+        if (name === 'work_permission') {
+          const approved = await options.confirmPending();
+          result = reply(JSON.stringify({ granted: approved, note: approved ? '用户已批准本次具体权限；当前工作权限已更新' : '用户拒绝本次权限提案；权限未扩大' }));
+        }
         options.trace.push({ sessionId: setup.scope.sessionId, operation: name, status: 'ok' }); return result;
       } catch (error) { options.trace.push({ sessionId: setup.scope.sessionId, operation: name, status: 'error' }); throw error; }
     }

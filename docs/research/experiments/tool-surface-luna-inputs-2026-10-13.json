@@ -1,0 +1,10 @@
+{
+  "baseline": "f0d3c50",
+  "model": "gpt-5.6-luna",
+  "hashes": {
+    "scripts/experiments/tool-surface/harness.ts": "7afa71316174c4afd138439461915f0ec156eb3e7a20d759e79f047fb4aa8957",
+    "scripts/experiments/tool-surface/interface.ts": "8f24a6bbe9fdaa53d238e7036f3a970a1a3e615c9114e611f915e956fe58eef5",
+    "scripts/experiments/tool-surface/run.ts": "621c8bb2a0986958d45e0aabdb486a3e5bbd9364d9e1fa33a8218f9575757761",
+    "scripts/experiments/tool-surface/skill/SKILL.md": "1f536e82ed6dc54d273fc368fca1c364105f7b2a14dfd72e03c7ffca1939793c"
+  }
+}

@@ -1,0 +1,2178 @@
+{
+  "mode": "live",
+  "model": "gpt-5.6-luna",
+  "requestIntervalMs": 15000,
+  "complete": true,
+  "verdict": "pilot-only; inspect paired outcomes",
+  "runs": [
+    {
+      "variant": "independent",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-g6a4dF",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": false
+      },
+      "elapsedMs": 217205,
+      "pacingMs": 161716,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 15,
+      "usage": {
+        "input": 19617,
+        "output": 1349,
+        "cacheRead": 79360,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "file_operation",
+          "status": "error"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "work_permission",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "complete_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "4f11a29a-93c9-4c61-a425-b261cdcbb26f",
+          "operation": "task_control",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\main-6afcbcb8f279ad49",
+            "state\\workspaces\\main-6afcbcb8f279ad49"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "7ac47e76-dd02-4c58-980f-5d5ec2d1bbbb",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-62OzUW",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "elapsedMs": 190597,
+      "pacingMs": 143329,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 13,
+      "usage": {
+        "input": 13374,
+        "output": 821,
+        "cacheRead": 67328,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "9746e0aa-f568-4bf1-8706-d781e1badc87",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\2dd5f544-9ab2-4307-9422-c736ee662f2f",
+            "state\\workspaces\\main-b3c677a3965e5886\\source.txt",
+            "state\\workspaces\\2dd5f544-9ab2-4307-9422-c736ee662f2f"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "2dd5f544-9ab2-4307-9422-c736ee662f2f",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "approval",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-qZxABS",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "changed": false,
+        "confirmed": false,
+        "completed": false
+      },
+      "elapsedMs": 50723,
+      "pacingMs": 29690,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 3,
+      "usage": {
+        "input": 6991,
+        "output": 348,
+        "cacheRead": 9728,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "538554a2-c3c3-4b19-88e9-a85025f04fb7",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "538554a2-c3c3-4b19-88e9-a85025f04fb7",
+          "operation": "work_permission",
+          "status": "ok"
+        },
+        {
+          "sessionId": "538554a2-c3c3-4b19-88e9-a85025f04fb7",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "protected",
+            "protected"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "4fff4c86-a045-4a13-8585-8f8ed4a46f6b",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "approval",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-IdzIQ3",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "changed": true,
+        "confirmed": true,
+        "completed": true
+      },
+      "elapsedMs": 114653,
+      "pacingMs": 87932,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 8,
+      "usage": {
+        "input": 11915,
+        "output": 674,
+        "cacheRead": 36096,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "e4de6153-670e-4a31-ab3a-afcecea297e8",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": true,
+          "paths": [
+            "state\\workspaces\\6ad2c774-45bf-48cf-87b9-4935f419be84",
+            "protected\\note.txt",
+            "state\\workspaces\\6ad2c774-45bf-48cf-87b9-4935f419be84",
+            "protected\\note.txt"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "6ad2c774-45bf-48cf-87b9-4935f419be84",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "denial",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-KZRHp3",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "elapsedMs": 45605,
+      "pacingMs": 27567,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 3,
+      "usage": {
+        "input": 2873,
+        "output": 444,
+        "cacheRead": 15616,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "82ec6960-89e6-489f-a909-e5353c7162c1",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "82ec6960-89e6-489f-a909-e5353c7162c1",
+          "operation": "work_permission",
+          "status": "ok"
+        },
+        {
+          "sessionId": "82ec6960-89e6-489f-a909-e5353c7162c1",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "protected",
+            "protected"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "572a2969-71c3-4558-b247-8a05f09b7798",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "denial",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-6Cz547",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "elapsedMs": 59213,
+      "pacingMs": 44196,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 4,
+      "usage": {
+        "input": 4556,
+        "output": 348,
+        "cacheRead": 18432,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "24b308d2-47a6-4557-9fb1-fa775b8c671f",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "24b308d2-47a6-4557-9fb1-fa775b8c671f",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "24b308d2-47a6-4557-9fb1-fa775b8c671f",
+          "operation": "write",
+          "status": "error"
+        },
+        {
+          "sessionId": "24b308d2-47a6-4557-9fb1-fa775b8c671f",
+          "operation": "read",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\a76a2978-3139-44bb-9b14-a8dc68dfc677",
+            "protected\\note.txt",
+            "state\\workspaces\\a76a2978-3139-44bb-9b14-a8dc68dfc677",
+            "protected\\note.txt"
+          ]
+        },
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\a76a2978-3139-44bb-9b14-a8dc68dfc677",
+            "protected\\note.txt",
+            "state\\workspaces\\a76a2978-3139-44bb-9b14-a8dc68dfc677"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "a76a2978-3139-44bb-9b14-a8dc68dfc677",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "memory",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-l7K4CC",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "quoteAndRole": true,
+        "searched": false,
+        "readOriginal": true,
+        "completed": true
+      },
+      "elapsedMs": 104168,
+      "pacingMs": 78679,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 7,
+      "usage": {
+        "input": 7141,
+        "output": 796,
+        "cacheRead": 39168,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "memory_read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "complete_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "47823965-4198-4962-bef6-7942c737a598",
+          "operation": "send_message",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "1565460b-f886-4504-ba26-82137aeb3fe0",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "memory",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-fihTFS",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": true
+      },
+      "elapsedMs": 168050,
+      "pacingMs": 112156,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 11,
+      "usage": {
+        "input": 30623,
+        "output": 924,
+        "cacheRead": 51456,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "memory_search",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "memory_read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "583ab24e-22b5-4687-bfb5-9b8d1ac238f8",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "3578974c-7f00-43e8-ae0f-68a12d5ca7ca",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "delegation",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-EfMbQs",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "helperMaterial": true,
+        "childCompleted": true,
+        "eventConsumed": false,
+        "completed": true
+      },
+      "elapsedMs": 103797,
+      "pacingMs": 80319,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 7,
+      "usage": {
+        "input": 8352,
+        "output": 967,
+        "cacheRead": 36096,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "delegate_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "delegate_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f24ecde1-c1d2-4d78-ae0c-f6782a4399c1",
+          "operation": "complete_work",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "12046e8c-5e98-4541-9ce6-25e28ee8fcbc",
+          "status": "completed",
+          "revision": 0
+        },
+        {
+          "id": "delegation:41ce81b2bf6c82a3450cb600626c4598c4737e88a8f0ad59b71f143a0d5c2fdc",
+          "status": "completed",
+          "revision": 0,
+          "parentTaskId": "12046e8c-5e98-4541-9ce6-25e28ee8fcbc"
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "delegation",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-0h4rNT",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "helperMaterial": true,
+        "childCompleted": true,
+        "eventConsumed": false,
+        "completed": true
+      },
+      "elapsedMs": 139449,
+      "pacingMs": 85517,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 9,
+      "usage": {
+        "input": 13604,
+        "output": 1049,
+        "cacheRead": 47872,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "delegate_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "bash",
+          "status": "error"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "67f38a18-5855-447f-b16b-6c475ceb87d7",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "b8af07a8-b9c1-413f-b450-2bf072be7878",
+          "status": "completed",
+          "revision": 0
+        },
+        {
+          "id": "delegation:3930d9cdabe2dd805eced9c05dd1d412fde5a4663093ac4f92d1bd21f4213bf9",
+          "status": "completed",
+          "revision": 0,
+          "parentTaskId": "b8af07a8-b9c1-413f-b450-2bf072be7878"
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-ZL6pqT",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "elapsedMs": 178983,
+      "pacingMs": 117153,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 12,
+      "usage": {
+        "input": 15858,
+        "output": 937,
+        "cacheRead": 66816,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "87406341-6d6d-4a4d-84c6-8b7722ff1744",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "b8ce3bc2-855c-4987-a123-1649292049e2",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-qcYhlJ",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": false
+      },
+      "elapsedMs": 241512,
+      "pacingMs": 165322,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 16,
+      "usage": {
+        "input": 16811,
+        "output": 1440,
+        "cacheRead": 89024,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "names": [
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "complete_work",
+            "task_control",
+            "memory_search",
+            "memory_read"
+          ],
+          "schemaBytes": 7596,
+          "instructionBytes": 372
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "complete_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "b25cde6b-2539-4a87-bb11-5ddeb428c538",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "235ed625-cbc1-4088-8798-2b6a4a20037d",
+          "status": "waiting",
+          "revision": 0
+        },
+        {
+          "id": "delegation:2587fed69f5eed0e0d78b3124086865dc887e13445440d77fdb326639add29d3",
+          "status": "completed",
+          "revision": 0,
+          "parentTaskId": "235ed625-cbc1-4088-8798-2b6a4a20037d"
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "approval",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-OxRr6k",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "changed": true,
+        "confirmed": true,
+        "completed": true
+      },
+      "elapsedMs": 115884,
+      "pacingMs": 85065,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 8,
+      "usage": {
+        "input": 12284,
+        "output": 644,
+        "cacheRead": 37120,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "51f52a27-833d-4abd-aa6a-3d597cfd753b",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": true,
+          "paths": [
+            "state\\workspaces\\f1c14f59-e4ce-4884-80c7-81e2b203caed",
+            "protected\\note.txt",
+            "state\\workspaces\\f1c14f59-e4ce-4884-80c7-81e2b203caed",
+            "protected\\note.txt"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "f1c14f59-e4ce-4884-80c7-81e2b203caed",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "approval",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-yrgmbv",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "changed": true,
+        "confirmed": true,
+        "completed": false
+      },
+      "elapsedMs": 77405,
+      "pacingMs": 44806,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 5,
+      "usage": {
+        "input": 11988,
+        "output": 453,
+        "cacheRead": 16384,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "ca5708a6-8538-41a5-b0a6-36aced553e2e",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "ca5708a6-8538-41a5-b0a6-36aced553e2e",
+          "operation": "work_permission",
+          "status": "ok"
+        },
+        {
+          "sessionId": "ca5708a6-8538-41a5-b0a6-36aced553e2e",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "ca5708a6-8538-41a5-b0a6-36aced553e2e",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "ca5708a6-8538-41a5-b0a6-36aced553e2e",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": true,
+          "paths": [
+            "protected\\note.txt",
+            "protected\\note.txt"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "37648c06-e9ef-4fdf-937e-7d339eb57db2",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "denial",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-VVp3nv",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "elapsedMs": 43050,
+      "pacingMs": 30312,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 3,
+      "usage": {
+        "input": 7218,
+        "output": 273,
+        "cacheRead": 9728,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "8a14ee31-2e8e-4ea1-8ffc-cb14d0d8ea71",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "8a14ee31-2e8e-4ea1-8ffc-cb14d0d8ea71",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "8a14ee31-2e8e-4ea1-8ffc-cb14d0d8ea71",
+          "operation": "read",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\6cf98dac-a349-4963-8e97-f451ba589d9f",
+            "protected\\note.txt",
+            "state\\workspaces\\6cf98dac-a349-4963-8e97-f451ba589d9f"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "6cf98dac-a349-4963-8e97-f451ba589d9f",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "denial",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-2OudCe",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "elapsedMs": 47537,
+      "pacingMs": 19789,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 3,
+      "usage": {
+        "input": 3909,
+        "output": 441,
+        "cacheRead": 14592,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "a4203ccf-118b-4623-9d16-f6e168ab8e12",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "a4203ccf-118b-4623-9d16-f6e168ab8e12",
+          "operation": "work_permission",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a4203ccf-118b-4623-9d16-f6e168ab8e12",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "protected\\note.txt",
+            "protected\\note.txt"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "b5747fc6-3c82-4e1a-87c9-b0577641bf03",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "memory",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-B0sLal",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": true
+      },
+      "elapsedMs": 151673,
+      "pacingMs": 109366,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 10,
+      "usage": {
+        "input": 15672,
+        "output": 1007,
+        "cacheRead": 54016,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "memory_search",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "memory_read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "a78f0980-ea88-4958-9e71-9e0d8863ceaf",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "8a10503f-9273-4b1c-9872-8e8b83538a2b",
+          "status": "completed",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "memory",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-NYoE4x",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": false
+      },
+      "elapsedMs": 75078,
+      "pacingMs": 54409,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 5,
+      "usage": {
+        "input": 11365,
+        "output": 508,
+        "cacheRead": 21504,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "f22de422-9d78-4252-a776-4cfa22651515",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "f22de422-9d78-4252-a776-4cfa22651515",
+          "operation": "memory_search",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f22de422-9d78-4252-a776-4cfa22651515",
+          "operation": "memory_read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f22de422-9d78-4252-a776-4cfa22651515",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "f22de422-9d78-4252-a776-4cfa22651515",
+          "operation": "complete_work",
+          "status": "error"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "b43e2eab-a4fd-4e4f-9ed4-094aed67ed5b",
+          "status": "waiting",
+          "revision": 0
+        }
+      ]
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "delegation",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Wsq0D6",
+      "passed": false,
+      "checks": {
+        "noUnknown": true,
+        "helperMaterial": false,
+        "childCompleted": true,
+        "eventConsumed": true,
+        "completed": false
+      },
+      "elapsedMs": 224100,
+      "pacingMs": 153829,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 15,
+      "usage": {
+        "input": 25313,
+        "output": 1925,
+        "cacheRead": 92672,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 887
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "names": [
+            "read",
+            "write",
+            "edit",
+            "bash"
+          ],
+          "schemaBytes": 2572,
+          "instructionBytes": 619
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "delegate_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "delegate_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "complete_work",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "error"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "004bbe38-84e3-4594-9957-4e5daf60e68e",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [
+        {
+          "kind": "permission-grant",
+          "approved": false,
+          "paths": [
+            "state\\workspaces\\e10edb31-1a4c-4a22-b81f-14a939fa5575",
+            "state\\workspaces\\main-20bf1caf1b1c4302\\helper.txt",
+            "state\\workspaces\\e10edb31-1a4c-4a22-b81f-14a939fa5575"
+          ]
+        }
+      ],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "e10edb31-1a4c-4a22-b81f-14a939fa5575",
+          "status": "waiting",
+          "revision": 0
+        },
+        {
+          "id": "delegation:56a1c7efd4d8b2db9c48e91d59bba7704782d382450fa005c86303475521aef2",
+          "status": "completed",
+          "revision": 0,
+          "parentTaskId": "e10edb31-1a4c-4a22-b81f-14a939fa5575"
+        }
+      ]
+    },
+    {
+      "variant": "independent",
+      "scenario": "delegation",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-LtXpMX",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "helperMaterial": true,
+        "childCompleted": true,
+        "eventConsumed": true,
+        "completed": true
+      },
+      "elapsedMs": 134524,
+      "pacingMs": 82322,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 9,
+      "usage": {
+        "input": 12082,
+        "output": 1041,
+        "cacheRead": 48128,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10550,
+          "instructionBytes": 799
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "names": [
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "complete_work",
+            "task_control",
+            "memory_search",
+            "memory_read"
+          ],
+          "schemaBytes": 7596,
+          "instructionBytes": 372
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "delegate_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "task_control",
+          "status": "error"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "read",
+          "status": "ok"
+        },
+        {
+          "sessionId": "3789b7c3-e3f4-4c16-9127-ae9310cf15a5",
+          "operation": "complete_work",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "4e087d56-7a6e-4870-b4b0-87e13f2b0aa3",
+          "status": "completed",
+          "revision": 0
+        },
+        {
+          "id": "delegation:fc99e79b595cf00923c27c323dd817dc7c417dc12f3de92640e5433949fa20d4",
+          "status": "completed",
+          "revision": 0,
+          "parentTaskId": "4e087d56-7a6e-4870-b4b0-87e13f2b0aa3"
+        }
+      ]
+    }
+  ]
+}
