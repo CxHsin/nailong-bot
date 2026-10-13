@@ -37,4 +37,27 @@ Session/SQLite 与控制、审计脚本位于本机 OS 临时目录，可能被�
 
 ## 下一步
 
-继续真实请求前，先明确是否排查并修复此次超时，或在不改变配置的条件下开启新的校准批次。新尝试单独冻结并保存，原中断记录保持不变；两组尚无可比较分数。
+用户随后同意先排查超时。完成下述无付费诊断后，真实实验仍暂停；重开时使用独立的新校准批次，原中断记录保持不变，两组尚无可比较分数。
+
+## 超时排查：无模型调用
+
+采用 diagnosing-bugs 的记录检查和本地反馈循环。先做正常响应/延迟不响应的 Responses 适配器配对，再在实际 `runExperiment` → Channel → Host → Pi → Responses SDK 链路注入底层连接错误。两个诊断脚本仅在 OS 临时目录，未修改源码或配置，未重新调用付费模型。
+
+### 假设与验证
+
+1. **临时连接超时**：底层连接错误会被 OpenAI SDK 转为同一个泛化错误。实际链路在第二次 fetch 注入 `TypeError`，cause 为 `ConnectTimeoutError` / `UND_ERR_CONNECT_TIMEOUT` 后，首个 read 正常、第二个请求报 `Request timed out.`、Task 为 waiting；7/7 断言通过。这只证明该原因能够产生同样症状，不证明原请求的 cause 就是它。
+2. **请求预算未正确传递**：实际链路捕获两次请求的 `x-stainless-timeout` 均为 `360`，本地端点不响应的适配器配对也按显式 200 ms 超时返回相同错误；正常对照通过。未发现请求超时配置缩短或未传入的问题。
+3. **真实端点暂时不可用或模型请求处理超时**：对配置 base URL 做 4 次不带凭据、无模型调用的 HEAD，均收到 HTTP 404，耗时分别 3,319、3,229、6,481、6,792 ms。404 仅用于确认可到达 HTTP 服务，不证明认证、模型推理或 Responses 流可用；没有复现远程连接失败。
+
+安装的 OpenAI SDK 在 `client.mjs` 的 `makeRequest` 捕获 fetch 错误时，将 abort 或带 timeout 文本的错误统一变为 `new APIConnectionTimeoutError()`，不保留原 cause。项目 `nativeStream` 能提取 cause/status，但此时底层 cause 已不存在。因此原 JSONL 的 `Request timed out.` 无法回溯到具体网络阶段。
+
+结论：本地复现了相同的超时症状及 SDK 错误归一化，排除了本地集成中 360 秒预算传递错误；临时连接超时是与现有事实相容的主要假设，尚未确认原远程失败的根因。没有实施运行时修复、扩大预算或开启自动重试。
+
+### 诊断证据
+
+- [正常/不响应对照与首个 HEAD](experiments/tool-surface-luna-foundation-v2-timeout-control-2026-10-13.json)。实际命令：`node --env-file=.env --import tsx C:/Users/Cx/AppData/Local/Temp/nailong-foundation-timeout-probe-20261013.mts`，正常响应、超时 stop/error 与远程可达性 4/4 断言通过。
+- [完整链路连接错误注入与后三个 HEAD](experiments/tool-surface-luna-foundation-v2-timeout-cause-2026-10-13.json)。实际命令：`node --env-file=.env --import tsx C:/Users/Cx/AppData/Local/Temp/nailong-foundation-timeout-cause-probe-20261013.mts`，7/7 断言通过。
+- 环境核验：Node v24.15.0、内置 Undici 7.24.4；HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 均未设置，NODE_USE_ENV_PROXY 未设置。未修改代理、系统或管理员配置。
+- 两份新增诊断 JSON 解析及配置凭据/端点扫描通过；`docs:check` 61 文档、163 本地链接通过，暂存差异检查通过。源码未改，未重跑全量测试。
+
+下一轮若继续校准，建议先在测试控制脚本的 fetch 边界仅保留失败类别、cause code、请求耗时与 HTTP 状态，避免 SDK 再次丢失原因；不记录凭据、端点地址、请求正文。此项尚未实施，后续真实请求须由用户决定是否恢复。
