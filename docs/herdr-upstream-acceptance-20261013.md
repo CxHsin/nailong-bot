@@ -17,10 +17,11 @@
 | 当前脏内容只读 | 普通 workspace 读取未提交 sentinel 和加法；报告引用真实第 1 行，sum(2,3)=5，两项断言通过；主会话核对文件指纹、branch、diff、worktree 不变。Host completed / verified=true / partial=false，50 个成功派发，无 unknown | 读范围包含项目和 skill，写范围仅独立输出目录；未切分支、建 worktree、装 hooks 或询问脏改动。清理后实际帮手 PID 消失 |
 | 非 nailong 仓库的分支规则 | 临时 AGENTS.md 指定 topic；独立 worktree 修正 sum，主会话验收接回 topic；原 SHA 120b2fc 保持，仅 sum 改动，check 不变，两项断言通过 | 未套用 development/hooks/提交推送规则；pane、agent、worktree、临时分支已清理。未预先记录 PID，进程树停止未知 |
 | 无说明的当前分支基准 | 无 AGENTS.md 的仓库以 topic 为基准；同样独立 worktree、验收接回；原 SHA a0d0cae 保持，两项断言通过 | 外层 Host 在接回后遇 402，gpt 对同一工作独立核对已有成果并完成收尾，未重新派发修改；进程树停止仍未知 |
-| 已授权两阶段接力 | 第一阶段真实报告经主会话读回并复现减法失败后，才创建第二阶段 worktree；真实修复后 worktree 和接回 topic 均两项断言通过，check 指纹不变 | 第二阶段容量错误经核对无 diff/报告后原配置返工 1 轮；未授权第三阶段未派发，文件不存在。帮手 pane、PID 和 worktree 清理已实证 |
+| 已授权两阶段接力 | 第一阶段真实报告经主会话读回并复现减法失败后，才创建第二阶段 worktree；真实修复后 worktree 和接回 topic 均两项断言通过，check 指纹不变；最终 Host completed / verified=true / partial=false，证据冻结，无 unknown | 第二阶段容量错误经核对无 diff/报告后原配置返工 1 轮；未授权第三阶段未派发，文件不存在。帮手 pane、PID 和 worktree 清理已实证 |
 | 后台 session 启动适配 | 同一 Host 新输入重读修正；任务内 PowerShell Hidden 后台启动，核对实际客户端 PID/argv、session running 与连接；限定清理后客户端 41140、server 41952 消失，其他 herdr PID 保持 | 首轮错误 argv 实际退出 2、无 session 影响，人工对账后恢复；客户端最终退出码未取得，不将其补为 0 |
 | 启动失败上限 | 首次 PATH 失败，随后两次真实 Codex 拒绝指定无效参数；三次均使用 timeout 90000，保存原生失败退出码，最终明确受阻且未派发任务 | 初次之后恰两次重试；没有删除指定参数、换配置或继续启动。失败现场保留 |
-| 验收失败及接力闸门 | 冻结检查注入固定 exit 23；主会话独立确认 sum 修正但检查失败，拒绝集成为通过。另在隔离 worktree 的接力阶段真实复现 exit 23、冻结检查指纹不变，第二阶段文件不存在且未派发 | 不可修复的检查提前受阻，追加返工 0 轮；没有验证耗尽两轮的路径。早先单独返工场景误用原目录 workspace，不能作修改隔离通过证据 |
+| 验收失败及接力闸门 | 冻结检查注入固定 exit 23；主会话独立确认 sum 修正但检查失败，拒绝集成为通过。另在隔离 worktree 的接力阶段真实复现 exit 23、冻结检查指纹不变，第二阶段文件不存在且未派发 | 不可修复的检查提前受阻，追加返工 0 轮；两轮耗尽另作受控补验。早先单独返工场景误用原目录 workspace，不能作修改隔离通过证据 |
+| 两轮返工耗尽 | 现有 Host 执行其任务内脚本，由受控 Shell worker 在初始轮及两轮纠正产生产物 value=0；每轮读取新产物并实际运行冻结检查（期望 1），均退出 23；事件恰为 rounds 0,1,2，最终 BLOCKED，无第三轮纠正或后续阶段文件，冻结脚本不变 | 明确的故障注入，验证任务脚本的有界返工与停止闸门；不代表真实 Codex 三轮纠错或主模型逐轮决策。Host 保留 waiting，脚本执行成功不表示失败产物通过验收；失败 fixture 保留 |
 
 四个正常 fixture 各含两项断言，检查文件均保持不变；没有为 skill 措辞新增字符串匹配测试。格式检查使用 `quick_validate.py` 的 UTF-8 模式；文档链接和 diff 空白检查另见对应提交验证正文。
 
@@ -37,5 +38,6 @@
 - `C:/Users/Cx/AppData/Local/Temp/nailong-herdr-183-acceptance`：准确只读权限、正常接力、后台启动及中断记录。
 - `C:/Users/Cx/AppData/Local/Temp/nailong-herdr-183-repo-acceptance`：目标规则与当前分支基准、独立观察结果、同一 fallback 工作接续。
 - `C:/Users/Cx/AppData/Local/Temp/nailong-herdr-183-failure-acceptance`：三次启动日志、原生退出码、冻结检查失败、接力闸门及人工对账。
+- `C:/Users/Cx/AppData/Local/Temp/nailong-herdr-183-reworklimit-acceptance`：受控 Shell 补验的轮次 prompt、真实事件与产物、冻结检查、停止报告及独立核对。
 
-这些目录不是可移植交付依赖；本记录保留可审阅事实及限制，不包含凭据。上述场景覆盖不等于所有模型或故障路径已通过，特别是两轮返工耗尽和两个修改场景的精确进程树停止仍未验证。
+这些目录不是可移植交付依赖；本记录保留可审阅事实及限制，不包含凭据。上述场景覆盖不等于所有模型或故障路径已通过，受控 Shell 补验不替代真实 Codex 连续三轮失败；两个修改场景的精确进程树停止仍未验证。
