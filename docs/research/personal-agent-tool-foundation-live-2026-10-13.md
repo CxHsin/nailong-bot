@@ -60,4 +60,4 @@ Session/SQLite 与控制、审计脚本位于本机 OS 临时目录，可能被�
 - 环境核验：Node v24.15.0、内置 Undici 7.24.4；HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 均未设置，NODE_USE_ENV_PROXY 未设置。未修改代理、系统或管理员配置。
 - 两份新增诊断 JSON 解析及配置凭据/端点扫描通过；`docs:check` 61 文档、163 本地链接通过，暂存差异检查通过。源码未改，未重跑全量测试。
 
-下一轮若继续校准，建议先在测试控制脚本的 fetch 边界仅保留失败类别、cause code、请求耗时与 HTTP 状态，避免 SDK 再次丢失原因；不记录凭据、端点地址、请求正文。此项尚未实施，后续真实请求须由用户决定是否恢复。
+下一轮若继续校准，建议先在测试控制脚本的 fetch 边界仅保留失败类别、cause code、请求耗时与 HTTP 状态，避免 SDK 再次丢失原因；不记录凭据、端点地址、请求正文。诊断结束时尚未实施；用户随后要求继续，[第二次试验](personal-agent-tool-foundation-attempt2-2026-10-13.md)已加入记录，校准 2/2 通过，正式批次因 TLS 建立前 ECONNRESET 暂停。

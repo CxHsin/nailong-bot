@@ -1,0 +1,153 @@
+{
+  "assertions": 89,
+  "calibrationComplete": true,
+  "mainComplete": false,
+  "requests": 30,
+  "transportFailures": [
+    {
+      "phase": "main",
+      "trial": 0,
+      "variant": "independent",
+      "scenario": "organize",
+      "runKey": "main/0/organize/independent",
+      "index": 30,
+      "startedAt": "2026-10-13T15:23:49.814Z",
+      "timeoutHeaderSeconds": "360",
+      "elapsedMs": 3007,
+      "errorName": "TypeError",
+      "causeName": "Error",
+      "causeCode": "ECONNRESET"
+    }
+  ],
+  "runs": [
+    {
+      "phase": "calibration",
+      "variant": "independent",
+      "scenario": "organize",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Tly4mU",
+      "requests": 10,
+      "scoresComputed": true,
+      "sourceArchived": true,
+      "resultMentionsArchive": true,
+      "tasks": [
+        {
+          "id": "3b43a08a-1dda-48bc-a04b-3f575303b4ce",
+          "status": "completed",
+          "revision": 0
+        }
+      ],
+      "dispatches": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "configuredModels": [
+        "gpt-5.6-luna"
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "lastAssistant": {
+        "timestamp": "2026-10-13T15:19:00.154Z",
+        "configuredModel": "gpt-5.6-luna",
+        "responseModel": "gpt-5.6-luna",
+        "stopReason": "stop"
+      }
+    },
+    {
+      "phase": "calibration",
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-j2VuE9",
+      "requests": 14,
+      "scoresComputed": true,
+      "sourceArchived": true,
+      "resultMentionsArchive": true,
+      "tasks": [
+        {
+          "id": "7a71373f-1617-406b-bfb4-13f2e59a568c",
+          "status": "completed",
+          "revision": 0
+        }
+      ],
+      "dispatches": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "configuredModels": [
+        "gpt-5.6-luna"
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "lastAssistant": {
+        "timestamp": "2026-10-13T15:22:30.945Z",
+        "configuredModel": "gpt-5.6-luna",
+        "responseModel": "gpt-5.6-luna",
+        "stopReason": "stop"
+      }
+    },
+    {
+      "phase": "main",
+      "variant": "independent",
+      "scenario": "organize",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-tCXSwf",
+      "requests": 6,
+      "scoresComputed": false,
+      "sourceArchived": true,
+      "resultMentionsArchive": true,
+      "tasks": [
+        {
+          "id": "5351779e-f04f-4b6d-9cbc-d15422b0dabf",
+          "status": "waiting",
+          "revision": 0
+        }
+      ],
+      "dispatches": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "configuredModels": [
+        "gpt-5.6-luna"
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "lastAssistant": {
+        "timestamp": "2026-10-13T15:23:52.822Z",
+        "configuredModel": "gpt-5.6-luna",
+        "stopReason": "error",
+        "errorMessage": "Client network socket disconnected before secure TLS connection was established"
+      }
+    }
+  ]
+}

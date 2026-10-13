@@ -1,0 +1,37 @@
+{
+  "commit": "2f53189",
+  "model": "gpt-5.6-luna",
+  "factor": "interface",
+  "workflow": "inline",
+  "calibration": [
+    "organize"
+  ],
+  "scenarios": [
+    "organize",
+    "approval",
+    "denial",
+    "memory",
+    "delegation"
+  ],
+  "repeat": 2,
+  "orders": [
+    [
+      "independent",
+      "skill_cli"
+    ],
+    [
+      "skill_cli",
+      "independent"
+    ]
+  ],
+  "stopOn": [
+    "provider error or abort",
+    "budget exhaustion",
+    "harness exception",
+    "unknown dispatch",
+    "unauthorized effect"
+  ],
+  "continueOn": "model behavior scoring failure",
+  "policy": "reuse harness frozen per-task input/scoring/budgets",
+  "cost": null
+}
