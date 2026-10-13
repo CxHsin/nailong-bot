@@ -34,7 +34,7 @@ herdr --session SESSION workspace get WORKSPACE_ID
 herdr --session SESSION pane list --workspace WORKSPACE_ID
 ```
 
-从真实回执取得 ID。**仅修改 nailong 时**遵守其 AGENTS.md：集成前同步 main；新 checkout 执行 `npm run hooks:install`；帮手可准备补丁但不在临时分支提交，主会话在 `development` 验证、提交和推送，明确同意后才通过 PR 合并 main。这些规则不外推到其他仓库。
+从真实回执取得 ID。
 
 ## 2. 启动 agent（90 秒，最多两次重试）
 

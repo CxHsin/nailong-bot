@@ -14,6 +14,10 @@
 
 MCP 支持 Streamable HTTP 或 stdio，url/command 二选一；支持 headers 或 env/args。来源名不得重复或复用 local/memory/tinyfish。连接失败使启动失败并清理已建立连接。连接和列出目录不是任何工作的执行授权，关闭 Host 时释放连接。
 
+### 项目指令与稳定前缀
+
+上下文按“Bot 基础提示词 → 项目指令 → Session 职责及当前工作约定”组装 system 前缀。复用 Pi 原生 `loadProjectContextFiles`，沿目录层级加载 AGENTS.md，保留其全局上下文、父目录继承和 CLAUDE.md 兼容行为。主会话及帮手结果续接按启动项目目录加载，不使用内部 Session 数据目录作为项目；嵌入调用可通过 `createPersonalPi` 的 `projectDir` 指定项目。任务和独立验收会话按自己的目标目录加载。项目文件不变时位于工作约定之前的前缀保持稳定，Session 重新打开时读取当前文件；项目指令不授予工作权限。
+
 ### 项目 herdr skill（#178）
 
 [配置示例](../config/capabilities.herdr.example.json) 登记 [herdr-workflow](../.agents/skills/herdr-workflow/SKILL.md)。设置 `AGENT_CAPABILITIES_FILE=config/capabilities.herdr.example.json`；已有配置时合并 `skillSources` 条目并保留其他能力。路径相对配置文件解析，移动配置文件时调整路径。主会话发现 skill 后读取完整文件，通过现有 `bash` 调用 herdr；不新建加载器或编排程序。
