@@ -29,7 +29,11 @@
 
 可复用真实模型入口：`node --env-file-if-exists=.env --import tsx scripts/acceptance/assistant-live.ts OUTPUT_DIRECTORY PROMPT_FILE [MODEL_ALIAS]`。输出目录应在仓库之外；marker 不是成果验收。
 
-## 未验证及限制
+## 后续实机补充
+
+用户明确要求真实测试后，Telegram 主人入站、实际文件往返与客户端确认、真实 Pi/Codex 的无关交流、补充要求、服务重开接回及 PID 停止检查已有新增证据，见 [实机补充](pi-assistant-live-20261014.md)。以下未验证说明记录首次提交时的状态，剩余覆盖以补充记录为准。
+
+## 首次提交时的未验证及限制
 
 真实 Telegram 手机端完整往返、真实模型的编码期间插话/补充/停止/重启完整矩阵，以及 Claude 实际代码成功仍未验证；自动化替身覆盖不能替代这些项。新版入口已切换，可运行代码和回归已交付，但 #196 的完整真实验收矩阵仍有以上缺口，保持 Issue 开放。上线使用前按实际账户条件补齐。
 
