@@ -40,6 +40,8 @@ herdr --session SESSION pane list --workspace WORKSPACE_ID
 
 配置按当次明确指定 > 项目约定 > 全局默认 > Codex 选择。模型与推理继承所选 CLI 配置；需要覆盖时按该版本帮助传参。保持 CLI 全局默认原样；指定配置不可用时报告受阻。
 
+Windows 启动前先按 [Windows CLI 预检与桌面 Codex 适配](references/windows-startup.md) 核对 pane 内的可执行路径；需要时补该 pane 的 PATH，并确认当前版本是否适用 `--no-daemon`，再执行下面的启动命令。
+
 ```text
 herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never
 # Claude 用 --kind claude，CLI 参数替换为 --permission-mode auto
@@ -49,7 +51,7 @@ herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 
 
 初次失败先读终端，处理已授权的项目信任或就绪提示，核对是否已存在同名 agent、实际进程和状态，再决定是否重试；初次之后最多两次启动重试，每次等待 90000 毫秒。仍无法就绪则报告受阻并保留现场，不更换指定配置，也不通过修改全局默认绕过提示。
 
-Windows pane 可能缺少桌面应用临时加入的 PATH。启动前核对 pane 内 CLI 可执行路径；必要时仅补该 pane 的 PATH，不硬编码本机临时包路径。桌面 Codex 缺少完整本地包时先查 `--help` 与 `--no-daemon` 支持，再使用本地启动适配。记录请求配置和实际可核实的 agent、模型、目录、权限；无法核实项写明未知。
+记录请求配置和实际可核实的可执行路径、agent、模型、目录、权限及启动适配参数；无法核实项写明未知。
 
 ## 3. 从文件传递 prompt
 
