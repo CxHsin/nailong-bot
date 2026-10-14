@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # 新底座工具接口隔离测试：校准中断
 
 2026-10-13，Asia/Shanghai。承接 [#187](https://github.com/CxHsin/nailong-bot/issues/187) 的真实模型实验与 [#193](https://github.com/CxHsin/nailong-bot/issues/193) 的底座校准。受检源码为 `46c4d4fe8ee494ddbbfaa79da04fb3bb3fa27d38`，启动前 development 同步 origin/main，结果 already up to date。

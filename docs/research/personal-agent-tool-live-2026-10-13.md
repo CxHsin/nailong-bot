@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Personal agent 工具融合：真实模型 pilot
 
 2026-10-13，Asia/Shanghai。用户要求开始真实测试，并指定切换为 `gpt-5.6-luna`。任务：[Issue #187](https://github.com/CxHsin/nailong-bot/issues/187)，基于 [#186](https://github.com/CxHsin/nailong-bot/issues/186) 的[隔离实验入口](../../scripts/experiments/tool-surface/README.md)。正式接口和 `.env` 未迁移或修改。

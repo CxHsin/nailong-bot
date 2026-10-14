@@ -5,7 +5,7 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 # herdr 帮手工作流
 
-主会话选择工作方式，通过现有 Shell 派发、等待、独立验收并继续用户目标。herdr 是底层终端工具；固定 `HerdrExecutor` / `delegate_work` 编码入口已退役。
+主会话通过原生 Pi Shell 派发外部帮手，登记后台观察，接回后检查实际成果并继续用户目标。herdr 是底层终端工具。
 
 ## 0. 兜底规则
 
@@ -74,6 +74,16 @@ if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端�
 
 ## 4. 等待、读结果、验收和清理
 
+### Pi 主助手的后台接回
+
+确认本次 prompt 已接收后，调用 `herdr_watch`，填写从真实回执取得的 `session`、`agent`、`paneId`、`workspaceId`、实际 `cwd` 和本次 `promptPath`。登记成功后结束当前工具轮次、及时回应主人；等待由桥接在后台执行。桥接只观察已派发的帮手，服务重启先核对实际身份与状态，不重新启动工作。
+
+`herdr_result` 是带身份的外部执行材料。收到后按本节独立验收，不把 idle/done 当成果成功。blocked 或 unknown 时核对原终端，保留现场，向主人说明所需决定；恢复工作后观察继续。登记失败时先读回实际状态，避免重复派发。
+
+主人插话时先判断归属：无关交流直接回应，明确的编码补充要求转交相应帮手，无法判断先询问。明确停止时查实际帮手和 pane，按当前 CLI 帮助停止并核对进程；终端关闭或状态未知不证明已停止。补充要求与停止不撤销已有影响。
+
+### 有界查询与成果核对
+
 ```text
 herdr --session SESSION agent wait AGENT_NAME --timeout 30000
 herdr --session SESSION agent get AGENT_NAME
@@ -114,18 +124,18 @@ if ($LASTEXITCODE -ne 0) { throw '读回失败，保留现场' }
 
 这是一份任务内脚本和主会话闸门，不新增后台任务框架或自动恢复保证。
 
-## 6. Host 权限与交付
+## 6. 执行与交付
 
-本 skill 通过现有 `skillSources` 接入，配置见[能力说明](../../../docs/capabilities.md)。执行需要当前工作有效的 Work Permission；skill、`working_agreements` 和 `executionTool:true` 均不授予权限。已有授权直接沿用；缺失时按现有 `work_permission` 提案与用户确认流程取得授权。当前 Host 同一工作只允许一个未结算动作，Shell/写入调用逐个等待回执；被拒绝时先核对上一动作。
+本 skill 由原生 Pi 资源加载器发现，配置见[能力说明](../../../docs/capabilities.md)。文件与 Shell 使用启动账户权限，工作目录不是沙箱。依据当前交办范围和目标仓库指令执行；主会话无需填写权限有效期或提交成果结算表单。
 
-只读使用项目读取范围及已有输出目录写 prompt、脚本和报告，不申请项目写权限；CLI 连接模型服务的网络需求按真实依赖填写。Codex full access / Claude auto 在可信执行中继承本机权限，项目只读和目录范围是行为约定，不是强制沙箱。发布、外发、越界动作及合并须有对应授权。
+只读任务在已有输出目录保存 prompt、脚本和报告，保留项目原状。Codex full access / Claude auto 继承本机权限，项目只读和目录范围是行为约定。发布、外发、重要删除、越界动作及合并须有对应授权。
 
-主会话用报告、补丁、代码或本地产物按用户目标交付，沿用现有成果能力；需要在线发布时先核对该动作授权。保留本地成果，不默认 HTML、R2 或公网发布。中断后从记录的 session/workspace/pane/agent、prompt、成果与验收证据人工对账；此路径不保证跨重启自动恢复或 Host 统一停止。
+主会话检查实际文件、差异和执行记录后正常回复；用 `send_file` 发送主人要求的本地产物。在线发布先核对授权。中断后从记录的 session/workspace/pane/agent、prompt、成果与验收证据对账；桥接负责恢复观察，不承诺跨重启自动完成所有工作或统一停止外部进程。
 
 ## 上游对照
 
 基线：[上游 herdr-workflow](https://github.com/joyehuang/skills/blob/master/personal/herdr-workflow/SKILL.md)（2026-10-13 读取；规格 #183）。
 
 - **保留**：0–5 的兜底、workspace/worktree 分流、启动、文件 prompt、读回清理和接力结构；内置 wait、主会话验收、最多两轮返工、只清理自己的资源与本地保留成果。
-- **适配**：目标仓库决定基准与集成；只读包含脏改动；启动 90 秒且仅两次重试；CLI 配置继承、Windows pane/PATH 与 PowerShell 文件传递；Host 权限、人工中断对账和按任务交付。第 6 节仅表达现有 Host 边界。
+- **适配**：目标仓库决定基准与集成；只读包含脏改动；启动 90 秒且仅两次重试；CLI 配置继承、Windows pane/PATH 与 PowerShell 文件传递；Pi 可信执行、后台观察与按目标交付（规格 #196）。
 - **省略**：作者固定模型、永久权限默认设置及私有 `task_protocol.py` registry/runner、notifier、watchdog、签收与恢复协议、`publish-artifact`/R2 发布设施；不复制这些依赖，也不声称它们的保证。

@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # 原生工具搜索适配
 
 2026-10-13，#167 / #169。保留 Pi 0.73.1 的 Agent loop 和 Session JSONL，在每个原生 Session 的公开 `agent.streamFn` 边界适配协议，不修改安装依赖，不全局替换 provider。

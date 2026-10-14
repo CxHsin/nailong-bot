@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Personal Agent 首轮落地核验与改动计划
 
 历史记录：固定执行器已由项目 skill 取代；当前入口见 [能力说明](capabilities.md)。旧实现基准见 [HerdrExecutor](https://github.com/CxHsin/nailong-bot/blob/3a7760bea6c7d85e233c3f0eae3eb592b144a958/src/personal/herdr.ts)。
@@ -16,7 +18,7 @@
 
 安装的 pi-ai/pi-coding-agent 为 0.73.1。pi-ai 的消息类型没有原生搜索块、工具引用或 deferred 标记；OpenAI provider 把工具映射为普通 function，Anthropic provider 未传 defer_loading，二者均不能完整保存原生发现响应。请求补丁不足以解决解析和历史重放。
 
-本项目 [model-config.ts](../src/agent/model-config.ts) 已有 toolSearch/nativeToolSearch 配置，[agent-models.ts](../src/agent/agent-models.ts) 返回 native 标记，但 [personal/pi.ts](../src/personal/pi.ts) 的会话创建没有落实原生搜索适配；不能把配置存在视为功能支持。
+本项目 [model-config.ts](../src/agent/model-config.ts) 已有 toolSearch/nativeToolSearch 配置，[agent-models.ts](../src/agent/agent-models.ts) 返回 native 标记，但 [personal/pi.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts) 的会话创建没有落实原生搜索适配；不能把配置存在视为功能支持。
 
 方案：在自定义 provider/stream 边界实现请求、流式解析和历史转换，保留 Pi agent loop。预注册当前工作可用的工具执行目录；provider 单独控制模型常驻定义及 deferred 目录。服务端搜索事件不作为普通本地工具调用执行；客户端搜索进入本地受控发现处理。工具实际派发始终检查工作身份、定义版本和授权。
 
@@ -40,7 +42,7 @@
 
 ### 委派与恢复
 
-当前 [types.ts](../src/personal/types.ts) 的 Task 只有 local/herdr executor，[host.ts](../src/personal/host.ts) 的正常完成、重启对账和挂接完成三条路径直接建 Delivery。目标统一为子成果持久入队，由本体接回继续整体工作；子成果不直接交付或当成用户历史学习。
+当前 [types.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/types.ts) 的 Task 只有 local/herdr executor，[host.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/host.ts) 的正常完成、重启对账和挂接完成三条路径直接建 Delivery。目标统一为子成果持久入队，由本体接回继续整体工作；子成果不直接交付或当成用户历史学习。
 
 方案：Task 兼容增加工作/委派角色及父、根工作身份；Attempt 持久记录开始和实际呈现的要求版本，成果固定记录产生版本。新增 work_events 持久收件表，事件用子任务/Attempt/类型生成稳定身份，完成结算与事件入队同一事务。状态区分待处理、处理中、已消费、受阻和未知，并记录 Session 注入及完成回执。
 
@@ -52,9 +54,9 @@ SQLite 与 Pi JSONL 没有共同事务，不能笼统保证模型及工具恰好
 
 ### 旧数据兼容
 
-[store.ts](../src/personal/store.ts) 当前业务记录使用 JSON body，可追加兼容字段；原 Task/Session/Attempt/Plan/Delivery 身份保持。新增独立业务 schema 迁移版本和一致备份，不能借用历史导入标记。
+[store.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/store.ts) 当前业务记录使用 JSON body，可追加兼容字段；原 Task/Session/Attempt/Plan/Delivery 身份保持。新增独立业务 schema 迁移版本和一致备份，不能借用历史导入标记。
 
-旧已完成工作不生成续接或补发；旧未完成工作先对账，再进入新续接机制。Plan 的 afterTaskId 仍代表整体工作完成。保留 [migration.ts](../src/personal/migration.ts) 已有历史导入、源摘要和遗忘保护；不重新导入记忆。迁移需验证重复启动幂等、原文和身份保留、计划依赖及 unknown Delivery 保留。
+旧已完成工作不生成续接或补发；旧未完成工作先对账，再进入新续接机制。Plan 的 afterTaskId 仍代表整体工作完成。保留 [migration.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/migration.ts) 已有历史导入、源摘要和遗忘保护；不重新导入记忆。迁移需验证重复启动幂等、原文和身份保留、计划依赖及 unknown Delivery 保留。
 
 自动召回仅在用户输入时触发，工具续步与重启复用对应记录，后台结果不触发新自动召回；主动搜索单独存在。已确认送达的本体回复按原有规则学习，子报告不冒充用户发言。工作约定独立保存，默认当前项目或工作，不从记忆推断偏好档案。
 

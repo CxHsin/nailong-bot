@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import type { ReplyPreview } from '../personal/types.js';
+export type ReplyPreview = { conversationId: string; replyId: string; text?: string };
 
 /** A single coalescing, best-effort draft lane. stop() is a barrier before durable send. */
 export function createDraftPreview(options: {

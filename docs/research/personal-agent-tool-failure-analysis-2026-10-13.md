@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Personal agent 工具实验：失败链与对照公平性复核
 
 2026-10-13，Asia/Shanghai。基于 [#187](https://github.com/CxHsin/nailong-bot/issues/187) 的真实 `gpt-5.6-luna` pilot，回答「为什么工具更细的 A 组反而完成率低、权限问题究竟是什么」。本轮读取已保存的 20 次主试验、Session 和 SQLite，没有重新请求模型或修改生产逻辑。基准源码为 `14c5cdf`。
@@ -20,13 +22,13 @@ A 五次目标成果未完成：四次材料正确但最终版本校验失败，
 
 细工具能缩小单次动作的范围，用 schema 约束参数，改善错误定位；这些收益取决于参数和状态是否可获得。完整任务还要选择动作、取得正确状态、执行、核验并结算。若结算要求填写一个未提供的版本字段，多暴露几个专用工具并不能补足信息。
 
-D 的 `agentctl work complete` 仍调用 A 的 `complete_work`，`agentctl work delegate` 仍调用 A 的 `delegate_work`，参数校验和 Host 执行实现也继续复用。它减少的是顶层入口，把部分选择和参数说明移到 Skill/帮助中。不是五种能力对十三种能力的比较。[路由实现](../../scripts/experiments/tool-surface/interface.ts)保留了这些映射。
+D 的 `agentctl work complete` 仍调用 A 的 `complete_work`，`agentctl work delegate` 仍调用 A 的 `delegate_work`，参数校验和 Host 执行实现也继续复用。它减少的是顶层入口，把部分选择和参数说明移到 Skill/帮助中。不是五种能力对十三种能力的比较。[路由实现](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/scripts/experiments/tool-surface/interface.ts)保留了这些映射。
 
 工具数量增加可能提高选择和阅读成本，命令融合也可能增加 JSON 引号、发现、往返和恢复成本。本试验不能单独测出前一种成本；D 多用了 20 次请求，累计 token 多 33.9%，未缓存 input 多约 48.7%，还有 18 次帮助调用。因此也不能声称 D 更省钱或同等目标下更高效。
 
 ## 状态校验的实际失败链
 
-[Pi 主对话](../../src/personal/pi.ts) `dialogue.decide` 注入的任务事实只有 `id/goal/status/requirements`。本轮核对 20 次原始初始输入，均没有根任务的 `revision` 和 `cwd`。结算工具却要求 `reviewedRevision` 与 `context.work().current().revision` 相等。
+[Pi 主对话](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts) `dialogue.decide` 注入的任务事实只有 `id/goal/status/requirements`。本轮核对 20 次原始初始输入，均没有根任务的 `revision` 和 `cwd`。结算工具却要求 `reviewedRevision` 与 `context.work().current().revision` 相等。
 
 A 的主对话 `task_control query` 不是同步状态读取：它保存一个 `decision`，返回 `proposed:true/executed:false`，当前工具结果不含版本。再次调用还会被「一条输入只能提出一个任务操作」拒绝。Host 在 `dialogue.decide` 返回后才应用这个提案，且查询回复只给目标、状态和结果/错误，没有版本。因此，主模型不能靠这个查询在当前工具循环中获得结算所需的版本。
 
@@ -45,7 +47,7 @@ D 的 `agentctl work --help` **及 `agentctl memory --help`** 则直接调用 `c
 
 ## 权限究竟拒绝了什么
 
-主试验审批者是[固定脚本](../../scripts/experiments/tool-surface/harness.ts)：只允许 `restricted`、无网络、每个根路径恰为工作目录或目标 `protected/note.txt`；拒绝场景一律拒绝。不是 Windows/UAC、文件 ACL 或 Shell 沙箱在这些 Run 中拒绝了操作。真实任意 Shell 没有在此试验执行。
+主试验审批者是[固定脚本](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/scripts/experiments/tool-surface/harness.ts)：只允许 `restricted`、无网络、每个根路径恰为工作目录或目标 `protected/note.txt`；拒绝场景一律拒绝。不是 Windows/UAC、文件 ACL 或 Shell 沙箱在这些 Run 中拒绝了操作。真实任意 Shell 没有在此试验执行。
 
 | Run | 提案或操作 | 判定与后续 | 归因 |
 | --- | --- | --- | --- |

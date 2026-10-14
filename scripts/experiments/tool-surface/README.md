@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../../../docs/adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # 校准后的工具接口实验
 
 对应 [#193](https://github.com/CxHsin/nailong-bot/issues/193)，规格为 [#189](https://github.com/CxHsin/nailong-bot/issues/189)。批次标识 `foundation-20261013-v2`。本入口只操作临时合成材料，不启用生产接口迁移。

@@ -5,7 +5,8 @@ export function parseCliArgs(argv: string[]): CliCommand {
   for (let index = command === "chat" || command === "send" ? 1 : 0; index < argv.length; index++) {
     const value = argv[index]!;
     if (value === "--json" || value === "--ndjson") json = true;
-    else if (value === '--restricted' || value === '--full-access') { const selected = value === '--restricted' ? 'restricted' : 'trusted'; if (mode && mode !== selected) throw new Error('不能同时选择 --restricted 和 --full-access'); mode = selected; }
+    else if (value === '--restricted') throw new Error('新 Pi 入口仅支持可信执行，未提供受限模式');
+    else if (value === '--full-access') mode = 'trusted';
     else if (value === "--conversation-id") conversationId = argv[++index];
     else if (value === "--image") imagePath = argv[++index];
     else text = text ? `${text} ${value}` : value;

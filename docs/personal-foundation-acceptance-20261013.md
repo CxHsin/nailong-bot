@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # #189 Personal Agent 底座验收：2026-10-13
 
 需求见[规格 #189](https://github.com/CxHsin/nailong-bot/issues/189)，责任边界见 [ADR-0009](adr/0009-runtime-work-context.md)。实现基于 development 的 `e407f89`，受检内容随本文所在提交保存。历史实验与旧验收保持原样。

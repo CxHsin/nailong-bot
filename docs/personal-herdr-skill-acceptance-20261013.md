@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # herdr skill 主会话验收（2026-10-13）
 
 对应 [规格 #177](https://github.com/CxHsin/nailong-bot/issues/177)、[闭环任务 #179](https://github.com/CxHsin/nailong-bot/issues/179)。此记录证明 skill 路径的真实正常运行闭环，不证明自动跨重启恢复或其他模型/CLI 路径。

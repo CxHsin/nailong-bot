@@ -2,8 +2,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { TSchema } from "typebox";
-import type { RetrievalAdapter } from '../personal/research-receipts.js';
-import { sourceUrl } from '../personal/research-receipts.js';
 
 export function tinyfishResultText(result: Awaited<ReturnType<Client["callTool"]>>): string {
   const blocks = Array.isArray(result.content) ? result.content : [];
@@ -57,12 +55,5 @@ export async function connectTinyfish(apiKey: string, url = endpoint) {
   });
 
   async function successfulText(args: Parameters<Client['callTool']>[0]) { const result = await client.callTool(args); if (result.isError) throw new Error(tinyfishResultText(result)); const text = tinyfishResultText(result); if (!text.trim()) throw new Error('Tinyfish 没有返回实际内容'); return text; }
-  const retrieval: RetrievalAdapter = { provider: 'tinyfish', version: 'single-url-provider-content-v1', validateArgs(args) {
-    if (!Array.isArray(args.urls) || args.urls.length !== 1 || typeof args.urls[0] !== 'string') throw new Error('来源回执要求单个 URL；组合响应不能归因于每个页面');
-    sourceUrl(args.urls[0]);
-  }, extract(args, result) {
-    const content = (result as { content: Array<{ type: string; text?: string }> }).content;
-    return [{ url: (args.urls as string[])[0]!, payload: content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n') }];
-  } };
-  return { tools: [search, fetch], retrieval, close: () => client.close() };
+  return { tools: [search, fetch], close: () => client.close() };
 }

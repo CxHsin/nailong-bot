@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Telegram Markdown 渲染与流式输出接口
 
 调研日期：2026-10-13（Asia/Shanghai）。检查 Telegram 官方在线 Bot API 文档、变更日志，以及本地已安装的 grammY 类型定义。当前官方版本为 Bot API 10.3（2026-08-24）；仅查阅资料，未向真实 Telegram 会话发送消息。
@@ -42,9 +44,9 @@ InputRichMessage 的 `markdown`、`html`、`blocks` 必须三选一。Rich Markd
 
 检查基准：`32fb3c1`，development。
 
-- [Telegram Channel](../../src/personal/telegram.ts) 调用 `bot.api.sendMessage(ownerId, text)`，未传格式参数，因此截图中的 Markdown 被当作普通文本显示。
-- [Channel](../../src/personal/channels.ts) 订阅正式 Delivery，默认按 3500 个 Unicode code point 分页，保存各页 sent/rejected/unknown；发送未知不自动重发。
-- [Pi prompt](../../src/personal/pi.ts) 当前订阅 message_end 统计用量，等待 prompt 完成后收集文字；没有把正文增量向 Channel 暴露。
+- [Telegram Channel](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/telegram.ts) 调用 `bot.api.sendMessage(ownerId, text)`，未传格式参数，因此截图中的 Markdown 被当作普通文本显示。
+- [Channel](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/channels.ts) 订阅正式 Delivery，默认按 3500 个 Unicode code point 分页，保存各页 sent/rejected/unknown；发送未知不自动重发。
+- [Pi prompt](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts) 当前订阅 message_end 统计用量，等待 prompt 完成后收集文字；没有把正文增量向 Channel 暴露。
 - package.json 使用 grammY `^1.46.0`；本地安装的 core/api.d.ts 已有 sendRichMessage、sendRichMessageDraft、sendMessageDraft，@grammyjs/types 已有 InputRichMessage，无需因这些方法缺失手写 HTTP 请求。部署时仍应核对实际安装版本。
 
 建议正式回复改用 Rich Markdown，并将格式感知分页放在 Telegram Channel。需要增加 Pi → Host → Channel 的公开正文预览通路；传输适配继续归 Channel，执行与任务状态继续归 Host。只预览当前面向用户的回复，不能把 thinking、工具参数或后台子任务的全部输出直接推送。草稿累计快照按回复身份隔离，并处理未闭合 Markdown、取消、失败和正式发送的竞态；客户端具体表现需实机验证。

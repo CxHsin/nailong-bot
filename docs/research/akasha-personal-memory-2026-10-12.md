@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Akasha 与 personal agent 记忆调研
 
 调研日期：2026-10-12。问题：如何借鉴 Akasha，在持续理解用户时保留经历、变化与原话，避免把用户归纳为固定偏好；应用是否已经保证了这一点？
@@ -84,9 +86,9 @@ Drift 手册另描述用户写技能定义的空闲后台工作，以及只属�
 
 ## 对 Nailong 的适用判断
 
-本地现有 [CONTEXT.md](../../CONTEXT.md) 已定义 Akasha 为原始来源召回、图关联、排除与已送达轮次学习，并明确无稳定偏好档案。本地记录链路保留用户与已送达助手原话，由 memory_search 展示材料参与图学习；本地没有采用上游 Markdown 用户档案。这是本地对照，不是上游保证。参见 [src/personal/memory.ts](../../src/personal/memory.ts)、[src/memory/graph.ts](../../src/memory/graph.ts)、[src/memory/recall.ts](../../src/memory/recall.ts)。
+本地现有 [CONTEXT.md](../../CONTEXT.md) 已定义 Akasha 为原始来源召回、图关联、排除与已送达轮次学习，并明确无稳定偏好档案。本地记录链路保留用户与已送达助手原话，由 memory_search 展示材料参与图学习；本地没有采用上游 Markdown 用户档案。这是本地对照，不是上游保证。参见 [src/personal/memory.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/memory.ts)、[src/memory/graph.ts](../../src/memory/graph.ts)、[src/memory/recall.ts](../../src/memory/recall.ts)。
 
-本地同样没有先挑“重要片段”再存入：`recordDeliveredTurn` 记录整轮原始文本，已展示的召回片段用出处范围校验后参与最多 8 项学习。当前本地通过模型调用 `memory_search` 取得材料；上游还在模型调用前依据当前用户输入自动准备背景。是否增加自动召回是独立产品与上下文预算决策，不是恢复稳定偏好档案的理由。[本地记录与展示学习](../../src/personal/memory.ts)、[上游自动材料](https://github.com/kachofugetsu09/akashic-agent/blob/556a14d311eb124ad7b0b522ba27a13898e5fe09/plugins/akasha/runtime.py#L121-L189)
+本地同样没有先挑“重要片段”再存入：`recordDeliveredTurn` 记录整轮原始文本，已展示的召回片段用出处范围校验后参与最多 8 项学习。当前本地通过模型调用 `memory_search` 取得材料；上游还在模型调用前依据当前用户输入自动准备背景。是否增加自动召回是独立产品与上下文预算决策，不是恢复稳定偏好档案的理由。[本地记录与展示学习](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/memory.ts)、[上游自动材料](https://github.com/kachofugetsu09/akashic-agent/blob/556a14d311eb124ad7b0b522ba27a13898e5fe09/plugins/akasha/runtime.py#L121-L189)
 
 本次讨论已确认：当前问题与事实优先，历史只作相关背景；不从过去行为推定不可变的偏好。明确长期工作约定是否独立保存仍待讨论，用户暂时没有首个持续跟踪场景。不能为了补全架构而替用户发明一个长期职责。
 

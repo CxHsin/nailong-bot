@@ -1,7 +1,6 @@
 import { marked } from 'marked';
-import type { Delivery } from '../personal/types.js';
 
-export interface RichPage { text: string; textFormat: NonNullable<Delivery['textFormat']> }
+export interface RichPage { text: string; textFormat: 'plain' | 'markdown' }
 const pageBytes = 8000;
 function literalPages(text: string): RichPage[] {
   const pages: RichPage[] = [];

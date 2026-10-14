@@ -1,3 +1,5 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Personal agent 的工具面：调研与实验方案
 
 2026-10-13。问题：当前主对话初始暴露约 13 个完整工具定义，是否有必要？初稿（`924c971`）做一手资料调研、仓库核验及实验设计，没有实测下述产品，也没有进行真实模型对照。产品资料只支持其公开描述，不支持推断内部完整工具清单。
@@ -79,12 +81,12 @@ Manus 2025 年的工程文章指出工具过多更容易误选，提出“遮蔽
 - [S8] Cue，官方主页及 FAQ：[Cue](https://cue.im/)。
 - [S9] OpenAI，官方 API 指南：[Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search)，How it works、Client-executed tool search。
 - [R1] [ADR-0008，工具、恢复与预算](../adr/0008-personal-agent-orchestration-direction.md)，第 35 行。
-- [R2] [src/personal/pi.ts](../../src/personal/pi.ts)，第 42–43 行常驻分类，第 106–115 行分流，第 281–292 行主对话组装，第 319–322 行后台续接。
-- [R3] [src/personal/permissions.ts](../../src/personal/permissions.ts)，第 51 行起的工作工具与授权检查。
+- [R2] [src/personal/pi.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts)，第 42–43 行常驻分类，第 106–115 行分流，第 281–292 行主对话组装，第 319–322 行后台续接。
+- [R3] [src/personal/permissions.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/permissions.ts)，第 51 行起的工作工具与授权检查。
 - [R4] [src/memory/tools.ts](../../src/memory/tools.ts)，第 7、27 行的两个记忆工具。
-- [R5] [src/agent/native-openai-responses.ts](../../src/agent/native-openai-responses.ts)，第 27–43 行发现记录与客户端/服务端目录。
-- [R6] [src/agent/native-anthropic.ts](../../src/agent/native-anthropic.ts)，第 25–35 行引用、deferred 目录及服务端搜索。
-- [R7] [src/agent/native-tool-search.ts](../../src/agent/native-tool-search.ts)，第 95–104 行匹配，第 108–122 行派发及授权。
-- [R8] [test/native-tool-search.test.ts](../../test/native-tool-search.test.ts)，第 106、131、175 行客户端发现及权限测试。
-- [R9] [test/native-tool-search-failures.test.ts](../../test/native-tool-search-failures.test.ts)，第 28 行夹具，第 42 行起的失败、重复、预算、恢复及压缩测试。
-- [R10] [src/personal/pi.ts](../../src/personal/pi.ts)，第 206 行起的完成验收；[test/personal-orchestration.test.ts](../../test/personal-orchestration.test.ts)，第 105、159、243、255 行帮手结果、修订及取消测试。
+- [R5] [src/agent/native-openai-responses.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/agent/native-openai-responses.ts)，第 27–43 行发现记录与客户端/服务端目录。
+- [R6] [src/agent/native-anthropic.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/agent/native-anthropic.ts)，第 25–35 行引用、deferred 目录及服务端搜索。
+- [R7] [src/agent/native-tool-search.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/agent/native-tool-search.ts)，第 95–104 行匹配，第 108–122 行派发及授权。
+- [R8] [test/native-tool-search.test.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/test/native-tool-search.test.ts)，第 106、131、175 行客户端发现及权限测试。
+- [R9] [test/native-tool-search-failures.test.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/test/native-tool-search-failures.test.ts)，第 28 行夹具，第 42 行起的失败、重复、预算、恢复及压缩测试。
+- [R10] [src/personal/pi.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts)，第 206 行起的完成验收；[test/personal-orchestration.test.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/test/personal-orchestration.test.ts)，第 105、159、243、255 行帮手结果、修订及取消测试。

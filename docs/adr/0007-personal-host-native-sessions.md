@@ -1,6 +1,8 @@
 ---
-status: accepted
+status: superseded
 ---
+
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
 
 # Personal Host with native Pi Sessions
 
