@@ -71,6 +71,31 @@ function hasHelperReceipt(
   });
 }
 
+async function hasDurableHelperReceipt(session: AgentSession, id: string) {
+  if (!hasHelperReceipt(session, id)) return false;
+  const path = session.sessionManager.getSessionFile();
+  if (!path) return false;
+  try {
+    // Pi postpones the first JSONL write until an assistant message exists.
+    const contents = await readFile(path, "utf8");
+    return contents
+      .split("\n")
+      .filter(Boolean)
+      .some((line) => {
+        const entry = JSON.parse(line);
+        return (
+          entry.type === "custom_message" &&
+          entry.customType === "herdr_result" &&
+          entry.details?.id === id &&
+          entry.details?.terminal === true
+        );
+      });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
 async function atomicJson(path: string, value: unknown) {
   const temp = `${path}.${randomUUID()}.tmp`;
   await writeFile(temp, JSON.stringify(value));
@@ -303,14 +328,18 @@ export async function createAssistant(options: AssistantOptions) {
     await Promise.all(known.map((entry) => conversation(entry.id)));
     let observing: Promise<void> | undefined;
     async function returnHelper(
-      context: Conversation,
-      record: HelperRecord,
+      conversationId: string,
+      helperId: string,
       status: string,
       notice: string,
       output: string,
     ) {
       const submit = acceptance.then(async () => {
-        if (closed || record.notice === notice) return;
+        if (closed) return;
+        // A reset may replace the Session while herdr get/read is awaiting I/O.
+        const context = await conversation(conversationId);
+        const record = context.helpers.find((helper) => helper.id === helperId);
+        if (!record || record.delivered || record.notice === notice) return;
         const terminal = status === "idle" || status === "done";
         const message = {
           customType: "herdr_result",
@@ -334,7 +363,10 @@ export async function createAssistant(options: AssistantOptions) {
             });
         }
         record.notice = notice;
-        if (terminal && hasHelperReceipt(context.session, record.id))
+        if (
+          terminal &&
+          (await hasDurableHelperReceipt(context.session, record.id))
+        )
           record.delivered = true;
         await context.saveHelpers();
       });
@@ -348,7 +380,7 @@ export async function createAssistant(options: AssistantOptions) {
           (record) => !record.delivered,
         )) {
           try {
-            if (hasHelperReceipt(context.session, record.id)) {
+            if (await hasDurableHelperReceipt(context.session, record.id)) {
               record.delivered = true;
               await context.saveHelpers();
               continue;
@@ -366,13 +398,13 @@ export async function createAssistant(options: AssistantOptions) {
               "--lines",
               "200",
             ]);
-            await returnHelper(context, record, state.status, notice, output);
+            await returnHelper(id, record.id, state.status, notice, output);
           } catch (error) {
             const notice = `unknown:${String(error)}`;
             if (record.notice !== notice)
               await returnHelper(
-                context,
-                record,
+                id,
+                record.id,
                 "unknown",
                 notice,
                 String(error),
@@ -434,8 +466,13 @@ export async function createAssistant(options: AssistantOptions) {
           if (command === "/reset") {
             await context.session.abort();
             await context.running;
+            for (const helper of context.helpers) {
+              if (await hasDurableHelperReceipt(context.session, helper.id))
+                helper.delivered = true;
+            }
             await context.saveHelpers();
             context.session.dispose();
+            opened.delete(context.session);
             conversations.set(
               input.conversationId,
               open(input.conversationId, true),
@@ -503,6 +540,7 @@ export async function createAssistant(options: AssistantOptions) {
             await context.session.abort();
             await context.running;
             context.session.dispose();
+            opened.delete(context.session);
           }
           await deliveries;
         } finally {

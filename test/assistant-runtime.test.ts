@@ -1,12 +1,343 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir, cp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { createServer } from "node:http";
 import { createAssistant } from "../src/assistant/runtime.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 import { assistantFixture } from "./fixtures/assistant.js";
+
+test("reset immediately after a visible helper return retains its durable acknowledgement", async () => {
+  let directory = "";
+  let status = "working";
+  let returns = 0;
+  let reconciled!: () => void;
+  const checked = new Promise<void>((resolve) => {
+    reconciled = resolve;
+  });
+  const f = await assistantFixture(
+    (wire, response) => {
+      const last = JSON.stringify(wire.messages.at(-1));
+      if (last.includes("watch coder"))
+        sendChatCompletion(response, "", [
+          {
+            index: 0,
+            id: "ack-watch",
+            type: "function",
+            function: {
+              name: "herdr_watch",
+              arguments: JSON.stringify({
+                session: "fixture",
+                agent: "coder",
+                paneId: "w1:p1",
+                workspaceId: "w1",
+                cwd: directory,
+                promptPath: join(directory, "prompt.txt"),
+              }),
+            },
+          },
+        ]);
+      else if (last.includes("herdr_result")) {
+        returns++;
+        sendChatCompletion(response, "visible result");
+      } else sendChatCompletion(response, "watching");
+    },
+    async (cwd) => {
+      directory = cwd;
+      await writeFile(join(cwd, "prompt.txt"), "fixture");
+      return {
+        pollMs: 100,
+        herdr: {
+          async run(_session, args) {
+            if (args[1] === "read") return "fixture result";
+            if (returns) reconciled();
+            return JSON.stringify({
+              result: {
+                agent: {
+                  name: "coder",
+                  pane_id: "w1:p1",
+                  workspace_id: "w1",
+                  cwd,
+                  agent_status: status,
+                  state_change_seq: status === "working" ? 1 : 2,
+                },
+              },
+            });
+          },
+        },
+      };
+    },
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "1",
+      text: "watch coder",
+    });
+    await f.app.waitForIdle();
+    status = "done";
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("no first result")), 3000);
+      const unsubscribe = f.app.subscribe((output) => {
+        if (output.type === "text" && output.text === "visible result") {
+          clearTimeout(timer);
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    await f.app.waitForIdle();
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "2",
+      text: "/reset",
+    });
+    // An unfixed reset queries and returns the helper again; fixed acknowledgement skips it.
+    await Promise.race([
+      checked,
+      new Promise((resolve) => setTimeout(resolve, 250)),
+    ]);
+    await f.app.waitForIdle();
+    assert.equal(returns, 1);
+  } finally {
+    clearTimeout(timer);
+    await f.close();
+  }
+});
+
+test("restart from pre-first-reply disk state does not lose a helper receipt held only in memory", async () => {
+  let directory = "";
+  let status = "working";
+  let held = false;
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let observed!: () => void;
+  const saved = new Promise<void>((resolve) => {
+    observed = resolve;
+  });
+  let queries = 0;
+  const f = await assistantFixture(
+    async (wire, response) => {
+      const last = JSON.stringify(wire.messages.at(-1));
+      if (last.includes("watch coder"))
+        sendChatCompletion(response, "", [
+          {
+            index: 0,
+            id: "durable-watch",
+            type: "function",
+            function: {
+              name: "herdr_watch",
+              arguments: JSON.stringify({
+                session: "fixture",
+                agent: "coder",
+                paneId: "w1:p1",
+                workspaceId: "w1",
+                cwd: directory,
+                promptPath: join(directory, "prompt.txt"),
+              }),
+            },
+          },
+        ]);
+      else if (last.includes("herdr_result")) {
+        if (!held) {
+          held = true;
+          await hold;
+          if (!response.destroyed)
+            sendChatCompletion(response, "old pending turn");
+        } else sendChatCompletion(response, "disk state recovered");
+      } else sendChatCompletion(response, "watching");
+    },
+    async (cwd) => {
+      directory = cwd;
+      await writeFile(join(cwd, "prompt.txt"), "fixture");
+      return {
+        pollMs: 10,
+        herdr: {
+          async run(_session, args) {
+            if (args[1] === "read") return "fixture artifact";
+            if (held && ++queries >= 2) observed();
+            return JSON.stringify({
+              result: {
+                agent: {
+                  name: "coder",
+                  pane_id: "w1:p1",
+                  workspace_id: "w1",
+                  cwd,
+                  agent_status: status,
+                  state_change_seq: status === "working" ? 1 : 2,
+                },
+              },
+            });
+          },
+        },
+      };
+    },
+  );
+  let restarted: Awaited<ReturnType<typeof createAssistant>> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "1",
+      text: "watch coder",
+    });
+    await f.app.waitForIdle();
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "2",
+      text: "/reset",
+    });
+    status = "done";
+    await saved;
+    // Copy the actual on-disk crash boundary before graceful abort can flush an assistant entry.
+    const snapshot = join(f.directory, "crash-snapshot");
+    await cp(f.options.dataDir, snapshot, {
+      recursive: true,
+      filter: (path) => !basename(path).startsWith("owner.sqlite"),
+    });
+    restarted = await createAssistant({ ...f.options, dataDir: snapshot });
+    await f.app.close();
+    release();
+    const answers: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("lost in-memory helper receipt")),
+        3000,
+      );
+      restarted!.subscribe((output) => {
+        if (output.type === "text") {
+          answers.push(output.text);
+          if (output.text === "disk state recovered") {
+            clearTimeout(timer);
+            resolve();
+          }
+        }
+      });
+    });
+    await restarted.waitForIdle();
+    assert.deepEqual(answers, ["disk state recovered"]);
+  } finally {
+    clearTimeout(timer);
+    release();
+    await restarted?.close();
+    await f.close();
+  }
+});
+
+test("a helper read crossing reset returns only to the new main Session", async () => {
+  let directory = "";
+  let status = "working";
+  let reading!: () => void;
+  const readStarted = new Promise<void>((resolve) => {
+    reading = resolve;
+  });
+  let release!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let returnRequests = 0;
+  const f = await assistantFixture(
+    (wire, response) => {
+      const last = JSON.stringify(wire.messages.at(-1));
+      if (last.includes("start OLD_ONLY"))
+        sendChatCompletion(response, "", [
+          {
+            index: 0,
+            id: "reset-watch",
+            type: "function",
+            function: {
+              name: "herdr_watch",
+              arguments: JSON.stringify({
+                session: "fixture",
+                agent: "coder",
+                paneId: "w1:p1",
+                workspaceId: "w1",
+                cwd: directory,
+                promptPath: join(directory, "prompt.txt"),
+              }),
+            },
+          },
+        ]);
+      else if (last.includes("herdr_result")) {
+        returnRequests++;
+        assert.doesNotMatch(JSON.stringify(wire.messages), /OLD_ONLY/);
+        sendChatCompletion(response, "new Session received return");
+      } else sendChatCompletion(response, "watching");
+    },
+    async (cwd) => {
+      directory = cwd;
+      await writeFile(join(cwd, "prompt.txt"), "fixture");
+      return {
+        pollMs: 10,
+        herdr: {
+          async run(_session, args) {
+            if (args[1] === "read") {
+              reading();
+              await hold;
+              return "new result";
+            }
+            return JSON.stringify({
+              result: {
+                agent: {
+                  name: "coder",
+                  pane_id: "w1:p1",
+                  workspace_id: "w1",
+                  cwd,
+                  agent_status: status,
+                  state_change_seq: status === "working" ? 1 : 2,
+                },
+              },
+            });
+          },
+        },
+      };
+    },
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "1",
+      text: "start OLD_ONLY",
+    });
+    await f.app.waitForIdle();
+    status = "done";
+    await readStarted;
+    await f.app.receive({
+      conversationId: "one",
+      inputId: "2",
+      text: "/reset",
+    });
+    const returned = new Promise<void>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("no return after reset")),
+        3000,
+      );
+      const unsubscribe = f.app.subscribe((output) => {
+        if (
+          output.type === "text" &&
+          output.text === "new Session received return"
+        ) {
+          clearTimeout(timer);
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    release();
+    await returned;
+    await f.app.waitForIdle();
+    assert.equal(returnRequests, 1);
+  } finally {
+    clearTimeout(timer);
+    release();
+    await f.close();
+  }
+});
 
 test("a helper return queued behind an active turn survives restart before Session insertion", async () => {
   let status = "working";
