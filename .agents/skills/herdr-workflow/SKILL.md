@@ -40,7 +40,7 @@ herdr --session SESSION pane list --workspace WORKSPACE_ID
 
 配置按当次明确指定 > 项目约定 > 全局默认 > Codex 选择。模型与推理继承所选 CLI 配置；需要覆盖时按该版本帮助传参。保持 CLI 全局默认原样；指定配置不可用时报告受阻。
 
-Windows 启动前先按 [Windows CLI 预检与桌面 Codex 适配](references/windows-startup.md) 核对 pane 内的可执行路径；需要时补该 pane 的 PATH，并确认当前版本是否适用 `--no-daemon`，再执行下面的启动命令。
+Windows 启动前先按 [Windows CLI 预检与桌面 Codex 适配](references/windows-startup.md) 核对可执行路径并补目标 pane 的 PATH。使用桌面应用附带的 Codex CLI 时，确认版本支持后采用该文档中带 `--no-daemon` 的启动命令；其他 CLI 使用下面的常规命令。
 
 ```text
 herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never
