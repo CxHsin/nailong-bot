@@ -13,9 +13,15 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 - `idle` 表示就绪，`done` 是工作完成后的 idle，`blocked` 是审批或提问，`unknown` 无法分类。状态、完成标记和 prompt 回显都只是观察，实际成果由主会话验收。
 - 普通等待用 `agent wait`；等特定状态才用 `--until`。普通终端命令可用 `pane run` / `pane wait-output --match`；读结果优先 `recent-unwrapped`。
-- 使用专用 session 与唯一 agent 名称，记录 workspace/pane、执行目录、基准、prompt 和成果路径。workspace/pane/agent 命令带 `--session SESSION`；session 管理命令按对应 help 调用（本机 `session attach NAME` 不接受全局 `--session`）。查询失败或 unknown 时保留现场、先对账。
-- 先核对专用 session 是否运行。`session attach` 是持续前台客户端，不作为普通同步 Shell 命令等待退出；需要启动时按本机帮助在后台运行。Windows 任务脚本使用 `Start-Process -WindowStyle Hidden`，记录本任务客户端 PID 与日志，再查询 session 确认就绪。客户端与 server 分别核对，保留其他会话及主服务。
+- 新任务固定复用 bot 专用的 `nailong` session（下文 `SESSION`），每个任务创建独立 workspace 并使用唯一 agent 名称；workspace 的执行目录按任务指定，session 名称不是项目目录。恢复旧任务沿用已记录的 session。记录 workspace/pane、执行目录、基准、prompt 和成果路径。workspace/pane/agent 命令带 `--session SESSION`；session 管理命令按对应 help 调用（本机 `session attach NAME` 不接受全局 `--session`）。查询失败或 unknown 时保留现场、先对账。
+- 派发前先确认共享 session 就绪，按下面的启动检查执行。客户端与 server 分别核对，保留其他会话及主服务。
 - 诊断命令保存原生命令输出和真实退出码再判断；预期失败可由任务脚本捕获并明确报告，不能把管道后续命令的退出码当作 herdr 成功，也不能因 Shell 返回成功而忽略回执中的错误。
+
+**2026-10-14 启动时序问题与处理：** 实测在 `session attach` 后立即创建 workspace 会遇到 `server_not_running`。固定 session 后，每次新派发按以下步骤执行：
+
+1. 查询 `herdr --session nailong status server --json`。检查退出码和 JSON：`running=true`、`compatible=true` 才进入就绪核对；`running=false` 时启动一次。该命令在未运行时也可能返回退出码 0，不能只看退出码。查询异常或版本不兼容时保留原始输出并报告，先不创建 workspace。
+2. 启动用 `herdr session attach nailong`。这是持续前台客户端；用户可在终端中提前运行。主助手自动启动时用任务内脚本在后台运行，Windows 使用 `Start-Process -WindowStyle Hidden`，记录客户端 PID 与日志；不等待客户端退出，也不重复启动。随后每秒查询一次 server JSON，最多等 30 秒；超时保留现场和日志，报告未就绪，不创建 workspace。
+3. server 就绪后，执行 `herdr --session nailong workspace list`，确认真实 API 回执无错误，再进入第 1 节创建本任务 workspace。已运行的 session 直接复用；任务清理只处理本任务资源，保留共享 session。若创建时仍报错，先查询现有 workspace 对账再决定后续，不重复派发代码任务。
 
 ## 1. 打开 workspace（修改才用 worktree）
 
@@ -63,7 +69,7 @@ Pi Shell 默认 Bash；Windows 下把传递放在任务内 PowerShell 脚本，�
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$session = '已核对的专用会话'
+$session = 'nailong'
 $agent = '已核对的帮手名称'
 $taskPrompt = Get-Content -LiteralPath 'D:/授权输出目录/task-prompt.txt' -Raw -Encoding utf8
 $promptArgs = @('--session', $session, 'agent', 'prompt', $agent, $taskPrompt,
