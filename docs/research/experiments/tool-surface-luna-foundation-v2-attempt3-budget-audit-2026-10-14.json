@@ -1,0 +1,19 @@
+{
+  "variant": "skill_cli",
+  "scenario": "delegation",
+  "trial": 1,
+  "segments": [
+    {
+      "requests": 13,
+      "tokens": 129764
+    },
+    {
+      "requests": 5,
+      "tokens": 77138
+    }
+  ],
+  "totalTokens": 206902,
+  "piPromptTokenLimit": 200000,
+  "hostGlobalTokenLimit": 300000,
+  "assertions": 2
+}

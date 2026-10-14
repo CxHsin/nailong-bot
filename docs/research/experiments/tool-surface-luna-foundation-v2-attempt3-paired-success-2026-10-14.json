@@ -1,0 +1,49 @@
+{
+  "pairs": [
+    {
+      "scenario": "organize",
+      "trial": 0,
+      "aTokens": 48684,
+      "dTokens": 71922,
+      "aRequests": 8,
+      "dRequests": 12
+    },
+    {
+      "scenario": "denial",
+      "trial": 0,
+      "aTokens": 19164,
+      "dTokens": 22620,
+      "aRequests": 3,
+      "dRequests": 4
+    },
+    {
+      "scenario": "memory",
+      "trial": 0,
+      "aTokens": 49019,
+      "dTokens": 56370,
+      "aRequests": 7,
+      "dRequests": 8
+    },
+    {
+      "scenario": "organize",
+      "trial": 1,
+      "aTokens": 62684,
+      "dTokens": 91865,
+      "aRequests": 10,
+      "dRequests": 13
+    },
+    {
+      "scenario": "denial",
+      "trial": 1,
+      "aTokens": 19285,
+      "dTokens": 11162,
+      "aRequests": 3,
+      "dRequests": 2
+    }
+  ],
+  "pairedSuccesses": 5,
+  "aTokens": 198836,
+  "dTokens": 253939,
+  "aRequests": 31,
+  "dRequests": 39
+}

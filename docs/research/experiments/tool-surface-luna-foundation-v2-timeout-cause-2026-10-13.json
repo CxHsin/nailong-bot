@@ -1,0 +1,33 @@
+{
+  "injectedConnectFailure": {
+    "error": "Request timed out.",
+    "requests": 2,
+    "wireCalls": 1,
+    "timeoutHeaderSeconds": [
+      "360",
+      "360"
+    ],
+    "taskStatus": "waiting",
+    "completedOperation": "read",
+    "originalCause": "UND_ERR_CONNECT_TIMEOUT",
+    "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-s7hEM1",
+    "assertions": 7
+  },
+  "remoteHeads": [
+    {
+      "reachable": true,
+      "status": 404,
+      "elapsedMs": 3229
+    },
+    {
+      "reachable": true,
+      "status": 404,
+      "elapsedMs": 6481
+    },
+    {
+      "reachable": true,
+      "status": 404,
+      "elapsedMs": 6792
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "modelRequests": 0,
+  "intervalMs": 15000,
+  "samples": [
+    {
+      "index": 0,
+      "ok": true,
+      "status": 200,
+      "elapsedMs": 581,
+      "connection": "keep-alive",
+      "keepAlive": null,
+      "events": [
+        {
+          "sample": 0,
+          "type": "beforeConnect"
+        },
+        {
+          "sample": 0,
+          "type": "connected"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "ok": true,
+      "status": 200,
+      "elapsedMs": 636,
+      "connection": "keep-alive",
+      "keepAlive": null,
+      "events": [
+        {
+          "sample": 1,
+          "type": "beforeConnect"
+        },
+        {
+          "sample": 1,
+          "type": "connected"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "ok": true,
+      "status": 200,
+      "elapsedMs": 686,
+      "connection": "keep-alive",
+      "keepAlive": null,
+      "events": [
+        {
+          "sample": 2,
+          "type": "beforeConnect"
+        },
+        {
+          "sample": 2,
+          "type": "connected"
+        }
+      ]
+    }
+  ]
+}

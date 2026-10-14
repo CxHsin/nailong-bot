@@ -1,14 +1,18 @@
 ---
-status: accepted
+status: superseded
 ---
 
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # Personal Agent 统一组织工作
+
+2026-10-13 后续底座决定：[ADR-0009](0009-runtime-work-context.md) 与[规格 #189](https://github.com/CxHsin/nailong-bot/issues/189)替代下文对所有入口默认受限、模型手填要求版本及非成功报告的现行约束。本文保留 #167 的方向和当时实现证据；本地交互目录与模式、Runtime 要求呈现职责以 ADR-0009 为准。
 
 2026-10-12 方向讨论，2026-10-13 用户调用 to-spec 将已确认设计转为规格。[设计结论 #166](https://github.com/CxHsin/nailong-bot/issues/166)、[规格 #167](https://github.com/CxHsin/nailong-bot/issues/167) 是讨论及实现规格的权威记录。本方向已按 #168–#173 在 development 实现；实际保证和未验证项见下方实现记录及[本轮验收](../personal-agent-acceptance-20261013.md)。[ADR-0007](0007-personal-host-native-sessions.md) 保留 #157 历史基线。讨论源：[Grok Bot 架构文章](https://www.joyehuang.me/blog/20261011---alwaysonagents/post)、[Akasha 专项调研](../research/akasha-personal-memory-2026-10-12.md)。
 
 ## 已确认的方向
 
-Nailong 的目标是持续共事的 personal agent，编码是其中一种能力。本体直接处理轻量工作和授权范围内的短操作；耗时、输出量大或需要独立上下文的工作委派给帮手。研究、整理与编码使用统一委派入口，保留不同帮手的能力和执行边界。herdr 是外部编码 Agent 的接入与管理桥梁，子任务结果回到本体，由本体继续处理完整用户目标。
+Nailong 的目标是持续共事的 personal agent，编码是其中一种能力。本体直接处理轻量工作和授权范围内的短操作；耗时、输出量大或需要独立上下文的工作委派给帮手。研究和整理使用 Host 委派入口；编码按 #177 使用项目 herdr-workflow skill 与主会话 Shell 调用 CLI。固定 HerdrExecutor 在真实闭环通过后退役，保留历史任务身份，不自动恢复、重派或改派。直接 CLI 帮手由 skill 核对和停止，不享有其他 Host 帮手的自动生命周期保证。herdr 是外部编码 Agent 的接入与管理桥梁，子任务结果回到本体，由本体继续处理完整用户目标。
 
 本体工具保持少量通用能力。连接器工具按需发现和加载，不将全部工具说明常驻模型上下文；加载工具不等于授予执行权限。用户基本同意按明确范围授权、按成果与影响选择验收，而非所有工作使用同一套独立验收流水线。具体工具、权限接口及受阻策略由 #167 规格和下方实现记录确定。
 
@@ -98,6 +102,6 @@ Host 以整体工作、独立子委派、WorkEvent 和动作账本为业务真�
 
 自动召回只由真实用户输入触发，持久 started/ready/unavailable/excluded 与呈现出处防止重启重复召回。孩子只接收本体选定原文/必要约定，额外背景请求是执行材料。工作约定通过独立修订事实及用户后续明确确认保存。
 
-受限后端除能力外匹配执行身份、证据、当前范围；Shell/独立检查/herdr 在异步核对后重读权限，原始模式、目标或范围变化不能沿用旧授权。Codex unelevated candidate 当前仅注册诊断并拒绝派发，没有通用可执行沙箱实现。实际 OS/二进制和采样限制见本轮验收。
+受限后端除能力外匹配执行身份、证据、当前范围；Shell/独立检查在异步核对后重读权限，原始模式、目标或范围变化不能沿用旧授权。Codex unelevated candidate 当前仅注册诊断并拒绝派发，没有通用可执行沙箱实现。实际 OS/二进制和采样限制见本轮验收。
 
 远端来源回执保存成功受控检索的 requested URL、provider-returned content、摘要、版本及 owner/root 身份，不声称提供独立 HTTP/freshness 核验。错误出处和伪造摘录保持 partial；本体仍判断结论是否符合目标。真实 SIGKILL 恢复用例与 throw/协议夹具分别列证据，真实 Anthropic 与本轮 Telegram 仍未验证；未部署或合并。

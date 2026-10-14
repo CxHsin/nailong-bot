@@ -1,0 +1,15 @@
+{
+  "control": {
+    "stopReason": "stop"
+  },
+  "stall": {
+    "stopReason": "error",
+    "errorMessage": "Request timed out.",
+    "elapsedMs": 216
+  },
+  "remoteHead": {
+    "reachable": true,
+    "status": 404,
+    "elapsedMs": 3319
+  }
+}

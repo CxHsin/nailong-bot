@@ -1,0 +1,3 @@
+{
+  "skillSources": [{ "name": "project", "path": "../.agents/skills" }]
+}

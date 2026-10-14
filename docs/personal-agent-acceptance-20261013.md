@@ -1,4 +1,8 @@
+> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+
 # #167 当前实现与验收：2026-10-13
+
+本文保留 #167/#173 当时验收矩阵和固定执行器基线，不代表当前编码入口。#177 项目 skill 的现行闭环证据见[最新验收](personal-herdr-skill-acceptance-20261013.md)。固定执行器代码与测试以 [3a7760b](https://github.com/CxHsin/nailong-bot/tree/3a7760bea6c7d85e233c3f0eae3eb592b144a958) 为历史基准。
 
 实施分支 development；#173 受检基础提交 `dcc8152`，其上包含本文所列实现，受检内容随本文件所在提交保存。本文记录实际已跑证据，不表示已合并、部署或完成真实端点矩阵。需求及六项责任见 [规格 #167](https://github.com/CxHsin/nailong-bot/issues/167)；架构见 [ADR-0008](adr/0008-personal-agent-orchestration-direction.md)。
 

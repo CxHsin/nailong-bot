@@ -1,0 +1,185 @@
+{
+  "modelRequests": 0,
+  "dns": [
+    {
+      "round": 0,
+      "ok": true,
+      "families": [
+        4
+      ],
+      "addresses": 1,
+      "elapsedMs": 8
+    },
+    {
+      "round": 1,
+      "ok": true,
+      "families": [
+        4
+      ],
+      "addresses": 1,
+      "elapsedMs": 1
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "families": [
+        4
+      ],
+      "addresses": 1,
+      "elapsedMs": 1
+    }
+  ],
+  "tls": [
+    {
+      "round": 0,
+      "ok": true,
+      "protocol": "TLSv1.3",
+      "authorized": true,
+      "elapsedMs": 221
+    },
+    {
+      "round": 1,
+      "ok": true,
+      "protocol": "TLSv1.3",
+      "authorized": true,
+      "elapsedMs": 210
+    },
+    {
+      "round": 2,
+      "ok": true,
+      "protocol": "TLSv1.3",
+      "authorized": true,
+      "elapsedMs": 639
+    }
+  ],
+  "head": [
+    {
+      "round": 0,
+      "mode": "default",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 609,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "default/0",
+          "type": "beforeConnect",
+          "relativeMs": 4
+        },
+        {
+          "probe": "default/0",
+          "type": "connected",
+          "relativeMs": 211
+        }
+      ]
+    },
+    {
+      "round": 0,
+      "mode": "pooled",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 619,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "pooled/0",
+          "type": "beforeConnect",
+          "relativeMs": 1
+        },
+        {
+          "probe": "pooled/0",
+          "type": "connected",
+          "relativeMs": 205
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "mode": "pooled",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 498,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "pooled/1",
+          "type": "beforeConnect",
+          "relativeMs": 1
+        },
+        {
+          "probe": "pooled/1",
+          "type": "connected",
+          "relativeMs": 249
+        }
+      ]
+    },
+    {
+      "round": 1,
+      "mode": "default",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 855,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "default/1",
+          "type": "beforeConnect",
+          "relativeMs": 1
+        },
+        {
+          "probe": "default/1",
+          "type": "connected",
+          "relativeMs": 352
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "mode": "default",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 500,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "default/2",
+          "type": "beforeConnect",
+          "relativeMs": 1
+        },
+        {
+          "probe": "default/2",
+          "type": "connected",
+          "relativeMs": 244
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "mode": "pooled",
+      "ok": true,
+      "status": 404,
+      "elapsedMs": 389,
+      "connection": "close",
+      "keepAlive": null,
+      "events": [
+        {
+          "probe": "pooled/2",
+          "type": "beforeConnect",
+          "relativeMs": 0
+        },
+        {
+          "probe": "pooled/2",
+          "type": "connected",
+          "relativeMs": 148
+        }
+      ]
+    }
+  ],
+  "rounds": 3,
+  "intervalMs": 15000
+}

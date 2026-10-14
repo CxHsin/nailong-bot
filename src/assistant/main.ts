@@ -1,0 +1,48 @@
+import { Bot } from "grammy";
+import { telegramEnvironment } from "../channel/telegram/index.js";
+import { downloadTelegramPhoto } from "../telegram/telegram-input.js";
+import { assistantEnvironment } from "./environment.js";
+import { connectTelegram } from "./telegram.js";
+
+export async function startTelegram() {
+  const telegram = telegramEnvironment(process.env);
+  const runtime = await assistantEnvironment();
+  const bot = new Bot(telegram.token, { client: { timeoutSeconds: 30 } });
+  const reportFailure = (error: unknown) =>
+    console.error(error instanceof Error ? error.message : String(error));
+  const stop = () => {
+    void bot.stop().catch(reportFailure);
+  };
+  let channel: Awaited<ReturnType<typeof connectTelegram>> | undefined;
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  bot.catch((error) => reportFailure(error.error));
+  try {
+    await bot.init();
+    channel = await connectTelegram({
+      app: runtime.app,
+      bot,
+      ownerId: telegram.ownerId,
+      dataDir: runtime.dataDir,
+      download: (id) => downloadTelegramPhoto(bot, telegram.token, id),
+      reportFailure,
+    });
+    await bot.api.setMyCommands(
+      [
+        { command: "help", description: "使用方式" },
+        { command: "reset", description: "开始新会话" },
+        { command: "model", description: "查看或切换模型" },
+      ],
+      { scope: { type: "chat", chat_id: telegram.ownerId } },
+    );
+    console.log("原生 Pi 助手正在接收 Telegram 私聊。");
+    await bot.start({ limit: 1, drop_pending_updates: false });
+  } finally {
+    process.off("SIGINT", stop);
+    process.off("SIGTERM", stop);
+    await channel?.accepted();
+    await channel?.finish();
+    await runtime.close();
+    await channel?.close();
+  }
+}

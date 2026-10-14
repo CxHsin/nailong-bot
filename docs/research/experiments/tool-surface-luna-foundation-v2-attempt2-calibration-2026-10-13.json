@@ -1,0 +1,690 @@
+{
+  "batch": "foundation-20261013-v2",
+  "factor": "interface",
+  "mode": "live",
+  "model": "gpt-5.6-luna",
+  "requestIntervalMs": 15000,
+  "complete": true,
+  "runs": [
+    {
+      "variant": "independent",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Tly4mU",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "elapsedMs": 156560,
+      "pacingMs": 48953,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 10,
+      "usage": {
+        "input": 11337,
+        "output": 1062,
+        "cacheRead": 50944,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "names": [
+            "task_control",
+            "plan_control",
+            "memory_search",
+            "memory_read",
+            "read",
+            "write",
+            "edit",
+            "work_permission",
+            "file_operation",
+            "bash",
+            "send_message",
+            "delegate_work",
+            "working_agreements",
+            "complete_work"
+          ],
+          "schemaBytes": 10552,
+          "instructionBytes": 687
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Tly4mU\\project\\source.txt"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Tly4mU\\project\\archive\\source.txt"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-Tly4mU\\project\\result.txt"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "36cef239-cd98-4e6e-8edd-ad6dfff1abb5",
+          "operation": "complete_work",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "3b43a08a-1dda-48bc-a04b-3f575303b4ce",
+          "status": "completed",
+          "revision": 0
+        }
+      ],
+      "replies": [
+        "工作已完成并核对：source.txt 已移入 archive/source.txt，原文保持不变；result.txt 已写入 archive/source.txt；原工作目录中的 source.txt 已不存在。"
+      ],
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "calibration": {
+        "batch": "foundation-20261013-v2",
+        "inputFingerprint": "73762043f3c55a6f22a9ea05e2cf7ca6e79df241f5fea1a45ae4f0f0c99c6465",
+        "policyFingerprint": "f8449d8bb040765262b7871cf2535d539846e52237354f4b24e58b1b10cd420c",
+        "scoringVersion": 2,
+        "permissionMode": "trusted",
+        "helper": "fast",
+        "source": "retrieved",
+        "workflow": "inline"
+      },
+      "frozen": {
+        "input": "把当前工作目录的 source.txt 移入 archive，保留原文，在 result.txt 写归档位置。核对成果后结算工作。",
+        "materials": {
+          "project/source.txt": "synthetic-source",
+          "protected/note.txt": "original",
+          "historicalUser": "我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。用户原话：周六乘火车，不坐飞机。"
+        },
+        "policy": {
+          "limits": {
+            "timeoutMs": 360000,
+            "maxTurns": 20,
+            "maxTokens": 200000
+          },
+          "hostLimits": {
+            "maxRootCalls": 24,
+            "maxGlobalCalls": 30,
+            "maxGlobalTokens": 300000,
+            "maxDurationMs": 360000
+          },
+          "permissionMode": "trusted",
+          "helper": "fast",
+          "source": "retrieved",
+          "workflow": "inline",
+          "approval": "exact-action-paths-v2",
+          "scoringVersion": 2
+        },
+        "scoring": {
+          "artifacts": [
+            "destination",
+            "sourceMoved"
+          ],
+          "instructions": [],
+          "permissions": [
+            "noUnknown"
+          ],
+          "lifecycle": [
+            "completed"
+          ]
+        }
+      },
+      "transportTelemetry": [
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 1,
+          "startedAt": "2026-10-13T15:16:23.671Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5705
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 2,
+          "startedAt": "2026-10-13T15:16:38.678Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5320
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 3,
+          "startedAt": "2026-10-13T15:16:53.683Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5567
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 4,
+          "startedAt": "2026-10-13T15:17:08.692Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5992
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 5,
+          "startedAt": "2026-10-13T15:17:23.697Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 7414
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 6,
+          "startedAt": "2026-10-13T15:17:38.702Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 8011
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 7,
+          "startedAt": "2026-10-13T15:17:53.717Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5969
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 8,
+          "startedAt": "2026-10-13T15:18:08.733Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5268
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 9,
+          "startedAt": "2026-10-13T15:18:23.746Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 20969
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "independent",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/independent",
+          "index": 10,
+          "startedAt": "2026-10-13T15:18:49.669Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 6383
+        }
+      ],
+      "audit": {
+        "responseModels": [
+          "gpt-5.6-luna"
+        ],
+        "stopReasons": []
+      },
+      "trial": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "mode": "live",
+      "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-j2VuE9",
+      "passed": true,
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "elapsedMs": 210751,
+      "pacingMs": 80931,
+      "limits": {
+        "timeoutMs": 360000,
+        "maxTurns": 20,
+        "maxTokens": 200000
+      },
+      "requests": 14,
+      "usage": {
+        "input": 17234,
+        "output": 1296,
+        "cacheRead": 68352,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "surfaces": [
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "names": [
+            "plan_control",
+            "read",
+            "write",
+            "edit",
+            "bash",
+            "working_agreements"
+          ],
+          "schemaBytes": 4933,
+          "instructionBytes": 905
+        }
+      ],
+      "trace": [
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-j2VuE9\\project\\source.txt"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "file_operation",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "write",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-j2VuE9\\project\\archive\\source.txt"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "read",
+          "status": "ok",
+          "target": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-j2VuE9\\project\\result.txt"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "read",
+          "status": "error"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "error"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "task_control",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "complete_work",
+          "status": "ok"
+        },
+        {
+          "sessionId": "0aa1da38-0d1b-4bec-a15c-c71fbda40184",
+          "operation": "bash",
+          "status": "ok"
+        }
+      ],
+      "approvals": [],
+      "wireTools": [],
+      "wireToolBytes": [],
+      "tasks": [
+        {
+          "id": "7a71373f-1617-406b-bfb4-13f2e59a568c",
+          "status": "completed",
+          "revision": 0
+        }
+      ],
+      "replies": [
+        "已将 source.txt 移入 archive，保留原文，并在 result.txt 写入归档位置。已核对归档内容、结果记录及原位置状态。"
+      ],
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "calibration": {
+        "batch": "foundation-20261013-v2",
+        "inputFingerprint": "73762043f3c55a6f22a9ea05e2cf7ca6e79df241f5fea1a45ae4f0f0c99c6465",
+        "policyFingerprint": "f8449d8bb040765262b7871cf2535d539846e52237354f4b24e58b1b10cd420c",
+        "scoringVersion": 2,
+        "permissionMode": "trusted",
+        "helper": "fast",
+        "source": "retrieved",
+        "workflow": "inline"
+      },
+      "frozen": {
+        "input": "把当前工作目录的 source.txt 移入 archive，保留原文，在 result.txt 写归档位置。核对成果后结算工作。",
+        "materials": {
+          "project/source.txt": "synthetic-source",
+          "protected/note.txt": "original",
+          "historicalUser": "我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。我们之前讨论出行。用户原话：周六乘火车，不坐飞机。"
+        },
+        "policy": {
+          "limits": {
+            "timeoutMs": 360000,
+            "maxTurns": 20,
+            "maxTokens": 200000
+          },
+          "hostLimits": {
+            "maxRootCalls": 24,
+            "maxGlobalCalls": 30,
+            "maxGlobalTokens": 300000,
+            "maxDurationMs": 360000
+          },
+          "permissionMode": "trusted",
+          "helper": "fast",
+          "source": "retrieved",
+          "workflow": "inline",
+          "approval": "exact-action-paths-v2",
+          "scoringVersion": 2
+        },
+        "scoring": {
+          "artifacts": [
+            "destination",
+            "sourceMoved"
+          ],
+          "instructions": [],
+          "permissions": [
+            "noUnknown"
+          ],
+          "lifecycle": [
+            "completed"
+          ]
+        }
+      },
+      "transportTelemetry": [
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 11,
+          "startedAt": "2026-10-13T15:19:04.668Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 10378
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 12,
+          "startedAt": "2026-10-13T15:19:19.708Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 4125
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 13,
+          "startedAt": "2026-10-13T15:19:34.711Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 6982
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 14,
+          "startedAt": "2026-10-13T15:19:49.716Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 2279
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 15,
+          "startedAt": "2026-10-13T15:20:04.721Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 10722
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 16,
+          "startedAt": "2026-10-13T15:20:19.729Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 3933
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 17,
+          "startedAt": "2026-10-13T15:20:34.730Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 6316
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 18,
+          "startedAt": "2026-10-13T15:20:49.730Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5631
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 19,
+          "startedAt": "2026-10-13T15:21:04.733Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 6991
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 20,
+          "startedAt": "2026-10-13T15:21:19.736Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 7116
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 21,
+          "startedAt": "2026-10-13T15:21:34.749Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 8056
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 22,
+          "startedAt": "2026-10-13T15:21:49.760Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 3258
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 23,
+          "startedAt": "2026-10-13T15:22:04.763Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 5006
+        },
+        {
+          "phase": "calibration",
+          "trial": 0,
+          "variant": "skill_cli",
+          "scenario": "organize",
+          "runKey": "calibration/0/organize/skill_cli",
+          "index": 24,
+          "startedAt": "2026-10-13T15:22:19.771Z",
+          "timeoutHeaderSeconds": "360",
+          "status": 200,
+          "elapsedMs": 6399
+        }
+      ],
+      "audit": {
+        "responseModels": [
+          "gpt-5.6-luna"
+        ],
+        "stopReasons": []
+      },
+      "trial": 0
+    }
+  ]
+}

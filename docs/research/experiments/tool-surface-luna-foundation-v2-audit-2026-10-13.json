@@ -1,0 +1,52 @@
+{
+  "batch": "foundation-20261013-v2",
+  "model": "gpt-5.6-luna",
+  "root": "C:\\Users\\Cx\\AppData\\Local\\Temp\\nailong-tool-experiment-dySm0o",
+  "phase": "calibration",
+  "variant": "independent",
+  "scenario": "organize",
+  "complete": false,
+  "error": "Request timed out.",
+  "messages": [
+    {
+      "timestamp": "2026-10-13T14:59:04.052Z",
+      "model": "gpt-5.6-luna",
+      "stopReason": "toolUse",
+      "toolNames": [
+        "read"
+      ],
+      "usage": {
+        "input": 5423,
+        "output": 144,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 5567
+      }
+    },
+    {
+      "timestamp": "2026-10-13T14:59:19.766Z",
+      "model": "gpt-5.6-luna",
+      "stopReason": "error",
+      "errorMessage": "Request timed out.",
+      "toolNames": [],
+      "usage": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 0
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "52ea8ef0-e568-493c-8a6d-13f6aa8b53e7",
+      "status": "waiting",
+      "revision": 0
+    }
+  ],
+  "dispatches": [],
+  "sourcePreserved": true,
+  "checksComputed": false,
+  "requestCount": 2
+}

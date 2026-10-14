@@ -1,0 +1,1460 @@
+{
+  "complete": true,
+  "assertions": 588,
+  "settled": 20,
+  "requests": 154,
+  "connections": 1,
+  "transportFailures": [],
+  "totals": {
+    "independent": {
+      "tasks": 10,
+      "passed": 7,
+      "scores": {
+        "artifacts": 8,
+        "instructions": 9,
+        "permissions": 8,
+        "lifecycle": 8
+      },
+      "requests": 52,
+      "tokens": 335317,
+      "elapsedMs": 787326,
+      "pacingMs": 486947
+    },
+    "skill_cli": {
+      "tasks": 10,
+      "passed": 8,
+      "scores": {
+        "artifacts": 8,
+        "instructions": 8,
+        "permissions": 8,
+        "lifecycle": 8
+      },
+      "requests": 102,
+      "tokens": 807187,
+      "elapsedMs": 1561766,
+      "pacingMs": 901426
+    }
+  },
+  "runs": [
+    {
+      "variant": "independent",
+      "scenario": "organize",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 8,
+      "totalTokens": 48684,
+      "usage": {
+        "input": 4955,
+        "output": 721,
+        "cacheRead": 43008,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 108297,
+      "pacingMs": 77150,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "read",
+        "file_operation",
+        "bash",
+        "write",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 12,
+      "totalTokens": 71922,
+      "usage": {
+        "input": 18400,
+        "output": 1042,
+        "cacheRead": 52480,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 179903,
+      "pacingMs": 135363,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "read",
+        "file_operation",
+        "bash",
+        "write",
+        "complete_work",
+        "task_control"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "bash",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "approval",
+      "trial": 0,
+      "passed": false,
+      "scores": {
+        "artifacts": false,
+        "instructions": true,
+        "permissions": false,
+        "lifecycle": false
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "changed": false,
+        "confirmed": false,
+        "completed": false
+      },
+      "scoreComputed": true,
+      "requests": 3,
+      "totalTokens": 17340,
+      "usage": {
+        "input": 7276,
+        "output": 336,
+        "cacheRead": 9728,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 43466,
+      "pacingMs": 31647,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "protected-directory",
+            "protected-directory"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "work_permission",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "approval",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "changed": true,
+        "confirmed": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 12,
+      "totalTokens": 77626,
+      "usage": {
+        "input": 15052,
+        "output": 1134,
+        "cacheRead": 61440,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 182377,
+      "pacingMs": 124335,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "consumed",
+          "mode": "restricted",
+          "readRoots": 2,
+          "writeRoots": 2,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "project",
+            "protected-file",
+            "project",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "write",
+        "read",
+        "bash",
+        "complete_work",
+        "task_control"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "bash",
+          "categories": []
+        },
+        {
+          "toolName": "bash",
+          "categories": [
+            "invalid-arguments"
+          ]
+        },
+        {
+          "toolName": "bash",
+          "categories": []
+        },
+        {
+          "toolName": "bash",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "denial",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "scoreComputed": true,
+      "requests": 3,
+      "totalTokens": 19164,
+      "usage": {
+        "input": 7008,
+        "output": 380,
+        "cacheRead": 11776,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 44735,
+      "pacingMs": 25831,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": true,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "protected-file",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "work_permission",
+        "complete_work"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "complete_work",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "denial",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "scoreComputed": true,
+      "requests": 4,
+      "totalTokens": 22620,
+      "usage": {
+        "input": 7634,
+        "output": 394,
+        "cacheRead": 14592,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 59607,
+      "pacingMs": 42613,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 2,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "project",
+            "protected-file",
+            "project"
+          ]
+        },
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 2,
+          "writeRoots": 2,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "project",
+            "protected-file",
+            "project",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "read",
+        "write"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "read",
+          "categories": [
+            "approval-declined"
+          ]
+        },
+        {
+          "toolName": "write",
+          "categories": [
+            "approval-declined"
+          ]
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "memory",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 7,
+      "totalTokens": 49019,
+      "usage": {
+        "input": 8039,
+        "output": 788,
+        "cacheRead": 40192,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 106493,
+      "pacingMs": 67852,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        },
+        {
+          "kind": "external-send",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "memory_search",
+        "memory_read",
+        "write",
+        "complete_work",
+        "task_control",
+        "send_message"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "task_control",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "memory",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 8,
+      "totalTokens": 56370,
+      "usage": {
+        "input": 15044,
+        "output": 1134,
+        "cacheRead": 40192,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 121904,
+      "pacingMs": 74935,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "memory_search",
+        "bash",
+        "memory_read",
+        "write",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "delegation",
+      "trial": 0,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "helperMaterial": true,
+        "childCompleted": true,
+        "helperDispatched": true,
+        "readMaterial": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 5,
+      "totalTokens": 34286,
+      "usage": {
+        "input": 9213,
+        "output": 497,
+        "cacheRead": 24576,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 73916,
+      "pacingMs": 47950,
+      "taskStatus": "completed",
+      "childStatuses": [
+        "completed"
+      ],
+      "childPermissions": [
+        {
+          "status": "completed",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": false
+        }
+      ],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "delegate_work",
+        "task_control",
+        "read",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "delegation",
+      "trial": 0,
+      "passed": false,
+      "scores": {
+        "artifacts": false,
+        "instructions": false,
+        "permissions": false,
+        "lifecycle": false
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "helperMaterial": false,
+        "childCompleted": false,
+        "helperDispatched": false,
+        "readMaterial": false,
+        "completed": false
+      },
+      "scoreComputed": true,
+      "requests": 16,
+      "totalTokens": 157521,
+      "usage": {
+        "input": 27014,
+        "output": 2251,
+        "cacheRead": 128256,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 243889,
+      "pacingMs": 85220,
+      "taskStatus": "waiting",
+      "childStatuses": [
+        "waiting",
+        "queued",
+        "queued"
+      ],
+      "childPermissions": [
+        {
+          "status": "waiting",
+          "resourceHeld": true,
+          "mode": "restricted",
+          "readRoots": 0,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        },
+        {
+          "status": "queued",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 0,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        },
+        {
+          "status": "queued",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": false
+        }
+      ],
+      "permissionProposals": [],
+      "actionKinds": [],
+      "modelToolNames": [
+        "bash",
+        "delegate_work",
+        "task_control",
+        "read",
+        "complete_work"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "bash",
+          "categories": []
+        },
+        {
+          "toolName": "bash",
+          "categories": []
+        },
+        {
+          "toolName": "read",
+          "categories": []
+        },
+        {
+          "toolName": "read",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "organize",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 13,
+      "totalTokens": 91865,
+      "usage": {
+        "input": 20760,
+        "output": 1217,
+        "cacheRead": 69888,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 195748,
+      "pacingMs": 106238,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "read",
+        "file_operation",
+        "bash",
+        "write",
+        "complete_work"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "read",
+          "categories": []
+        },
+        {
+          "toolName": "bash",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "organize",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "destination": true,
+        "sourceMoved": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 10,
+      "totalTokens": 62684,
+      "usage": {
+        "input": 11881,
+        "output": 883,
+        "cacheRead": 49920,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 148223,
+      "pacingMs": 100280,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "file-mkdir",
+          "status": "succeeded"
+        },
+        {
+          "kind": "file-move",
+          "status": "succeeded"
+        },
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "read",
+        "file_operation",
+        "write",
+        "complete_work",
+        "task_control"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "read",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "approval",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "changed": true,
+        "confirmed": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 7,
+      "totalTokens": 41622,
+      "usage": {
+        "input": 11774,
+        "output": 664,
+        "cacheRead": 29184,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 106375,
+      "pacingMs": 73506,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "consumed",
+          "mode": "restricted",
+          "readRoots": 2,
+          "writeRoots": 2,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "project",
+            "protected-file",
+            "project",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "write",
+        "read",
+        "complete_work",
+        "bash",
+        "task_control"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "approval",
+      "trial": 1,
+      "passed": false,
+      "scores": {
+        "artifacts": false,
+        "instructions": true,
+        "permissions": false,
+        "lifecycle": false
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "changed": false,
+        "confirmed": false,
+        "completed": false
+      },
+      "scoreComputed": true,
+      "requests": 3,
+      "totalTokens": 17400,
+      "usage": {
+        "input": 7297,
+        "output": 375,
+        "cacheRead": 9728,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 42423,
+      "pacingMs": 22352,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": true,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "protected-directory",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "work_permission",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "denial",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "scoreComputed": true,
+      "requests": 2,
+      "totalTokens": 11162,
+      "usage": {
+        "input": 6007,
+        "output": 291,
+        "cacheRead": 4864,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 30792,
+      "pacingMs": 14291,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 2,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": false,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "project",
+            "protected-file",
+            "project"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "read"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "read",
+          "categories": [
+            "approval-declined"
+          ]
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "denial",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "unchanged": true,
+        "denied": true,
+        "notCompleted": true
+      },
+      "scoreComputed": true,
+      "requests": 3,
+      "totalTokens": 19285,
+      "usage": {
+        "input": 7077,
+        "output": 432,
+        "cacheRead": 11776,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 71120,
+      "pacingMs": 22795,
+      "taskStatus": "waiting",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [
+        {
+          "status": "denied",
+          "mode": "restricted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "network": false,
+          "expiredAtProposal": true,
+          "expiresAfterParent": false,
+          "rootClasses": [
+            "protected-directory",
+            "protected-file"
+          ]
+        }
+      ],
+      "actionKinds": [],
+      "modelToolNames": [
+        "work_permission",
+        "complete_work"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "complete_work",
+          "categories": []
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "memory",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "quoteAndRole": true,
+        "searched": true,
+        "readOriginal": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 10,
+      "totalTokens": 69577,
+      "usage": {
+        "input": 17552,
+        "output": 1081,
+        "cacheRead": 50944,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 152802,
+      "pacingMs": 100409,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "bash",
+        "memory_search",
+        "memory_read",
+        "write",
+        "complete_work",
+        "task_control"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "bash",
+          "categories": []
+        },
+        {
+          "toolName": "bash",
+          "categories": [
+            "invalid-arguments"
+          ]
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "memory",
+      "trial": 1,
+      "passed": false,
+      "scores": {
+        "artifacts": true,
+        "instructions": false,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "quoteAndRole": true,
+        "searched": false,
+        "readOriginal": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 5,
+      "totalTokens": 33094,
+      "usage": {
+        "input": 8953,
+        "output": 589,
+        "cacheRead": 23552,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 73645,
+      "pacingMs": 51602,
+      "taskStatus": "completed",
+      "childStatuses": [],
+      "childPermissions": [],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "memory_read",
+        "write",
+        "complete_work",
+        "task_control"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "skill_cli",
+      "scenario": "delegation",
+      "trial": 1,
+      "passed": false,
+      "scores": {
+        "artifacts": false,
+        "instructions": false,
+        "permissions": false,
+        "lifecycle": false
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "helperMaterial": false,
+        "childCompleted": false,
+        "helperDispatched": false,
+        "readMaterial": false,
+        "completed": false
+      },
+      "scoreComputed": true,
+      "requests": 18,
+      "totalTokens": 206902,
+      "usage": {
+        "input": 34567,
+        "output": 2814,
+        "cacheRead": 169521,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 288369,
+      "pacingMs": 144516,
+      "taskStatus": "waiting",
+      "childStatuses": [
+        "waiting",
+        "queued",
+        "queued",
+        "queued"
+      ],
+      "childPermissions": [
+        {
+          "status": "waiting",
+          "resourceHeld": true,
+          "mode": "restricted",
+          "readRoots": 0,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        },
+        {
+          "status": "queued",
+          "resourceHeld": false,
+          "mode": "restricted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        },
+        {
+          "status": "queued",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        },
+        {
+          "status": "queued",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": true
+        }
+      ],
+      "permissionProposals": [],
+      "actionKinds": [],
+      "modelToolNames": [
+        "bash",
+        "delegate_work",
+        "task_control",
+        "read",
+        "write",
+        "complete_work"
+      ],
+      "failedOperations": [
+        {
+          "toolName": "bash",
+          "categories": [
+            "invalid-arguments"
+          ]
+        },
+        {
+          "toolName": "read",
+          "categories": []
+        },
+        {
+          "toolName": "write",
+          "categories": [
+            "completion-rejected"
+          ]
+        },
+        {
+          "toolName": "read",
+          "categories": []
+        },
+        {
+          "toolName": "write",
+          "categories": [
+            "completion-rejected"
+          ]
+        }
+      ],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    },
+    {
+      "variant": "independent",
+      "scenario": "delegation",
+      "trial": 1,
+      "passed": true,
+      "scores": {
+        "artifacts": true,
+        "instructions": true,
+        "permissions": true,
+        "lifecycle": true
+      },
+      "checks": {
+        "noUnknown": true,
+        "modeMatches": true,
+        "helperMaterial": true,
+        "childCompleted": true,
+        "helperDispatched": true,
+        "readMaterial": true,
+        "completed": true
+      },
+      "scoreComputed": true,
+      "requests": 5,
+      "totalTokens": 34361,
+      "usage": {
+        "input": 9532,
+        "output": 509,
+        "cacheRead": 24320,
+        "cacheWrite": 0,
+        "cost": null
+      },
+      "elapsedMs": 75008,
+      "pacingMs": 39488,
+      "taskStatus": "completed",
+      "childStatuses": [
+        "completed"
+      ],
+      "childPermissions": [
+        {
+          "status": "completed",
+          "resourceHeld": false,
+          "mode": "trusted",
+          "readRoots": 1,
+          "writeRoots": 1,
+          "expiredAtCreation": false
+        }
+      ],
+      "permissionProposals": [],
+      "actionKinds": [
+        {
+          "kind": "write",
+          "status": "succeeded"
+        }
+      ],
+      "modelToolNames": [
+        "delegate_work",
+        "task_control",
+        "read",
+        "complete_work"
+      ],
+      "failedOperations": [],
+      "responseModels": [
+        "gpt-5.6-luna"
+      ],
+      "userMessages": 1,
+      "assistantErrors": 0
+    }
+  ]
+}
