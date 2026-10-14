@@ -13,15 +13,16 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 - `idle` 表示就绪，`done` 是工作完成后的 idle，`blocked` 是审批或提问，`unknown` 无法分类。状态、完成标记和 prompt 回显都只是观察，实际成果由主会话验收。
 - 普通等待用 `agent wait`；等特定状态才用 `--until`。普通终端命令可用 `pane run` / `pane wait-output --match`；读结果优先 `recent-unwrapped`。
-- 新任务固定复用 bot 专用的 `nailong` session（下文 `SESSION`），每个任务创建独立 workspace 并使用唯一 agent 名称；workspace 的执行目录按任务指定，session 名称不是项目目录。恢复旧任务沿用已记录的 session。记录 workspace/pane、执行目录、基准、prompt 和成果路径。workspace/pane/agent 命令带 `--session SESSION`；session 管理命令按对应 help 调用（本机 `session attach NAME` 不接受全局 `--session`）。查询失败或 unknown 时保留现场、先对账。
+- 新任务复用 herdr 默认 session，常规命令不传 `--session`；每个任务创建独立 workspace 并使用唯一 agent 名称，执行目录按任务指定。记录 workspace/pane、执行目录、基准、prompt 和成果路径。恢复旧任务沿用已记录的 session，命名会话的操作带 `--session SESSION`；session 管理命令按对应 help 调用。查询失败或 unknown 时保留现场、先对账。
 - 派发前先确认共享 session 就绪，按下面的启动检查执行。客户端与 server 分别核对，保留其他会话及主服务。
 - 诊断命令保存原生命令输出和真实退出码再判断；预期失败可由任务脚本捕获并明确报告，不能把管道后续命令的退出码当作 herdr 成功，也不能因 Shell 返回成功而忽略回执中的错误。
 
-**2026-10-14 启动时序问题与处理：** 实测在 `session attach` 后立即创建 workspace 会遇到 `server_not_running`。固定 session 后，每次新派发按以下步骤执行：
+**2026-10-14 启动时序问题与处理：** 实测启动后立即创建 workspace 会遇到 `server_not_running`。默认 session 的派发流程为：
 
-1. 查询 `herdr --session nailong status server --json`。检查退出码和 JSON：`running=true`、`compatible=true` 才进入就绪核对；`running=false` 时启动一次。该命令在未运行时也可能返回退出码 0，不能只看退出码。查询异常或版本不兼容时保留原始输出并报告，先不创建 workspace。
-2. 启动用 `herdr session attach nailong`。这是持续前台客户端；用户可在终端中提前运行。主助手自动启动时用任务内脚本在后台运行，Windows 使用 `Start-Process -WindowStyle Hidden`，记录客户端 PID 与日志；不等待客户端退出，也不重复启动。随后每秒查询一次 server JSON，最多等 30 秒；超时保留现场和日志，报告未就绪，不创建 workspace。
-3. server 就绪后，执行 `herdr --session nailong workspace list`，确认真实 API 回执无错误，再进入第 1 节创建本任务 workspace。已运行的 session 直接复用；任务清理只处理本任务资源，保留共享 session。若创建时仍报错，先查询现有 workspace 对账再决定后续，不重复派发代码任务。
+1. 查询 `herdr status server --json`，退出码正常且 `running=true`、`compatible=true` 时直接进入第 1 节创建任务 workspace。未运行也可能返回退出码 0，需读 JSON；查询异常或版本不兼容时报告实际错误。
+2. `running=false` 时后台启动一次 `herdr`（Windows 用 `Start-Process -WindowStyle Hidden`，记录客户端 PID 与日志），每秒查询一次状态，最多等 30 秒；确认就绪才创建 workspace，超时则保留现场并报告。用户提前启动默认 herdr 时直接复用。
+
+任务结束只清理本任务资源，保留共享 session。若创建 workspace 报错，先查询现有 workspace 对账，避免重复派发。
 
 ## 1. 打开 workspace（修改才用 worktree）
 
@@ -33,11 +34,11 @@ description: 通过 herdr CLI 委托 Codex 或 Claude 进行只读勘察或代�
 
 ```text
 # 只读：原目录普通 workspace
-herdr --session SESSION workspace create --cwd PROJECT --label LABEL --no-focus
+herdr workspace create --cwd PROJECT --label LABEL --no-focus
 # 修改：BASE 来自目标仓库规则；无规则时来自当前分支
-herdr --session SESSION worktree create --cwd PROJECT --branch BRANCH --base BASE --path WORKTREE --no-focus
-herdr --session SESSION workspace get WORKSPACE_ID
-herdr --session SESSION pane list --workspace WORKSPACE_ID
+herdr worktree create --cwd PROJECT --branch BRANCH --base BASE --path WORKTREE --no-focus
+herdr workspace get WORKSPACE_ID
+herdr pane list --workspace WORKSPACE_ID
 ```
 
 从真实回执取得 ID。
@@ -49,10 +50,10 @@ herdr --session SESSION pane list --workspace WORKSPACE_ID
 **2026-10-14 Windows 实测记录：** Telegram 派发时 herdr pane 找不到 `codex`，原因是未继承桌面应用临时加入的 PATH；桌面应用已附带 CLI，无需另下载。已将可执行目录直接加入 Windows 当前用户的永久 PATH，重新打开终端并重启 herdr 后继承。下面的桌面 Codex 启动命令添加 `--no-daemon`，绕过共享后台服务；其他版本先按 `codex --help` 确认参数支持。
 
 ```text
-herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never --no-daemon
+herdr agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never --no-daemon
 # Claude 用 --kind claude，CLI 参数替换为 --permission-mode auto
-herdr --session SESSION agent get AGENT_NAME
-herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 200
+herdr agent get AGENT_NAME
+herdr agent read AGENT_NAME --source recent-unwrapped --lines 200
 ```
 
 初次失败先读终端，处理已授权的项目信任或就绪提示，核对是否已存在同名 agent、实际进程和状态，再决定是否重试；初次之后最多两次启动重试，每次等待 90000 毫秒。仍无法就绪则报告受阻并保留现场，不更换指定配置，也不通过修改全局默认绕过提示。
@@ -69,10 +70,9 @@ Pi Shell 默认 Bash；Windows 下把传递放在任务内 PowerShell 脚本，�
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$session = 'nailong'
 $agent = '已核对的帮手名称'
 $taskPrompt = Get-Content -LiteralPath 'D:/授权输出目录/task-prompt.txt' -Raw -Encoding utf8
-$promptArgs = @('--session', $session, 'agent', 'prompt', $agent, $taskPrompt,
+$promptArgs = @('agent', 'prompt', $agent, $taskPrompt,
     '--wait', '--until', 'working', '--timeout', '5000')
 & herdr @promptArgs
 if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端，保留 prompt' }
@@ -84,7 +84,7 @@ if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端�
 
 ### Pi 主助手的后台接回
 
-确认本次 prompt 已接收后，调用 `herdr_watch`，填写从真实回执取得的 `session`、`agent`、`paneId`、`workspaceId`、实际 `cwd` 和本次 `promptPath`。登记成功后结束当前工具轮次、及时回应主人；等待由桥接在后台执行。桥接只观察已派发的帮手，服务重启先核对实际身份与状态，不重新启动工作。
+确认本次 prompt 已接收后，调用 `herdr_watch`，默认会话的 `session` 填 `default`；`agent`、`paneId`、`workspaceId` 从真实回执取得，并填写实际 `cwd` 和本次 `promptPath`。旧命名会话填写其记录的 session。登记成功后结束当前工具轮次、及时回应主人；等待由桥接在后台执行。桥接只观察已派发的帮手，服务重启先核对实际身份与状态，不重新启动工作。
 
 `herdr_result` 是带身份的外部执行材料。收到后按本节独立验收，不把 idle/done 当成果成功。blocked 或 unknown 时核对原终端，保留现场，向主人说明所需决定；恢复工作后观察继续。登记失败时先读回实际状态，避免重复派发。
 
@@ -93,9 +93,9 @@ if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端�
 ### 有界查询与成果核对
 
 ```text
-herdr --session SESSION agent wait AGENT_NAME --timeout 30000
-herdr --session SESSION agent get AGENT_NAME
-herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 200
+herdr agent wait AGENT_NAME --timeout 30000
+herdr agent get AGENT_NAME
+herdr agent read AGENT_NAME --source recent-unwrapped --lines 200
 ```
 
 用内置 wait 等待；仍在运行时继续有界等待并报告必要进展。超时不表示失败或停止，idle/done 不表示验收通过。长等待可放任务内后台脚本并保存日志，主会话接续时读回实际状态。
@@ -113,7 +113,7 @@ herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 
 以下每阶段调用一次的 relay 片段由主会话填入已经核对的 session、agent 和本阶段文件，前提是第 3 节的就绪检查已完成。不同阶段可以使用不同帮手；脚本只负责派发、等待和读回，主会话是验收闸门。
 
 ```powershell
-param([string]$Session, [string]$Agent, [string]$PromptPath)
+param([string]$Session = 'default', [string]$Agent, [string]$PromptPath)
 $ErrorActionPreference = 'Stop'
 $taskPrompt = Get-Content -LiteralPath $PromptPath -Raw -Encoding utf8
 & herdr --session $Session agent prompt $Agent $taskPrompt --wait --until working --timeout 5000
