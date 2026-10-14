@@ -40,10 +40,10 @@ herdr --session SESSION pane list --workspace WORKSPACE_ID
 
 配置按当次明确指定 > 项目约定 > 全局默认 > Codex 选择。模型与推理继承所选 CLI 配置；需要覆盖时按该版本帮助传参。保持 CLI 全局默认原样；指定配置不可用时报告受阻。
 
-Windows 启动前先按 [Windows CLI 预检与桌面 Codex 适配](references/windows-startup.md) 核对可执行路径并补目标 pane 的 PATH。使用桌面应用附带的 Codex CLI 时，确认版本支持后采用该文档中带 `--no-daemon` 的启动命令；其他 CLI 使用下面的常规命令。
+**2026-10-14 Windows 实测记录：** Telegram 派发时 herdr pane 找不到 `codex`，原因是未继承桌面应用临时加入的 PATH；桌面应用已附带 CLI，无需另下载。已将可执行目录直接加入 Windows 当前用户的永久 PATH，重新打开终端并重启 herdr 后继承。下面的桌面 Codex 启动命令添加 `--no-daemon`，绕过共享后台服务；其他版本先按 `codex --help` 确认参数支持。
 
 ```text
-herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never
+herdr --session SESSION agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never --no-daemon
 # Claude 用 --kind claude，CLI 参数替换为 --permission-mode auto
 herdr --session SESSION agent get AGENT_NAME
 herdr --session SESSION agent read AGENT_NAME --source recent-unwrapped --lines 200
