@@ -2,16 +2,16 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Nailong Bot · Personal Host Codemap",
+    "title": "Nailong Bot · Native Pi Assistant Codemap",
     "locale": "zh-CN",
-    "subtitle": "2026-10-12 · development d8aacac · ADR-0007",
+    "subtitle": "2026-10-14 · development 5b93ef3 · ADR-0010",
     "output": ".archify/architecture-nailong-runtime-20261004-210224/nailong-runtime.html",
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/CxHsin/nailong-bot.git",
       "provider": "github",
       "link_mode": "web",
-      "revision": "d8aacac84f8ac66bc6e5ad794ab6e67a4bbe9fc4"
+      "revision": "5b93ef399a2e92d7a278252f8ff84d1367a185c4"
     }
   },
   "components": [
@@ -25,123 +25,123 @@
         320
       ],
       "size": [
-        200,
+        220,
         76
       ],
       "sources": [
         {
           "path": "src/main.ts",
-          "line": 7,
-          "end_line": 35,
-          "label": "Telegram 生产入口"
+          "line": 1,
+          "end_line": 2,
+          "label": "Telegram 正式入口"
         },
         {
           "path": "src/cli/main.ts",
-          "line": 8,
-          "end_line": 23,
-          "label": "CLI 生产入口"
+          "line": 9,
+          "end_line": 26,
+          "label": "CLI 会话与输出"
         }
       ]
     },
     {
       "id": "channels",
       "type": "frontend",
-      "label": "Plain Channels",
-      "sublabel": "认证输入 · 纯文本 / 文件",
+      "label": "Telegram / CLI Channels",
+      "sublabel": "身份校验 · 图片 / 富文本 / 文件",
       "pos": [
-        300,
+        320,
         320
       ],
       "size": [
-        190,
+        220,
         76
       ],
       "sources": [
         {
-          "path": "src/personal/telegram.ts",
-          "line": 9,
-          "end_line": 27,
-          "label": "Telegram 输入与附件"
+          "path": "src/assistant/telegram.ts",
+          "line": 12,
+          "end_line": 42,
+          "label": "连接与草稿预览"
         },
         {
-          "path": "src/personal/channels.ts",
-          "line": 31,
-          "end_line": 96,
-          "label": "逐页交付与学习补偿"
+          "path": "src/assistant/telegram.ts",
+          "line": 64,
+          "end_line": 113,
+          "label": "富文本 / 文件及输入"
         },
         {
-          "path": "src/telegram/telegram-input.ts",
-          "line": 27,
-          "end_line": 65,
-          "label": "owner 授权与照片输入"
+          "path": "src/cli/main.ts",
+          "line": 36,
+          "end_line": 55,
+          "label": "CLI 输入与图片"
         }
       ]
     },
     {
-      "id": "host",
+      "id": "service",
       "type": "backend",
-      "label": "Personal Host",
-      "sublabel": "Task / Attempt · 授权 · 恢复",
+      "label": "Assistant Service",
+      "sublabel": "输入去重 · 会话选择 · 串行接入",
       "pos": [
-        610,
+        640,
         320
       ],
       "size": [
-        210,
+        220,
         76
       ],
       "sources": [
         {
-          "path": "src/personal/host.ts",
-          "line": 128,
-          "end_line": 173,
-          "label": "动作授权与资源调度"
+          "path": "src/assistant/runtime.ts",
+          "line": 106,
+          "end_line": 146,
+          "label": "独占目录与会话索引"
         },
         {
-          "path": "src/personal/host.ts",
-          "line": 242,
-          "end_line": 280,
-          "label": "实际执行状态恢复"
+          "path": "src/assistant/runtime.ts",
+          "line": 480,
+          "end_line": 554,
+          "label": "去重 / reset / model / steering"
         },
         {
-          "path": "src/personal/runtime.ts",
-          "line": 23,
-          "end_line": 127,
-          "label": "统一生产装配"
+          "path": "src/assistant/environment.ts",
+          "line": 10,
+          "end_line": 42,
+          "label": "生产装配"
         }
       ]
     },
     {
       "id": "pi",
       "type": "backend",
-      "label": "Pi Native Sessions",
-      "sublabel": "主对话决策 / 本地 Task",
+      "label": "Native Pi Session",
+      "sublabel": "模型循环 · 工具 · steering / 压缩",
       "pos": [
-        940,
+        960,
         320
       ],
       "size": [
-        210,
+        220,
         76
       ],
       "sources": [
         {
-          "path": "src/personal/pi.ts",
-          "line": 66,
-          "end_line": 100,
-          "label": "原生 Session 装配"
+          "path": "src/assistant/runtime.ts",
+          "line": 189,
+          "end_line": 218,
+          "label": "资源发现与扩展"
         },
         {
-          "path": "src/personal/pi.ts",
-          "line": 126,
-          "end_line": 185,
-          "label": "主会话决策"
+          "path": "src/assistant/runtime.ts",
+          "line": 235,
+          "end_line": 278,
+          "label": "原生 Session 创建与绑定"
         },
         {
-          "path": "src/personal/pi.ts",
-          "line": 185,
-          "end_line": 275,
-          "label": "本地任务执行"
+          "path": "src/assistant/runtime.ts",
+          "line": 284,
+          "end_line": 345,
+          "label": "回复与原生重试事件"
         }
       ]
     },
@@ -149,9 +149,9 @@
       "id": "models",
       "type": "external",
       "label": "Model Providers",
-      "sublabel": "显式模型配置 · MODEL_DEFAULT",
+      "sublabel": "配置别名 · /model · 原生重试",
       "pos": [
-        1310,
+        1280,
         320
       ],
       "size": [
@@ -160,144 +160,94 @@
       ],
       "sources": [
         {
-          "path": "src/agent/model-config.ts",
-          "line": 10,
-          "end_line": 51,
-          "label": "环境与模型配置"
-        },
-        {
           "path": "src/agent/agent-models.ts",
-          "line": 1,
-          "end_line": 42,
-          "label": "模型选择与凭据"
-        }
-      ]
-    },
-    {
-      "id": "historical",
-      "type": "database",
-      "label": "Historical Records",
-      "sublabel": "迁移导入 · 离线诊断",
-      "pos": [
-        20,
-        100
-      ],
-      "size": [
-        200,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/migration.ts",
           "line": 21,
-          "end_line": 56,
-          "label": "旧事实读取"
+          "end_line": 42,
+          "label": "模型选择与运行时凭据"
         },
         {
-          "path": "src/personal/migration.ts",
-          "line": 58,
-          "end_line": 125,
-          "label": "幂等迁移"
-        },
-        {
-          "path": "src/cli/diagnose-context.ts",
-          "line": 1,
-          "end_line": 20,
-          "label": "离线上下文诊断"
+          "path": "src/assistant/runtime.ts",
+          "line": 526,
+          "end_line": 543,
+          "label": "会话模型切换"
         }
       ]
     },
     {
-      "id": "store",
+      "id": "state",
       "type": "database",
-      "label": "Personal Store",
-      "sublabel": "personal.sqlite · 单 Host 锁",
+      "label": "Assistant State",
+      "sublabel": "独占锁 · 指针 · 去重 · 工作目录",
       "pos": [
-        300,
+        320,
         100
       ],
       "size": [
-        190,
+        220,
         76
       ],
       "sources": [
         {
-          "path": "src/personal/store.ts",
-          "line": 8,
-          "end_line": 31,
-          "label": "业务事实与目录所有权"
+          "path": "src/assistant/runtime.ts",
+          "line": 109,
+          "end_line": 136,
+          "label": "owner.sqlite / conversations.json"
         },
         {
-          "path": "src/personal/store.ts",
-          "line": 32,
-          "end_line": 74,
-          "label": "事务与输入持久化"
-        }
-      ]
-    },
-    {
-      "id": "plans",
-      "type": "backend",
-      "label": "Explicit Plans",
-      "sublabel": "时间 / 依赖触发 · missed 策略",
-      "pos": [
-        610,
-        100
-      ],
-      "size": [
-        210,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/plans.ts",
-          "line": 6,
-          "end_line": 38,
-          "label": "计划校验与控制"
+          "path": "src/assistant/runtime.ts",
+          "line": 154,
+          "end_line": 186,
+          "label": "inputs.json / helpers.json"
         },
         {
-          "path": "src/personal/plans.ts",
-          "line": 88,
-          "end_line": 121,
-          "label": "原子消费与 Task 创建"
+          "path": "src/assistant/runtime.ts",
+          "line": 220,
+          "end_line": 241,
+          "label": "session.json 指针"
         }
       ]
     },
     {
       "id": "sessions",
       "type": "database",
-      "label": "Session Files",
-      "sublabel": "personal-sessions/ · JSONL",
+      "label": "Native Session Files",
+      "sublabel": "sessions/<conversation hash>/ · JSONL",
       "pos": [
-        940,
+        960,
         100
       ],
       "size": [
-        210,
+        220,
         76
       ],
       "sources": [
         {
-          "path": "src/personal/pi.ts",
-          "line": 49,
-          "end_line": 100,
-          "label": "Pi 上下文与压缩"
+          "path": "src/assistant/runtime.ts",
+          "line": 154,
+          "end_line": 160,
+          "label": "会话目录"
         },
         {
-          "path": "src/personal/pi.ts",
-          "line": 379,
-          "end_line": 390,
-          "label": "reset / forget 退役会话"
+          "path": "src/assistant/runtime.ts",
+          "line": 220,
+          "end_line": 261,
+          "label": "原生 JSONL 重开"
+        },
+        {
+          "path": "src/assistant/runtime.ts",
+          "line": 74,
+          "end_line": 103,
+          "label": "磁盘 custom-message 回执"
         }
       ]
     },
     {
       "id": "tools",
       "type": "external",
-      "label": "Shell / MCP / Skills",
-      "sublabel": "显式接入 · TinyFish 可选",
+      "label": "Native Tools / MCP / Skills",
+      "sublabel": "read / bash · 资源发现 · TinyFish 可选",
       "pos": [
-        1310,
+        1280,
         100
       ],
       "size": [
@@ -306,150 +256,32 @@
       ],
       "sources": [
         {
-          "path": "src/agent/capability-config.ts",
+          "path": "src/assistant/environment.ts",
           "line": 17,
-          "end_line": 29,
-          "label": "能力配置"
+          "end_line": 42,
+          "label": "MCP / Skills / TinyFish 接入"
         },
         {
-          "path": "src/personal/pi.ts",
-          "line": 217,
-          "end_line": 245,
-          "label": "命令与通用 MCP 确认"
+          "path": "src/assistant/runtime.ts",
+          "line": 189,
+          "end_line": 218,
+          "label": "DefaultResourceLoader / send_file"
         },
         {
-          "path": "src/agent/tinyfish.ts",
-          "line": 14,
-          "end_line": 27,
-          "label": "可选网页工具"
+          "path": ".agents/skills/herdr-workflow/SKILL.md",
+          "line": 1,
+          "end_line": 30,
+          "label": "项目编码委派技能"
         }
       ]
     },
     {
-      "id": "embedding",
-      "type": "external",
-      "label": "Embedding API",
-      "sublabel": "可选向量服务",
+      "id": "receipts",
+      "type": "database",
+      "label": "Telegram Send Receipts",
+      "sublabel": "sending / sent / rejected / unknown",
       "pos": [
         20,
-        570
-      ],
-      "size": [
-        200,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/runtime.ts",
-          "line": 35,
-          "end_line": 40,
-          "label": "显式向量配置"
-        },
-        {
-          "path": "src/memory/embedding.ts",
-          "line": 70,
-          "end_line": 98,
-          "label": "向量请求与降级"
-        }
-      ]
-    },
-    {
-      "id": "memory",
-      "type": "database",
-      "label": "Akasha Memory",
-      "sublabel": "原始来源 · 图召回 · 送达学习",
-      "pos": [
-        300,
-        570
-      ],
-      "size": [
-        190,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/memory.ts",
-          "line": 24,
-          "end_line": 47,
-          "label": "记忆专用持久事实"
-        },
-        {
-          "path": "src/personal/memory.ts",
-          "line": 69,
-          "end_line": 118,
-          "label": "幂等学习与来源排除"
-        }
-      ]
-    },
-    {
-      "id": "acceptance",
-      "type": "backend",
-      "label": "Independent Acceptance",
-      "sublabel": "实际文件 / 检查 · 当前 revision",
-      "pos": [
-        610,
-        570
-      ],
-      "size": [
-        230,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/runtime.ts",
-          "line": 56,
-          "end_line": 78,
-          "label": "统一独立验收入口"
-        },
-        {
-          "path": "src/personal/pi.ts",
-          "line": 324,
-          "end_line": 376,
-          "label": "读取成果与验收工具"
-        },
-        {
-          "path": "src/personal/verification.ts",
-          "line": 20,
-          "end_line": 67,
-          "label": "有限配置命令凭据"
-        }
-      ]
-    },
-    {
-      "id": "herdr",
-      "type": "backend",
-      "label": "herdr Executor",
-      "sublabel": "专用会话 · Codex 委派",
-      "pos": [
-        940,
-        570
-      ],
-      "size": [
-        210,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/personal/herdr.ts",
-          "line": 46,
-          "end_line": 94,
-          "label": "专用执行身份与权限"
-        },
-        {
-          "path": "src/personal/herdr.ts",
-          "line": 143,
-          "end_line": 192,
-          "label": "补充要求 / 停止 / 核实"
-        }
-      ]
-    },
-    {
-      "id": "artifacts",
-      "type": "database",
-      "label": "Frozen Artifacts",
-      "sublabel": "personal-artifacts/ · SHA256",
-      "pos": [
-        1310,
         570
       ],
       "size": [
@@ -458,16 +290,106 @@
       ],
       "sources": [
         {
-          "path": "src/personal/artifacts.ts",
-          "line": 7,
-          "end_line": 27,
-          "label": "冻结实际成果"
+          "path": "src/assistant/telegram.ts",
+          "line": 24,
+          "end_line": 30,
+          "label": "telegram-sends.jsonl"
         },
         {
-          "path": "src/personal/channels.ts",
-          "line": 46,
-          "end_line": 55,
-          "label": "发送前验证内容"
+          "path": "src/assistant/telegram.ts",
+          "line": 44,
+          "end_line": 62,
+          "label": "发送状态与回执"
+        }
+      ]
+    },
+    {
+      "id": "preview",
+      "type": "frontend",
+      "label": "Reply Preview / Rich Output",
+      "sublabel": "增量草稿 · Markdown 分页 · 文件",
+      "pos": [
+        320,
+        570
+      ],
+      "size": [
+        220,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/telegram/draft-preview.ts",
+          "line": 1,
+          "end_line": 57,
+          "label": "草稿调度与最终发送边界"
+        },
+        {
+          "path": "src/telegram/rich-reply.ts",
+          "line": 1,
+          "end_line": 52,
+          "label": "富文本分页与纯文本降级"
+        }
+      ]
+    },
+    {
+      "id": "watch",
+      "type": "backend",
+      "label": "Helper Observation",
+      "sublabel": "已派发身份 · 状态对账 · 回传材料",
+      "pos": [
+        640,
+        570
+      ],
+      "size": [
+        220,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/herdr.ts",
+          "line": 45,
+          "end_line": 76,
+          "label": "真实身份与状态核对"
+        },
+        {
+          "path": "src/assistant/herdr.ts",
+          "line": 78,
+          "end_line": 130,
+          "label": "herdr_watch 登记"
+        },
+        {
+          "path": "src/assistant/runtime.ts",
+          "line": 369,
+          "end_line": 459,
+          "label": "后台观察与原生回传"
+        }
+      ]
+    },
+    {
+      "id": "herdr",
+      "type": "external",
+      "label": "herdr / Codex / Claude",
+      "sublabel": "Shell + workflow · 实际文件验收",
+      "pos": [
+        960,
+        570
+      ],
+      "size": [
+        220,
+        76
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/herdr.ts",
+          "line": 11,
+          "end_line": 29,
+          "label": "外部 herdr CLI"
+        },
+        {
+          "path": ".agents/skills/herdr-workflow/SKILL.md",
+          "line": 1,
+          "end_line": 30,
+          "label": "委派与验收流程"
         }
       ]
     }
@@ -477,178 +399,152 @@
       "id": "input",
       "from": "user",
       "to": "channels",
-      "label": "认证输入",
-      "variant": "emphasis"
+      "label": "文本 / 图片输入",
+      "variant": "default"
     },
     {
-      "id": "submit",
+      "id": "accept",
       "from": "channels",
-      "to": "host",
-      "label": "PersonalInput",
-      "variant": "emphasis"
+      "to": "service",
+      "label": "conversation / inputId",
+      "variant": "default"
     },
     {
-      "id": "execute",
-      "from": "host",
+      "id": "prompt",
+      "from": "service",
       "to": "pi",
-      "label": "决策 / local Task",
-      "variant": "emphasis"
+      "label": "prompt / steer",
+      "variant": "default"
     },
     {
-      "id": "provider",
+      "id": "model",
       "from": "pi",
       "to": "models",
       "label": "模型请求",
-      "variant": "emphasis"
+      "variant": "default"
     },
     {
-      "id": "store",
-      "from": "host",
-      "to": "store",
-      "label": "业务事实",
-      "variant": "dashed"
-    },
-    {
-      "id": "trigger",
-      "from": "plans",
-      "to": "host",
-      "label": "原子入队",
+      "id": "state",
+      "from": "service",
+      "to": "state",
+      "label": "指针 / 去重 / 目录",
       "variant": "dashed"
     },
     {
       "id": "session",
       "from": "pi",
       "to": "sessions",
-      "label": "原生上下文",
+      "label": "原生上下文与回执",
       "variant": "dashed"
     },
     {
-      "id": "capabilities",
+      "id": "tools",
       "from": "pi",
       "to": "tools",
-      "label": "显式工具",
+      "label": "原生工具与资源",
       "variant": "dashed"
     },
     {
-      "id": "delegate",
-      "from": "host",
+      "id": "dispatch",
+      "from": "pi",
       "to": "herdr",
-      "label": "herdr Task",
+      "label": "Shell 按技能委派",
       "variant": "dashed"
     },
     {
-      "id": "local-acceptance",
+      "id": "register",
       "from": "pi",
-      "to": "acceptance",
-      "label": "local 执行证据",
+      "to": "watch",
+      "label": "herdr_watch",
       "variant": "dashed"
     },
     {
-      "id": "herdr-acceptance",
-      "from": "herdr",
-      "to": "acceptance",
-      "label": "委派执行证据",
+      "id": "observe",
+      "from": "watch",
+      "to": "herdr",
+      "label": "get / read 对账",
       "variant": "dashed"
     },
     {
-      "id": "freeze",
-      "from": "acceptance",
-      "to": "artifacts",
-      "label": "冻结验收成果",
+      "id": "helper-state",
+      "from": "watch",
+      "to": "state",
+      "label": "保存 helpers.json",
       "variant": "dashed"
     },
     {
-      "id": "verdict",
-      "from": "acceptance",
-      "to": "host",
-      "label": "独立验收结论",
+      "id": "return",
+      "from": "watch",
+      "to": "pi",
+      "label": "custom-message 材料",
       "variant": "dashed"
     },
     {
-      "id": "delivery",
-      "from": "host",
+      "id": "reply",
+      "from": "pi",
+      "to": "service",
+      "label": "回复 / 预览 / send_file",
+      "variant": "dashed"
+    },
+    {
+      "id": "output",
+      "from": "service",
       "to": "channels",
-      "label": "持久 Delivery",
-      "variant": "dashed",
-      "labelAt": [
-        570,
-        410
-      ]
+      "label": "会话输出",
+      "variant": "dashed"
     },
     {
-      "id": "learn",
+      "id": "preview",
       "from": "channels",
-      "to": "memory",
-      "label": "确认送达后学习",
+      "to": "preview",
+      "label": "草稿 / 最终富文本",
       "variant": "dashed"
     },
     {
-      "id": "recall",
-      "from": "pi",
-      "to": "memory",
-      "label": "记忆工具",
-      "variant": "dashed"
-    },
-    {
-      "id": "embeddings",
-      "from": "memory",
-      "to": "embedding",
-      "label": "可选向量",
-      "variant": "dashed"
-    },
-    {
-      "id": "migration",
-      "from": "historical",
-      "to": "store",
-      "label": "幂等迁移",
-      "variant": "dashed"
-    },
-    {
-      "id": "historical-memory",
-      "from": "historical",
-      "to": "memory",
-      "label": "历史记忆来源",
+      "id": "receipt",
+      "from": "channels",
+      "to": "receipts",
+      "label": "发送回执",
       "variant": "dashed"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "生产主路径与职责",
+      "title": "生产入口与职责",
       "items": [
-        "Telegram / CLI → Plain Channel → Personal Host → Pi 原生主对话；长工作形成独立 Task，选择 local Pi 或专用 herdr 执行。",
-        "Host 持有输入、Task、Attempt、Plan、Action Authorization 和 Delivery；主对话与 Task 会话分离，Pi 负责模型轮次及原生压缩。",
-        "Task 目标与补充要求独立持久化；Steer 收到、展示和应用分别记录。只有用户明确指示才创建时间 / 依赖计划，触发消费与任务入队同一事务。"
-      ]
-    },
-    {
-      "dot": "rose",
-      "title": "权限与资源边界",
-      "items": [
-        "Telegram 先验证 owner 私聊再下载图片；CLI 信任本机启动用户。conversationId 选择上下文，actorId 用于任务操作授权。",
-        "未指定 cwd 时每个 Task 获得独立 data/workspaces/<taskId>；显式资源和项目根目录规范化后检查重叠。独立资源可并发，未知执行保留占用。",
-        "Pi 文件工具限任务目录，配置 Skill 根只读；真实路径检查禁止访问 Agent 持久数据。命令与通用 MCP 需对具体动作、参数和当前 revision 确认，批准在派发前持久消费。",
-        "Shell 继承进程权限，并非 OS 沙箱；TinyFish 网页工具独立按 key 接入。herdr Codex 使用 workspace-write/on-request，Claude 需可核验策略；当前生产装配未提供该 Claude 策略。"
-      ]
-    },
-    {
-      "dot": "emerald",
-      "title": "事实源、验收与交付",
-      "items": [
-        "personal.sqlite 是业务事实源，SQLite WAL/FULL 事务持久化；host-owner.sqlite 的锁防止同一数据目录同时启动两个 Host。Pi 交换单独保存到 personal-sessions/。",
-        "本地 / herdr 执行结果均进入独立验收：读取实际文件与 SHA256，核对当前要求及有限配置命令的退出码、终止状态与 revision；要求改变会使验收失效。",
-        "成果冻结到 personal-artifacts/ 后逐页发送文本和附件，文件发送前再次校验摘要。Task 完成与 Delivery sent/rejected/unknown 分开；未知送达不自动重发。",
-        "Akasha 使用 personal-memory.sqlite 的记忆事实、历史来源及派生图索引，可选 embeddings.sqlite；普通回复与完成 / 部分完成的 Task 结果确认送达后幂等学习，失败可补偿而不重发。"
+        "Telegram / CLI → Assistant Service → 每个 conversation 的原生 Pi Session；Pi 负责模型循环、工具、资源发现、steering 和压缩。",
+        "服务只保存目录独占、会话指针、输入去重及最小帮手观察记录。输入先持久去重再执行；崩溃可能丢失尚未完成的已接收输入。",
+        "工作目录随会话保存；原生工具继承启动账户权限。用户与项目指令约束动作范围，工作目录本身不是沙箱。"
       ]
     },
     {
       "dot": "violet",
-      "title": "恢复、迁移与证据范围",
+      "title": "编码委派与后台接回",
       "items": [
-        "恢复先核实执行身份；running 挂接已有执行，unknown 等待核实。取消的 Task 不自动复活，实际停止后才释放资源；Session 结束本身不能证明外部进程停止。",
-        "/reset 退役主会话；/forget 排除来源并退役相关会话，相关 Task 保守停止、Plan 暂停，原始审计事实保留。",
-        "旧 Event Log、Context Projection 与诊断保留用于迁移和离线解释，不再作为在线执行循环；历史 Run 不转成新 Task。图中迁移箭头不是在线业务写入。",
-        "源码链接固定到 d8aacac（2026-10-12 development），按 ADR-0007 核对实际实现。图校验仅验证展示与来源；真实 Telegram 验收仍待完成。"
+        "主助手通过原生 Shell 和 herdr-workflow 委派编码；herdr_watch 只登记已确认接收的外部帮手，不派发或重启工作。",
+        "后台核对 session / agent / pane / workspace / cwd 与实际状态，读回外部材料后通过 Pi custom-message 接入正确会话。idle / done 触发成果检查，不证明成功。",
+        "回传与用户接入串行；忙碌 Session 使用 followUp，空闲时触发轮次。以磁盘原生回执对账，重启后继续观察，主助手按目标项目要求检查真实文件、diff 与命令结果。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "会话、模型与交付",
+      "items": [
+        "data/pi-assistant-v1 使用独占 owner.sqlite、conversations.json 及会话目录中的 session.json / inputs.json / helpers.json；模型交换存于原生 JSONL。",
+        "/model 切换并保存模型别名；限流与临时错误的重试由 Pi 原生机制决定。/reset 取消当前轮次并创建新 Session，保留外部帮手观察记录，不停止外部工作。",
+        "Telegram 先校验 owner 私聊再下载图片。临时草稿与最终发送分开；正文富文本分页，400 格式错误可降级，send_file 交给通道发送原始文件。",
+        "telegram-sends.jsonl 记录发送状态；未知发送不自动重发。send_file 工具回复表示交给接入层处理，不构成用户工作目标的成功证明。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "退役边界与验证证据",
+      "items": [
+        "按 ADR-0010 使用全新数据命名空间；旧 Host / Task / Attempt / Akasha / Plan 不在在线路径中读取或迁移。历史文件与离线诊断保留。",
+        "不再展示旧授权、统一验收、冻结成果、记忆学习与计划调度的在线关系；定时主动职责、服务端部署、多 bot 留待后续。",
+        "源码固定到 5b93ef3（2026-10-14 development）。图校验验证展示与来源；运行证据见 docs/pi-assistant-acceptance-20261014.md 和实机补充。",
+        "现有记录包含 93/93 测试及 Telegram / Pi / Codex 实机证据；Claude 成功编码仍待验收，402 不能算代码成果成功。"
       ]
     }
   ]
