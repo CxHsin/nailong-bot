@@ -274,7 +274,42 @@ export async function createAssistant(options: AssistantOptions) {
         },
       });
       let replyId = "";
+      let pendingModelError: { message: string } | undefined;
+      const reportModelError = (message: string) =>
+        void emit({
+          conversationId: id,
+          type: "text",
+          text: `模型调用失败：${message}`,
+        }).catch(() => {});
       session.subscribe((event) => {
+        if (event.type === "auto_retry_start") {
+          pendingModelError = undefined;
+          const reason = /429|rate.?limit|too many requests/i.test(event.errorMessage)
+            ? "模型限流"
+            : "模型调用暂时失败";
+          void emit({
+            conversationId: id,
+            type: "text",
+            text: `${reason}，正在重试（${event.attempt}/${event.maxAttempts}）。`,
+          }).catch(() => {});
+          return;
+        }
+        if (event.type === "auto_retry_end") {
+          pendingModelError = undefined;
+          if (!event.success) reportModelError(event.finalError ?? "未知错误");
+          return;
+        }
+        if (event.type === "agent_end") {
+          const error = pendingModelError;
+          // Pi chooses auto-retry synchronously after notifying agent_end listeners.
+          queueMicrotask(() => {
+            if (error && pendingModelError === error) {
+              pendingModelError = undefined;
+              reportModelError(error.message);
+            }
+          });
+          return;
+        }
         if (
           event.type === "message_start" &&
           event.message.role === "assistant"
@@ -294,12 +329,9 @@ export async function createAssistant(options: AssistantOptions) {
           .join("\n");
         if (text.trim())
           void emit({ conversationId: id, type: "text", text }).catch(() => {});
-        if (event.message.stopReason === "error")
-          void emit({
-            conversationId: id,
-            type: "text",
-            text: `模型调用失败：${event.message.errorMessage ?? "未知错误"}`,
-          }).catch(() => {});
+        pendingModelError = event.message.stopReason === "error"
+          ? { message: event.message.errorMessage ?? "未知错误" }
+          : undefined;
       });
       // Native Session receipt, not a helper's status, prevents known result re-injection.
       for (const record of helpers) {
