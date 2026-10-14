@@ -64,7 +64,7 @@ herdr agent read AGENT_NAME --source recent-unwrapped --lines 200
 
 将完整任务保存为已有授权输出目录中的 UTF-8 文件，包含目标、工作目录、目标仓库约束、允许范围、成果路径和验收。只读任务明确读取当前未提交内容、引用真实文件、不修改项目；修改任务写明接回方式和约定检查。可请求独立完成标记作为辅助证据。
 
-发送前查询 agent 并读终端，确认已经就绪、没有旧任务混淆。`agent prompt --wait` 不绑定独立轮次；旧 working 状态可能误报新任务接收。
+发送前查询 agent 并读终端，确认已经就绪、没有旧任务混淆。按 joye 的启动经验，`agent start` 后可能仍在欢迎界面，此时发送会丢失 prompt；先确认欢迎/信任提示已结束、任务输入界面就绪，再发送。`agent prompt --wait` 不绑定独立轮次；旧 working 状态可能误报新任务接收。
 
 Pi Shell 默认 Bash；Windows 下把传递放在任务内 PowerShell 脚本，通过 `pwsh -NoProfile -File 'D:/授权输出目录/send.ps1'` 调用。prompt 不插入多层 Shell 命令字符串：
 
@@ -78,7 +78,9 @@ $promptArgs = @('agent', 'prompt', $agent, $taskPrompt,
 if ($LASTEXITCODE -ne 0) { throw '接收未确认：先查询状态和读终端，保留 prompt' }
 ```
 
-结合终端读回确认本任务已接收；超时、stalled 或 Shell 等待被中断时先查 `agent get` 和 `agent read`，不盲目重发。参数形状随安装版本帮助核验。
+结合终端读回确认本任务已接收：核对本次任务对应的处理输出；终端标题变为本次任务标题时可作为辅助证据，prompt 回显本身不算接收。这里 `--until working --timeout 5000` 只等待开始处理，确认接收后交给 `herdr_watch`；普通 `agent prompt --wait` 默认等 idle/done/blocked，属于结束或阻塞状态等待。参数形状随安装版本帮助核验。
+
+**2026-10-14 prompt 提交问题与处理：** 超时、`agent_prompt_stalled` 或 Shell 等待被中断，不证明任务未运行；先查 `agent get` 和 `agent read`。确认本次任务已在处理则继续观察；仅在确认完整文本仍停在输入框、尚未提交时补一次 Enter，再读回核对接收。本次实测由此恢复。无法判断时保留现场并报告提交状态未确认，避免重复发送整个任务。
 
 ## 4. 等待、读结果、验收和清理
 
@@ -142,7 +144,7 @@ if ($LASTEXITCODE -ne 0) { throw '读回失败，保留现场' }
 
 ## 上游对照
 
-基线：[上游 herdr-workflow](https://github.com/joyehuang/skills/blob/master/personal/herdr-workflow/SKILL.md)（2026-10-13 读取；规格 #183）。
+基线：[上游 herdr-workflow](https://github.com/joyehuang/skills/blob/master/personal/herdr-workflow/SKILL.md)（2026-10-13 读取；规格 #183；2026-10-14 复核欢迎界面、标题确认与等待中断说明）。
 
 - **保留**：0–5 的兜底、workspace/worktree 分流、启动、文件 prompt、读回清理和接力结构；内置 wait、主会话验收、最多两轮返工、只清理自己的资源与本地保留成果。
 - **适配**：目标仓库决定基准与集成；只读包含脏改动；启动 90 秒且仅两次重试；CLI 配置继承、Windows pane/PATH 与 PowerShell 文件传递；Pi 可信执行、后台观察与按目标交付（规格 #196）。
