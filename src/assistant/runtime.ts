@@ -296,7 +296,15 @@ export async function createAssistant(options: AssistantOptions) {
         }
         if (event.type === "auto_retry_end") {
           pendingModelError = undefined;
-          if (!event.success) reportModelError(event.finalError ?? "未知错误");
+          if (!event.success) {
+            if (event.finalError === "Retry cancelled")
+              void emit({
+                conversationId: id,
+                type: "text",
+                text: "重试已取消。",
+              }).catch(() => {});
+            else reportModelError(event.finalError ?? "未知错误");
+          }
           return;
         }
         if (event.type === "agent_end") {
