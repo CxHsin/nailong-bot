@@ -52,17 +52,19 @@ Escape 不会必然停止 Codex 已启动的后台进程。本次主 Pi 通过 P
 | Telegram 发起默认 session 编码 | 用户发送 acceptance-default 请求，正式 Pi 输入时间为 19:25:02。主助手复用默认 herdr session，创建 wF/wF:p1、agent acceptance-double-codex，实际派发 Codex 并登记 `herdr_watch(session=default)`。prompt 超时后查实际输入，补一次 Enter，再核对 working；未重复发送任务。Codex 创建 double.mjs 与恰好两个 node:test（正数、负数与零），自身 2/2；主 Pi 读回实际文件并独立运行 2/2，保存 verification.txt；执行负责人独立复跑 2/2。后台登记和最终汇报等 message_id=501–504 均 sent；用户确认收到且显示正常 |
 | 主助手强制终止后接回 | 使用独立真实 Pi 进程和真实 Codex，默认 session、wE/wE:p1、agent crash196-192619。Codex 正在运行门控 Node PID 29980，主 Pi PID 22956 已登记后台观察。核对命令行、启动时间和持久化身份后强制终止主 Pi，未调用 close；确认门控和 Codex 继续工作。以同一数据重开主 Pi PID 10336，恢复后不发送新输入，再释放门控。Codex 生成 subtract.mjs、subtract.test.mjs、report.md，自身 2/2；恢复的 Pi 自动接回，读实际文件、独立执行 2/2并写 main-verification.txt；执行负责人独立复跑 2/2。原生记录恰好 1 个用户输入、1 次 herdr_watch、1 个 herdr_result 磁盘回执，帮手身份与终止前一致且 delivered=true，主 Pi 没有 agent start 或 agent prompt。此项来自本地入口，文件输出由本地订阅器保存，没有 Telegram 文件交付回执 |
 | 原生重试经真实 Telegram 出站 | 真实 Pi Session 连接本地受控 Provider：首个请求 429，第二个请求成功；正式 connectTelegram 经真实 API 发送“模型限流，正在重试（1/1）。”和最终恢复结果，message_id=505/506 均 sent，requests=2、errors=[]。用户确认两条都收到、显示正常。此项证明原生重试提示和真实出站，限流由受控 Provider 注入，不代表手机输入触发真实上游 429 |
+| 真实图片入站与描述 | 用户在 19:39:42 通过 Telegram 发送图片并附“描述一下图片”。正式 Pi 原生输入 id=00431fc7 包含 text 和 image/jpeg（图片数据已实际加载），gpt-6.1-sol 于 19:40 回复黄色奶龙、红褐和乳白长袍、金色光芒及小天使等画面描述。Telegram message_id=508 为 sent，回复与用户提供的客户端截图一致；用户明确确认“图片验收通过”。本次请求为图片描述，未要求生成或发送描述文件 |
 
 本轮原始证据保留在设备本地：
 
 - 首次测试根目录的 `acceptance-default/`：代码、测试、verification.txt、task-prompt.txt、send.ps1、tool-evidence.json；正式 Pi 原生 JSONL 和 `pi-data/telegram-sends.jsonl` 保存实际入站、工具、回传与发送回执。
 - `C:/Users/Cx/AppData/Local/Temp/nailong196-acceptance-final-20261014-192510/`：forced-termination.json、main-probe.mjs、main-before/after 日志与 outputs、helper-terminal.txt、crash-tool-evidence.json、main-data 原生 Session/身份记录、代码和报告、main-verification.txt、root-verification.txt。
 - 同一补验目录的 telegram-retry.mjs、telegram-retry-result.json、telegram-retry-receipts.jsonl：受控模型请求次数、原生输出、实际 Telegram 回执。
+- 首次测试根目录的 telegram-photo-evidence.json：原生图片输入元数据、实际模型描述与 Session 来源；图片数据仅保留类型与长度摘要。发送回执见同目录 `pi-data/telegram-sends.jsonl`；客户端截图由用户提供并确认。
 
 保存证据后仅终止本次恢复探针 PID 10336，关闭核对过的 wE:p1；wE 随最后一个 pane 关闭而消失，门控进程已退出。共享默认 herdr 服务、其他 workspace、Telegram 编码 wF 和正式 bot 保持运行。
 
 ## 当前结论与待验项
 
-默认 session 编码、后台交流与补充、准确停止、强制终止后恢复观察、文件往返、重试出站与客户端显示均已有实机证据。完整自动化为 93/93，类型检查与构建通过，见原验收补充。真实图片入站仍未收到测试输入；Claude ds 仍受已知 402 额度限制，成功编码未验证。#196/#197 保持开放。
+默认 session 编码、后台交流与补充、准确停止、强制终止后恢复观察、文件往返、重试出站与客户端显示、真实图片入站与描述均已有实机证据。完整自动化为 93/93，类型检查与构建通过，见原验收补充。Claude ds 仍受已知 402 额度限制，成功编码未验证。#196/#197 保持开放。
 
 正式 bot 当前 PID **34100**，继续供用户私聊实测。停止前先核对 PID、命令行与启动时间仍对应本次 `src/main.ts`，再执行 `Stop-Process -Id 34100`；停止 bot 不停止外部帮手。原始凭据、数据库、图片内容和终端日志不提交仓库。
