@@ -1,10 +1,10 @@
 # Pi Durable 接入验证
 
-日期：2026-10-15。范围来自[队列与持久工作流讨论](event-queue-durable-workflow-2026-10-15.md)中用户对“先做接入验证，再决定采用”的同意。本次完成实验，没有切换正式入口，也没有作出最终执行引擎选择。
+日期：2026-10-15。范围来自[队列与持久工作流讨论](event-queue-durable-workflow-2026-10-15.md)中用户对“先做接入验证，再决定采用”的同意。本次完成实验，没有切换正式入口。实验及工具清理说明后，用户确认采用，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。
 
 ## 结论
 
-**建议选用 Pi Durable 承载主 agent 的持久执行，并由 nailong 队列层实现事件优先级。** 本机验证表明，模型配置、项目指令/技能、工具恢复及 herdr 观察均存在可行接入路径；它不是现有 coding-agent Session 的透明替代。是否据此采用仍由用户确认。
+**已确认选用 Pi Durable 承载主 agent 的持久执行，并由 nailong 自有队列负责路由、去重、优先级与 FIFO。** 本机验证表明，模型配置、项目指令/技能、工具恢复及 herdr 观察均存在可行接入路径；它不是现有 coding-agent Session 的透明替代。该选型确认未扩大下述实验覆盖范围。
 
 真实 Windows 环境为 Node `v24.15.0`，独立安装的 `@earendil-works/pi-durable`、`pi-ai`、`chord` 均固定 `1.2.0`，使用 `node:sqlite` 与 Git Bash。根项目原有 `@mariozechner/pi-coding-agent` 和运行入口保持原样。
 
@@ -70,6 +70,6 @@ herdr_watch 复用原有工具实现并转换结果格式。内部回传用带�
 
 ## 尚未决定或验证
 
-执行引擎正式采用、现有 Session 的导入/保留方式，以及切换数据空间仍需确认。事件路由的具体匹配与去重键、连续消息合批窗口、内部结果调度、完整 reset 与取消衔接，以及 Telegram 图片/文件/草稿/发送回执属于后续实现和验收范围。
+执行引擎选型已确认；现有 Session 的导入/保留方式，以及切换数据空间仍需明确。事件路由的具体匹配与去重键、连续消息合批窗口、内部结果调度、完整 reset 与取消衔接，以及 Telegram 图片/文件/草稿/发送回执属于后续实现和验收范围。
 
 本次没有接入 cron、邮件或 Slack，没有修改 herdr 内部执行恢复，也没有承诺任意外部副作用精确一次。`herdr_watch`、`send_file` 与当前 Channel 行为须按[迁移评审约定](../agents/refactor-review.md)逐项核对；通过本实验不意味着正式迁移已经完成。

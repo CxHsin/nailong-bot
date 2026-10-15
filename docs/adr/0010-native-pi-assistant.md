@@ -6,6 +6,8 @@ status: accepted
 
 2026-10-14 confirmed direction [#195](https://github.com/CxHsin/nailong-bot/issues/195), specification [#196](https://github.com/CxHsin/nailong-bot/issues/196), implementation [#197](https://github.com/CxHsin/nailong-bot/issues/197).
 
+2026-10-15: [ADR-0011](0011-durable-main-agent-and-conversation-queue.md) replaces the direction of deferring main-agent durable execution and relying on native steering for incoming input. The production entry still follows the implementation below until that migration is completed; its evidence does not establish the new queue or recovery guarantees.
+
 ## Decision
 
 Use one native Pi main Session per conversation. Pi owns the agent loop, tools, resource discovery, steering and compaction. The local service connects authenticated Telegram/CLI input and output. It keeps a process lock, conversation/session pointers, deduplication and versioned minimal helper observation records.

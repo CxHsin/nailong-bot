@@ -1,6 +1,6 @@
 # Nailong Bot Agent Context
 
-One personal assistant uses native Pi through Telegram or CLI. Current direction: [ADR-0010](docs/adr/0010-native-pi-assistant.md), [spec #196](https://github.com/CxHsin/nailong-bot/issues/196). Older Host terminology below has been retired from the online path; historical ADRs keep their original evidence.
+One personal assistant uses native Pi through Telegram or CLI. Current production baseline: [ADR-0010](docs/adr/0010-native-pi-assistant.md), [spec #196](https://github.com/CxHsin/nailong-bot/issues/196). Accepted next direction: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [conclusion #200](https://github.com/CxHsin/nailong-bot/issues/200); migration is pending. Older Host terminology below has been retired from the online path; historical ADRs keep their original evidence.
 
 ## Language
 
@@ -34,7 +34,7 @@ One personal assistant uses native Pi through Telegram or CLI. Current direction
 
 ## Agreed design language: queue and workflow
 
-These terms describe the confirmed direction in the [queue and workflow discussion](docs/research/event-queue-durable-workflow-2026-10-15.md), not additional guarantees of the current runtime. Execution-engine selection remains open.
+These terms describe the confirmed direction in the [queue and workflow discussion](docs/research/event-queue-durable-workflow-2026-10-15.md), not additional guarantees of the current runtime. [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md) selects Pi Durable for main-agent execution and a nailong-owned persistent queue for routing, deduplication, priority and FIFO; production migration is pending. This replaces native Steering as the planned scheduling policy: equal-priority direct inputs wait in arrival order.
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
