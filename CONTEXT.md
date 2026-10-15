@@ -42,6 +42,10 @@ These terms describe the confirmed direction in the [queue and workflow discussi
 
 **Processing Turn**: One period in which the main agent handles selected input. It can end after delegating background work; completion of the user's whole goal is not required to release the conversation for later input.
 
+**Input Batch**: An ordered group of already queued ordinary Input Events selected when a Conversation is idle or its current Processing Turn ends. Each event retains its identity and message boundary; grouping does not imply a shared goal. Selection adds no timed wait and stops at commands or a change of source or priority.
+
+**Explicit Steering**: A user-authored `/steer` command that supplements current work at the next supported input boundary. Multiple accepted supplements may be read together in order, retaining their identities. Ordinary input remains queued for a later Processing Turn; steering is separate from stopping or priority preemption, and does not immediately stop running tools.
+
 **Event Priority**: The ordering that permits higher-priority input to interrupt lower-priority processing. Direct user inputs have equal priority to each other and wait in arrival order; they outrank background input.
 
 **Durable Workflow**: Saved execution progress and confirmed model/tool results that allow interrupted work to continue without repeating completed operations solely because execution restarted. It is separate from conversation history and helper-local context.

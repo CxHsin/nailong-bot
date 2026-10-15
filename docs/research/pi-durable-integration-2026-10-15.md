@@ -40,6 +40,14 @@ Durable `abort()` 会终止当前 run 并撤销其内部排队输入。若把所
 
 本次验证的是进程强杀，不是断电。当前 SQLite 适配使用 WAL 与 synchronous=NORMAL，不应由进程恢复结果推导断电后最后一次提交必不丢失。
 
+### 后续 `/steer` 静态核查
+
+用户确认 Telegram 显式 `/steer` 才用于运行中补充，普通输入仍排队到后续轮次。对已安装 1.2.0 发布包的补充静态核查表明，接口是 `submit` 的 `whenBusy: "steer"`，不是独立的 `.steer()`。在整轮工具完成后的边界，所选 steer 会加入当前 run；如果模型直接产出最终答复，则在 final 边界结束旧 run、让待处理输入启动后续 run。因此它不提供“立即打断工具”或“必定进入原 run”的保证。[发布包说明](https://unpkg.com/@earendil-works/pi-durable@1.2.0/README.md)、[generation 实现](https://unpkg.com/@earendil-works/pi-durable@1.2.0/dist/harness/generation.js)
+
+`steeringMode: "all"` 可在边界读取全部已排队 steer，各自保留输入条目，并不判断语义是否相同。它不能替代 nailong 的统一优先级与 FIFO 队列。提交和 inbox 有持久记录，但会话 abort 会撤销其中待处理的输入，因此应用仍需保留 `/steer` 原始内容与提交身份，恢复时核对是否已消费。[inbox 实现](https://unpkg.com/@earendil-works/pi-durable@1.2.0/dist/harness/inbox.js)、[提交实现](https://unpkg.com/@earendil-works/pi-durable@1.2.0/dist/harness/submissions.js)、[abort 实现](https://unpkg.com/@earendil-works/pi-durable@1.2.0/dist/harness/scheduler.js)
+
+以上是源码审阅，不新增或扩大前述 9 项实验的覆盖。显式 `/steer` 的通道解析、边界交接、重启去重、abort 续接及空闲处理仍需正式实现与验收。
+
 ### 模型和资源需要适配
 
 沿用当前配置的模型身份、端点、凭据和兼容标志可调用新 pi-ai provider，但需显式沿用当前运行时的 thinkingLevel：推理模型使用 low，其他模型 off。第一次 Responses 检查默认 off 时向上游发送 effort=none，被当前 GPT 模型以 400 拒绝；补齐配置后复测通过。
