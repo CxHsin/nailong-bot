@@ -52,6 +52,6 @@ node --import tsx scripts/experiments/pi-durable/live-herdr.mjs C:/absolute/new-
 
 已完成工具的崩溃恢复与被取消工作的业务续接不同：后者需要新 submission 关联原事件，并重新核对最新指令。实验在抢占状态保存后强杀，没有覆盖应用队列与 Harness 之间的任意崩溃窗口。
 
-旧扩展 hooks、旧 Session 导入、图片/文件交付、Telegram 草稿和回执、连续消息时间窗合批、完整 `/reset` 衔接尚未迁移或验收。不能把本实验直接作为线上替换入口。
+旧 Session 导入、图片/文件交付（包括 `send_file`）、Telegram 草稿和回执、连续消息时间窗合批、完整 `/reset` 衔接尚未迁移或验收。当前没有发现第三方扩展依赖，不要求建设通用旧扩展兼容层；在用工具的核查见验证报告。不能把本实验直接作为线上替换入口。
 
 本次保存的脱敏结果见 `evidence/`；它们是实际运行证据，不是每次运行自动覆盖的测试快照。

@@ -46,6 +46,12 @@ Durable `abort()` 会终止当前 run 并撤销其内部排队输入。若把所
 
 项目指令与技能可通过现有 SDK 的 loadProjectContextFiles、loadSkills、formatSkillsForPrompt 单独加载，再构成 Durable sections，无需开启旧 AgentSession。此结果仅证明指令/技能发现与读取；旧 extension hooks、slash commands、模板和动态资源未获得自动兼容。
 
+### 当前工具与扩展清理
+
+2026-10-15 按用户“有用则保留，无用则删除”的要求核查：当前自有 Pi 注册代码提供两项在用能力，`herdr_watch` 保存帮手身份并观察结果，`send_file` 将文件交给通道发送。迁移时保留这两项能力，改为 Durable 的工具接入方式；无需为它们建设通用旧扩展兼容层。当前入口尚未切换，因此仍保留正在使用的注册实现。
+
+`AssistantOptions.extensionPaths` 仅声明并转交 SDK，没有任何生产、测试或脚本调用者，已删除该参数及转交代码。SDK 的默认资源发现仍负责项目指令、技能及目录资源加载，不能随该参数一并删除。当前本地默认工作目录和数据目录没有发现外部扩展；测试中的 `.pi/extensions/fixture.ts` 是临时夹具。没有发现需要迁移的第三方扩展，因此不把通用旧 hooks、slash commands 等自动兼容列为迁移要求；若后续发现实际使用者，再单独核对。
+
 herdr_watch 复用原有工具实现并转换结果格式。内部回传用带来源身份的自定义条目保存摘要和证据位置，不把完整终端过程塞进主上下文，也不因回传直接发给用户。模型协议中的角色与条目的业务来源需要分别保留。
 
 ## 环境问题与证据边界
@@ -66,4 +72,4 @@ herdr_watch 复用原有工具实现并转换结果格式。内部回传用带�
 
 执行引擎正式采用、现有 Session 的导入/保留方式，以及切换数据空间仍需确认。事件路由的具体匹配与去重键、连续消息合批窗口、内部结果调度、完整 reset 与取消衔接，以及 Telegram 图片/文件/草稿/发送回执属于后续实现和验收范围。
 
-本次没有接入 cron、邮件或 Slack，没有修改 herdr 内部执行恢复，也没有承诺任意外部副作用精确一次。旧扩展与当前 Channel 行为须按[迁移评审约定](../agents/refactor-review.md)逐项核对；通过本实验不意味着正式迁移已经完成。
+本次没有接入 cron、邮件或 Slack，没有修改 herdr 内部执行恢复，也没有承诺任意外部副作用精确一次。`herdr_watch`、`send_file` 与当前 Channel 行为须按[迁移评审约定](../agents/refactor-review.md)逐项核对；通过本实验不意味着正式迁移已经完成。

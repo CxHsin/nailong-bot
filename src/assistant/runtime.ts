@@ -41,7 +41,6 @@ export type AssistantOptions = {
   prompt?: string;
   modelConfiguration: ModelConfiguration;
   skillPaths?: string[];
-  extensionPaths?: string[];
   tools?: ToolDefinition[];
   herdr?: HerdrClient;
   pollMs?: number;
@@ -193,7 +192,6 @@ export async function createAssistant(options: AssistantOptions) {
         settingsManager: settings,
         systemPrompt: options.prompt,
         additionalSkillPaths: options.skillPaths,
-        additionalExtensionPaths: options.extensionPaths,
         extensionFactories: [
           herdrExtension(client, helpers, saveHelpers),
           (pi) => {
