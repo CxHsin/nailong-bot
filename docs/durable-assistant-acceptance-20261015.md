@@ -2,7 +2,7 @@
 
 规格 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，实现 [#202](https://github.com/CxHsin/nailong-bot/issues/202)、[#203](https://github.com/CxHsin/nailong-bot/issues/203)、[#204](https://github.com/CxHsin/nailong-bot/issues/204)、[#205](https://github.com/CxHsin/nailong-bot/issues/205)。本文件记录正式 Assistant Service、Telegram/CLI 入口的实际验收；[独立 Pi Durable 实验](research/pi-durable-integration-2026-10-15.md)与[旧原生 Session 验收](pi-assistant-acceptance-20261014.md)保留各自范围，不能代替本轮证据。
 
-状态：2026-10-16 已完成实现与受控综合验收。受检范围为基准 `769249c` 后、本记录所在提交的源码与测试；正式入口代码已切换，尚未启动真实模型/Telegram/helper 的生产联调。
+状态：2026-10-16 已完成实现与受控综合验收。受检范围为基准 `769249c` 后、本记录所在提交的源码与测试；正式入口代码已切换。本记录描述初次受控验收；后续真实模型、Telegram 手机客户端与真实 helper 的测评见[真实链路测评](durable-assistant-live-20261016.md)。
 
 ## 行为与证据对应
 

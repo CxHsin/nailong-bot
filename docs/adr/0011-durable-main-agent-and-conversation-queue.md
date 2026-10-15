@@ -30,4 +30,4 @@ nailong 保留未运行事件，每次只向 Harness 提交当前轮次，避免
 
 模型临时故障默认最多重试 3 次，含首次共 4 次请求，基础等待 2 秒，仅由执行器一层负责。`/resume [批次ID]` 明确继续本会话暂停的工作，省略 ID 时选择本会话全部暂停项；重启不绕过暂停。`/reset` 保留事件、进度和委派，普通消息排队与显式 `/steer` 各自遵循上述边界。
 
-实现任务 [#202](https://github.com/CxHsin/nailong-bot/issues/202)、[#203](https://github.com/CxHsin/nailong-bot/issues/203)、[#204](https://github.com/CxHsin/nailong-bot/issues/204)、[#205](https://github.com/CxHsin/nailong-bot/issues/205) 已于 2026-10-16 完成受控综合验收：全仓 128 项测试、类型检查、构建及文档链接检查通过。实际输入/输出、强杀恢复证据与真实服务未联调的边界见 [当前验收记录](../durable-assistant-acceptance-20261015.md)。[操作说明](../personal-agent-operations.md)描述新入口，旧验收保留原基准与限制。
+实现任务 [#202](https://github.com/CxHsin/nailong-bot/issues/202)、[#203](https://github.com/CxHsin/nailong-bot/issues/203)、[#204](https://github.com/CxHsin/nailong-bot/issues/204)、[#205](https://github.com/CxHsin/nailong-bot/issues/205) 已于 2026-10-16 完成受控综合验收：全仓 128 项测试、类型检查、构建及文档链接检查通过。实际输入/输出、强杀恢复证据见[受控验收记录](../durable-assistant-acceptance-20261015.md)；随后完成真实模型、Telegram 手机文件交付及真实 helper 原身份恢复，见[真实链路测评](../durable-assistant-live-20261016.md)。[操作说明](../personal-agent-operations.md)描述新入口，旧验收保留原基准与限制。
