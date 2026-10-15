@@ -47,7 +47,38 @@ herdr pane list --workspace WORKSPACE_ID
 
 配置按当次明确指定 > 项目约定 > 全局默认 > Codex 选择。模型与推理继承所选 CLI 配置；需要覆盖时按该版本帮助传参。保持 CLI 全局默认原样；指定配置不可用时报告受阻。
 
-**2026-10-14 Windows 实测记录：** Telegram 派发时 herdr pane 找不到 `codex`，原因是未继承桌面应用临时加入的 PATH；桌面应用已附带 CLI，无需另下载。已将可执行目录直接加入 Windows 当前用户的永久 PATH，重新打开终端并重启 herdr 后继承。下面的桌面 Codex 启动命令添加 `--no-daemon`，绕过共享后台服务；其他版本先按 `codex --help` 确认参数支持。
+### Windows：先在目标 pane 检查 Codex
+
+桌面应用附带的 Codex 可能只在调用方的 PATH 中，而 herdr 服务和新 pane 继承了另一份环境。2026-10-16 实测新 pane 仍找不到 `codex`；此前加过用户 PATH 不能作为当前 pane 可用的证据。启动前在处于 Shell 提示符的目标 pane 检查：
+
+```powershell
+herdr pane run PANE_ID 'Get-Command codex -CommandType Application -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; codex --version'
+herdr pane read PANE_ID --source recent-unwrapped --lines 40
+```
+
+读回实际可执行路径和版本后才启动 agent。`pane run` 返回只说明命令已送入终端，不代表终端内命令成功；尚无结果时按第 0 节等待输出。
+
+若目标 pane 报找不到命令，而调用方 PowerShell 可以运行 Codex，从调用方取得实际路径，再把所在目录加入**当前目标 pane** 的进程 PATH：
+
+```powershell
+$paneId = '从回执取得的目标 pane ID'
+$codexExe = (Get-Command codex -CommandType Application -ErrorAction Stop).Source
+& $codexExe --version
+if ($LASTEXITCODE -ne 0) { throw '调用方 Codex 不可用，保留现场' }
+$codexDir = Split-Path -Parent $codexExe
+$prepareCodex = '$env:Path = ''' + $codexDir.Replace("'", "''") + ';'' + $env:Path; (Get-Command codex -CommandType Application -ErrorAction Stop).Source; codex --version'
+& herdr pane run $paneId $prepareCodex
+if ($LASTEXITCODE -ne 0) { throw '命令送入失败，先核对 pane' }
+herdr pane read $paneId --source recent-unwrapped --lines 40
+```
+
+此命令适用于 PowerShell pane；其他 Shell 按其语法设置当前进程 PATH。调用方也找不到时，检查桌面安装目录 `$env:LOCALAPPDATA/OpenAI/Codex/bin` 下实际存在的 `codex.exe`，核对来源并运行绝对路径的 `--version` 后再选用；多个版本以当前桌面正在使用的路径为准，无法确定则报告缺失信息。安装目录随更新变化，每次重新发现，避免写死版本子目录。
+
+完成条件是目标 pane 内 `Get-Command` 解析到选定的可执行文件且 `codex --version` 成功。补路径仅影响本次 pane；新 pane 重做检查，保持永久 PATH 和共享 herdr 服务原样。真实修复与后续任务通过的证据见[实测报告](../../../docs/durable-assistant-live-20261016.md)。
+
+### 启动与读回
+
+下面的桌面 Codex 启动命令添加 `--no-daemon`，绕过共享后台服务；其他版本先按 `codex --help` 确认参数支持。
 
 ```text
 herdr agent start AGENT_NAME --kind codex --pane PANE_ID --timeout 90000 -- --sandbox danger-full-access --ask-for-approval never --no-daemon

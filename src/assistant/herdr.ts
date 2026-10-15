@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Type } from "typebox";
-import type { ExtensionFactory } from "@mariozechner/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-durable";
 
 export interface HerdrClient {
   run(session: string, args: string[]): Promise<string>;
@@ -72,59 +72,25 @@ export async function inspectHelper(
 }
 
 /** Observes an already dispatched helper; never starts or restarts external work. */
-export function herdrExtension(
+export function durableHerdrWatch(
   client: HerdrClient,
   records: HelperRecord[],
   save: () => Promise<void>,
-): ExtensionFactory {
-  return (pi) => {
-    pi.registerTool({
-      name: "herdr_watch",
-      label: "Watch herdr helper",
-      description:
-        "Register an already dispatched herdr helper for background observation and return to conversation. Use after confirming prompt reception. Does not launch work or prove completion.",
-      parameters: Type.Object({
-        session: Type.String(),
-        agent: Type.String(),
-        paneId: Type.String(),
-        workspaceId: Type.String(),
-        cwd: Type.String(),
-        promptPath: Type.String(),
-      }),
-      async execute(callId, args) {
-        await readFile(resolve(args.promptPath), "utf8");
-        const state = await inspectHelper(client, args);
-        if (state.launchPending || state.status === "unknown")
-          throw new Error("帮手接收状态未知；先查询和读回，不重复派发");
-        const existing = records.find(
-          (record) =>
-            record.session === args.session &&
-            record.agent === args.agent &&
-            !record.delivered,
-        );
-        if (existing)
-          return {
-            content: [{ type: "text", text: "已在后台观察此帮手。" }],
-            details: {},
-          };
-        records.push({
-          ...args,
-          cwd: resolve(args.cwd),
-          promptPath: resolve(args.promptPath),
-          id: callId,
-          sequence: state.sequence,
-        });
+) {
+  return defineTool({
+    name: "herdr_watch",
+    description: "Observe an already dispatched helper after confirming receipt. Never launches it; idle/done requires result inspection.",
+    parameters: Type.Object({session: Type.String(),agent: Type.String(),paneId: Type.String(),workspaceId: Type.String(),cwd: Type.String(),promptPath: Type.String()}),
+    replay: "unsafe",
+    async execute(args, api) {
+      await readFile(resolve(args.promptPath), "utf8");
+      const state = await inspectHelper(client,args);
+      if (state.launchPending || state.status === "unknown") throw new Error("帮手接收状态未知；先查询和读回，不重复派发");
+      if (!records.some((record)=>record.session===args.session&&record.agent===args.agent&&!record.delivered)) {
+        records.push({...args,cwd:resolve(args.cwd),promptPath:resolve(args.promptPath),id:api.callId,sequence:state.sequence});
         await save();
-        return {
-          content: [
-            {
-              type: "text",
-              text: "已保存帮手身份并在后台观察；现在可继续交流。idle/done 只触发成果核对。",
-            },
-          ],
-          details: {},
-        };
-      },
-    });
-  };
+      }
+      return {output:[{type:"text",text:"已保存帮手身份并在后台观察；现在可继续交流。idle/done 只触发成果核对。"}]};
+    },
+  });
 }

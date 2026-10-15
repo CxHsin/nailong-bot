@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "helper": "durable-reconnect-20261015",
+  "state": {
+    "status": "done",
+    "sequence": 5,
+    "launchPending": false
+  },
+  "hostHardKilled": true,
+  "relaunches": 0,
+  "expectedResult": 421,
+  "acceptedInternalResults": 1,
+  "boundary": "Actual herdr/Codex helper; main Harness uses deterministic model to isolate the bridge."
+}

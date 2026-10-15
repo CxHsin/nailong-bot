@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "receiptId": "1a2e23cb-b0bc-4161-b11c-4d3de4ce6419",
+  "receiptId": "9ab6d1b3-7851-49ce-a357-35ceb8a03602",
   "status": "current",
   "command": "deliver",
   "type": "architecture",
   "input": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\candidate.json",
   "output": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\nailong-runtime.html",
   "specification": {
-    "sha256": "2c02fb552e8f9cdc1ef459c5a48c2aa4e182448a167553d3f81813074e2f9718",
-    "bytes": 16481
+    "sha256": "7265b5de49ac2c4f6789ce2769ee33de8decf2f74248acfe17a9fe39717915e9",
+    "bytes": 14318
   },
   "artifact": {
-    "sha256": "f38f9dbca9f038e87e58637fd51bada7f81eb13f23394b5a37ef111d787f59e0",
-    "bytes": 790977
+    "sha256": "09a7ed2692e7ea29dd1a8581f501967d0e55e98e4065570b08d7b86b07a52fdb",
+    "bytes": 784264
   }
 }

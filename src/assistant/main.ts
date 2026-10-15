@@ -30,12 +30,14 @@ export async function startTelegram() {
     await bot.api.setMyCommands(
       [
         { command: "help", description: "使用方式" },
-        { command: "reset", description: "开始新会话" },
+        { command: "reset", description: "重置会话上下文，保留工作" },
         { command: "model", description: "查看或切换模型" },
+        { command: "steer", description: "补充当前工作" },
+        { command: "resume", description: "继续暂停工作" },
       ],
       { scope: { type: "chat", chat_id: telegram.ownerId } },
     );
-    console.log("原生 Pi 助手正在接收 Telegram 私聊。");
+    console.log("持久队列与 Pi Durable 助手正在接收 Telegram 私聊。");
     await bot.start({ limit: 1, drop_pending_updates: false });
   } finally {
     process.off("SIGINT", stop);

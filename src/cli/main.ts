@@ -46,6 +46,7 @@ async function main() {
     await runtime.app.receive({
       conversationId,
       inputId: randomUUID(),
+      source: "cli",
       text,
       images,
     });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, rm, writeFile, cp } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, cp, mkdir, copyFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -11,7 +11,10 @@ test("installed hooks reject main commits and protected remote refs even when pu
   const repo = join(dir, "repo"); const remote = join(dir, "remote.git");
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   await cp(resolve(".githooks"), join(repo, ".githooks"), { recursive: true });
-  await cp(resolve("scripts"), join(repo, "scripts"), { recursive: true });
+  await mkdir(join(repo, "scripts"));
+  for (const name of ["install-git-hooks.mjs", "git-guard.mjs"]) {
+    await copyFile(resolve("scripts", name), join(repo, "scripts", name));
+  }
   git("init", "-b", "development"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.com");
   execFileSync(process.execPath, ["scripts/install-git-hooks.mjs"], { cwd: repo });
   assert.equal(git("config", "--local", "core.hooksPath"), ".githooks");
