@@ -1,6 +1,6 @@
 # 事件队列系统与持久工作流讨论
 
-日期：2026-10-15。状态：行为与技术选型已确认；剩余规格与迁移验收待完善，亦不表示现有运行时已实现。
+日期：2026-10-15。状态：行为、技术选型、实现细节与验收边界均已确认，正式规格为 [#201](https://github.com/CxHsin/nailong-bot/issues/201)；实现与迁移验收待完成，亦不表示现有运行时已实现。
 
 用户先同意做 Pi Durable 接入验证；[实际验证报告](pi-durable-integration-2026-10-15.md)记录 9 项通过、适配成本与验证边界。澄清在用工具与闲置扩展参数后，用户确认更新方案：采用 Pi Durable 承载主 agent 持久执行，nailong 自有队列负责路由、去重、优先级与 FIFO，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。以下约定是已接受的目标行为，正式入口尚未切换。
 
@@ -62,11 +62,11 @@ herdr 回传属于内部执行材料，不变成用户消息，也不因回传�
 - [Temporal Activity 官方说明](https://github.com/temporalio/documentation/blob/cdc231e55d811d8d0df5b75b38dd2546b2131e2f/docs/encyclopedia/activities/activity-definition.mdx#L188)表明 Activity 返回前的内部步骤不形成独立恢复历史。仅把整个 Pi `prompt()` 包成一个 Activity，不能获得其中每个工具步骤的恢复；还需暴露工具步骤或增加工具账本。它另需运行 Service 与 Worker。
 - 保留当前 Pi SDK 的方案可继续使用现有 Session、技能和扩展，但需自行补齐持久输入、工具 intent/result、成果复用、未决操作核实与恢复衔接；当前 SDK 的事件 hook 不是现成恢复执行器。
 
-## 剩余规格与迁移验收
+## 正式规格与迁移验收
 
 用户确认切换时丢弃旧会话历史，不导入旧摘要、近期对话或详细工具记录，新会话从空白上下文开始。这里规定的是新运行时不加载旧历史，不据此扩大为删除本地目录、凭据或成果文件；委派身份与已发生外部效果也不能由旧上下文缺席推导为不存在。
 
-轮次边界合批、Telegram 显式 `/steer`、空闲 steer 转普通输入、重试耗尽后暂停保留进度及旧会话历史不迁移均已确认。规格仍需明确批次与原始事件的完成/取消/恢复关系、答复组织、路由匹配与去重键、内部结果交付时机、重试数值上限，以及切换数据空间的办法。这些细节不能因执行引擎选定而视为已经确认。
+用户进一步整体确认[正式规格](event-queue-durable-spec-2026-10-15.md)及其验收边界：合批固定原始成员并按一个处理轮次恢复，可统一答复；Telegram 去重包含来源、会话与 message_id，CLI 沿用一次输入 UUID；模型最多重试 3 次，含首次最多 4 次请求，基础等待 2 秒，只由执行器重试；herdr 回传先保存，当前轮结束后让已排队直接输入先处理；使用独立新执行数据空间，不导入旧历史。这些是待实现要求，不能作为现有运行保证。
 
 以下是正式接入的验收要求，不是现有实验已覆盖的保证：
 
@@ -89,6 +89,6 @@ herdr 回传属于内部执行材料，不变成用户消息，也不因回传�
 
 已确认项来自本轮用户对事件链路的更正、优先级与同级排队的明确说明，以及对工具步骤恢复、自动重启恢复、错误分类、herdr 轮次释放与身份续接、抢占后核对续接和 `/reset` 保留工作的同意。
 
-已按 [Issue tracker 约定](../agents/issue-tracker.md)发布[设计结论 #200](https://github.com/CxHsin/nailong-bot/issues/200)，并由 ADR-0011 记录已接受的技术取舍。该结论作为后续规格与实现任务的依据；正式规格仍需补齐上述细节，不能直接标为可无人值守实现。
+已按 [Issue tracker 约定](../agents/issue-tracker.md)发布[设计结论 #200](https://github.com/CxHsin/nailong-bot/issues/200)，并由 ADR-0011 记录已接受的技术取舍。用户整体确认后，发布[正式规格 #201](https://github.com/CxHsin/nailong-bot/issues/201)，标记 `ready-for-agent`。
 
-已整理[待整体核对的规格草稿](event-queue-durable-spec-draft-2026-10-15.md)，明确区分已确认行为与拟定的具体实现细节，并列出正式入口的行为验收边界。
+仓库[规格归档](event-queue-durable-spec-2026-10-15.md)包含实现细节、正式入口行为验收和 #202–#205 的任务依赖。早期草稿及当时待决说明保留在 Git 历史和结论 Issue 评论中，当前实施以 #201 为准。

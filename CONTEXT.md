@@ -1,6 +1,6 @@
 # Nailong Bot Agent Context
 
-One personal assistant uses native Pi through Telegram or CLI. Current production baseline: [ADR-0010](docs/adr/0010-native-pi-assistant.md), [spec #196](https://github.com/CxHsin/nailong-bot/issues/196). Accepted next direction: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [conclusion #200](https://github.com/CxHsin/nailong-bot/issues/200); migration is pending. Older Host terminology below has been retired from the online path; historical ADRs keep their original evidence.
+One personal assistant uses native Pi through Telegram or CLI. Current production baseline: [ADR-0010](docs/adr/0010-native-pi-assistant.md), [spec #196](https://github.com/CxHsin/nailong-bot/issues/196). Accepted next direction: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [conclusion #200](https://github.com/CxHsin/nailong-bot/issues/200), [spec #201](https://github.com/CxHsin/nailong-bot/issues/201); implementation tasks #202–#205 and migration are pending. Older Host terminology below has been retired from the online path; historical ADRs keep their original evidence.
 
 ## Language
 

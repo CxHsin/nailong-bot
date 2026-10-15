@@ -4,9 +4,9 @@ status: accepted
 
 # 主 agent 使用 Pi Durable，输入由 nailong 会话队列调度
 
-设计结论：[Issue #200](https://github.com/CxHsin/nailong-bot/issues/200)。
+设计结论：[Issue #200](https://github.com/CxHsin/nailong-bot/issues/200)。已确认正式规格：[Issue #201](https://github.com/CxHsin/nailong-bot/issues/201)。
 
-2026-10-15，在完成 [9 项接入实验](../research/pi-durable-integration-2026-10-15.md)并澄清现有工具用途后，用户确认采用 Pi Durable 承载主 agent 的持久执行，由 nailong 自有持久队列负责事件路由、去重、会话选择、优先级、同级 FIFO 与合批。[行为结论与待完善规格](../research/event-queue-durable-workflow-2026-10-15.md)记录完整范围。此决定替代 [ADR-0010](0010-native-pi-assistant.md)中暂缓主 agent 持久工作流与采用原生 steering 接收新输入的方向；正式运行入口尚未迁移。
+2026-10-15，在完成 [9 项接入实验](../research/pi-durable-integration-2026-10-15.md)并澄清现有工具用途后，用户确认采用 Pi Durable 承载主 agent 的持久执行，由 nailong 自有持久队列负责事件路由、去重、会话选择、优先级、同级 FIFO 与合批。[行为结论与规格确认记录](../research/event-queue-durable-workflow-2026-10-15.md)记录完整范围。此决定替代 [ADR-0010](0010-native-pi-assistant.md)中暂缓主 agent 持久工作流与采用原生 steering 接收新输入的方向；正式运行入口尚未迁移。
 
 选择 Pi Durable 可复用模型和工具步骤的持久执行能力，避免在旧 SDK 上自建全部工具恢复协议，也无需部署 Temporal 的独立 Service/Worker。代价是 Harness、现有会话和工具接口需要衔接；实验尚未验证所有队列/执行器崩溃交接窗口，亦不提供跨系统 exactly-once 或外部效果回滚保证。
 
@@ -22,4 +22,4 @@ nailong 保留未运行事件，每次只向 Harness 提交当前轮次，避免
 
 用户确认切换时不迁移旧会话历史，新会话从空白上下文开始；这不等于物理删除旧目录或忽略已有外部委派。空闲时 `/steer 内容` 转为普通输入并遵守已有队列顺序，空命令显示用法。
 
-范围为 Windows 本机单服务。cron、邮件、Slack 等连接器、herdr 内部步骤恢复、完整分层记忆和缓存优化留待后续。批次的完成与恢复协议、内部材料投递等细节及完整迁移验收见[待核对规格草稿](../research/event-queue-durable-spec-draft-2026-10-15.md)；选型确认不等于生产迁移完成。合批选择依据见[调研记录](../research/personal-agent-message-scheduling-2026-10-15.md)。
+范围为 Windows 本机单服务。cron、邮件、Slack 等连接器、herdr 内部步骤恢复、完整分层记忆和缓存优化留待后续。批次的完成与恢复协议、内部材料投递、默认模型重试上限等细节及完整迁移验收均已整体确认，见[正式规格归档](../research/event-queue-durable-spec-2026-10-15.md)；规格确认不等于生产迁移完成。合批选择依据见[调研记录](../research/personal-agent-message-scheduling-2026-10-15.md)。
