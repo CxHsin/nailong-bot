@@ -31,3 +31,17 @@ One personal assistant uses native Pi through Telegram or CLI. Current direction
 **Send Receipt**: Telegram's minimal sending/sent/rejected/unknown record. Unknown sends are not automatically retried. This is separate from the success of the user's work.
 
 **Historical Host / Task / Attempt / Akasha / Plan**: Retired online concepts retained in older documentation and offline diagnostics. The new data namespace neither loads nor migrates those records. Proactive responsibilities and timers are deferred.
+
+## Agreed design language: queue and workflow
+
+These terms describe the confirmed direction in the [queue and workflow discussion](docs/research/event-queue-durable-workflow-2026-10-15.md), not additional guarantees of the current runtime. Execution-engine selection remains open.
+
+**Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
+
+**Queue System**: The combination of input routing, deduplication and conversation selection with each Conversation's queue of pending input.
+
+**Processing Turn**: One period in which the main agent handles selected input. It can end after delegating background work; completion of the user's whole goal is not required to release the conversation for later input.
+
+**Event Priority**: The ordering that permits higher-priority input to interrupt lower-priority processing. Direct user inputs have equal priority to each other and wait in arrival order; they outrank background input.
+
+**Durable Workflow**: Saved execution progress and confirmed model/tool results that allow interrupted work to continue without repeating completed operations solely because execution restarted. It is separate from conversation history and helper-local context.
