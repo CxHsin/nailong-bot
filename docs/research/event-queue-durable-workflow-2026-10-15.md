@@ -2,6 +2,8 @@
 
 日期：2026-10-15。状态：已确认行为持续记录；技术选型待决，尚非完整实现规格，亦不表示现有运行时已实现。
 
+用户随后同意先做 Pi Durable 接入验证；[实际验证报告](pi-durable-integration-2026-10-15.md)记录 9 项通过、适配成本与验证边界。正式采用仍待确认，以下行为约定不因实验通过就成为当前生产保证。
+
 ## 问题与当前基线
 
 用户本次关注的是外部事件进入主 agent 前的队列系统，以及主 agent 执行过程中的持久工作流。它不是对旧 Host 的通用 Task/Attempt、权限或结算协议的恢复。
@@ -47,7 +49,7 @@ herdr 回传属于内部执行材料，不变成用户消息，也不因回传�
 
 需依据官方实现与实际接入验证，在 Pi Durable、Temporal 或保留现有 Pi SDK 并增加恢复适配之间作出取舍。选型还需明确现有模型配置、技能、扩展、会话历史与工具取消行为如何衔接。
 
-本次只读核对的事实如下，尚未安装或运行候选引擎：
+最初只读核对的事实如下；之后的安装与运行结果见上述实际验证报告：
 
 - [Pi Durable 官方源码](https://github.com/earendil-works/pi/tree/6a1f799b675c8cb98320b71ff7ee44f160fe8d66/packages/durable)与 [npm metadata](https://registry.npmjs.org/@earendil-works/pi-durable/latest)均显示版本 1.2.0，但没有逐文件比对源码与发布包。README 仍标记 Experimental；它使用独立 Harness，已有模型/工具持久 task、intent/result 和 safe/unsafe 重放策略。没有找到直接导入当前 coding-agent 扩展、ResourceLoader 或旧 Session JSONL 的官方接口；优先级与保留队列的抢占也仍需适配。
 - Durable 要求 Node >=22.19，使用 `node:sqlite`；官方 Node 执行环境包含 Windows Git Bash 与进程树取消处理。这是源码支持证据，不是本机集成已通过的证据。

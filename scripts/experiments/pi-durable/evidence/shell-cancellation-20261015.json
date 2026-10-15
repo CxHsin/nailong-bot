@@ -1,0 +1,12 @@
+[
+  {
+    "name": "windows-shell-cancellation",
+    "status": "passed",
+    "elapsedMs": 623,
+    "evidence": {
+      "cancelledPid": 30784,
+      "processExited": true,
+      "heartbeatStopped": true
+    }
+  }
+]

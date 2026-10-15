@@ -1,0 +1,166 @@
+[
+  {
+    "name": "hard-kill-unsafe-tool-recovery",
+    "status": "passed",
+    "elapsedMs": 2077,
+    "evidence": {
+      "effects": [
+        {
+          "tool": "step",
+          "phase": "first"
+        },
+        {
+          "tool": "gate",
+          "phase": "first"
+        }
+      ],
+      "modelCallsAfterRestart": 1,
+      "duplicateSubmission": "same ID before and after restart"
+    }
+  },
+  {
+    "name": "hard-kill-safe-tool-recovery",
+    "status": "passed",
+    "elapsedMs": 2010,
+    "evidence": {
+      "effects": [
+        {
+          "tool": "step",
+          "phase": "first"
+        },
+        {
+          "tool": "gate",
+          "phase": "first"
+        },
+        {
+          "tool": "gate",
+          "phase": "second"
+        }
+      ],
+      "modelCallsAfterRestart": 1,
+      "duplicateSubmission": "same ID before and after restart"
+    }
+  },
+  {
+    "name": "priority-preemption-fifo-and-queue-restart",
+    "status": "passed",
+    "elapsedMs": 2070,
+    "evidence": {
+      "order": [
+        "direct-1",
+        "direct-2",
+        "background-1",
+        "background-2"
+      ],
+      "aborted": {
+        "conversationId": 1,
+        "requestId": "background-1:1",
+        "type": "input",
+        "status": "unanswered",
+        "entry": 7,
+        "id": 8,
+        "reason": "aborted"
+      },
+      "boundary": "Application queue survived; resumed background uses a new submission linked to the original event. Not a production atomic preemption implementation."
+    }
+  },
+  {
+    "name": "project-and-skill-discovery-with-native-windows-tools",
+    "status": "passed",
+    "elapsedMs": 133,
+    "evidence": {
+      "skill": "herdr-workflow",
+      "projectFiles": [
+        "D:\\Code\\nailong bot\\AGENTS.md"
+      ],
+      "tools": [
+        "bash",
+        "read"
+      ],
+      "limits": "Skill directory/read verified; old arbitrary extension hooks and slash commands are not bridged."
+    }
+  },
+  {
+    "name": "herdr-watch-bridge-reopen-and-internal-result",
+    "status": "passed",
+    "elapsedMs": 63,
+    "evidence": {
+      "helperQueries": 2,
+      "launches": 0,
+      "returnedEntries": 1,
+      "boundary": "Real existing herdr_watch/inspectHelper implementations with a controlled HerdrClient; not an actual external coding run. No Telegram channel attached."
+    }
+  },
+  {
+    "name": "live-model-and-skill:ds:openai-completions",
+    "status": "passed",
+    "elapsedMs": 7474,
+    "evidence": {
+      "alias": "ds",
+      "api": "openai-completions",
+      "readToolConfirmed": true,
+      "reply": [
+        {
+          "type": "text",
+          "text": "DURABLE_SKILL_OK herdr-workflow"
+        }
+      ],
+      "usage": {
+        "models": {
+          "endpoint-2e33f0f6a1093d3c/deepseek-flash": {
+            "input": 439,
+            "output": 119,
+            "cacheRead": 3456,
+            "cacheWrite": 0,
+            "reasoning": 24,
+            "totalTokens": 4014,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          }
+        },
+        "tools": {}
+      }
+    }
+  },
+  {
+    "name": "live-model-and-skill:gpt:openai-responses",
+    "status": "passed",
+    "elapsedMs": 10243,
+    "evidence": {
+      "alias": "gpt",
+      "api": "openai-responses",
+      "readToolConfirmed": true,
+      "reply": [
+        {
+          "type": "text",
+          "text": "DURABLE_SKILL_OK herdr-workflow"
+        }
+      ],
+      "usage": {
+        "models": {
+          "endpoint-3194ab659e7ec107/gpt-6.1-sol": {
+            "input": 6062,
+            "output": 85,
+            "cacheRead": 5504,
+            "cacheWrite": 0,
+            "reasoning": 0,
+            "totalTokens": 11651,
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0
+            }
+          }
+        },
+        "tools": {}
+      }
+    }
+  }
+]

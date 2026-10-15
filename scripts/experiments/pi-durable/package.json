@@ -1,0 +1,16 @@
+{
+  "name": "nailong-pi-durable-experiment",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "node --import tsx verify.mjs",
+    "check:live": "node --env-file-if-exists=../../../.env --import tsx verify.mjs --live"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-durable": "1.2.0"
+  }
+}
