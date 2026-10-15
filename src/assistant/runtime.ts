@@ -1,43 +1,24 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, access } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import {
-  AuthStorage,
-  createAgentSession,
-  DefaultResourceLoader,
-  ModelRegistry,
-  SessionManager,
-  SettingsManager,
-  type AgentSession,
-  type ToolDefinition,
-} from "@mariozechner/pi-coding-agent";
-import type { ImageContent } from "@mariozechner/pi-ai";
-import { createAgentModels } from "../agent/agent-models.js";
+import { mkdir, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
+import { Type } from "@earendil-works/pi-ai";
 import type { ModelConfiguration } from "../agent/model-config.js";
-import {
-  herdrClient,
-  herdrExtension,
-  inspectHelper,
-  type HelperRecord,
-  type HerdrClient,
-} from "./herdr.js";
-import { Type } from "typebox";
-import { DatabaseSync } from "node:sqlite";
-import { publicReplyText } from "../telegram/reply-preview.js";
+import { herdrClient, durableHerdrWatch, inspectHelper, type HelperRecord, type HerdrClient } from "./herdr.js";
+import { createQueuedAssistant, type QueueExecutionContext, type ProcessingBatch } from "./queued-service.js";
+import type { QueueInput } from "./queue.js";
+import { createDurableExecutor } from "./durable-executor.js";
+import { AssistantState, requireFreshNamespace, steerKey, type SteerRecord } from "./state.js";
 import type { ReplyPreview } from "../telegram/draft-preview.js";
 
-export type AssistantInput = {
-  conversationId: string;
-  inputId: string;
-  text: string;
-  images?: ImageContent[];
-};
-export type AssistantOutput = { conversationId: string } & (
+export type AssistantInput = QueueInput;
+export type AssistantOutput = { conversationId: string; outputId?: string } & (
   { type: "text"; text: string } | { type: "file"; path: string }
 );
 export type AssistantOptions = {
   cwd?: string;
   dataDir: string;
+  legacyDataDir?: string;
   prompt?: string;
   modelConfiguration: ModelConfiguration;
   skillPaths?: string[];
@@ -47,549 +28,260 @@ export type AssistantOptions = {
   reportFailure?: (error: unknown) => void;
   shellPath?: string;
 };
-type Conversation = {
-  session: AgentSession;
-  running?: Promise<void>;
-  inputs: Set<string>;
-  helpers: HelperRecord[];
-  saveHelpers: () => Promise<void>;
-  directory: string;
-};
 
-function hasHelperReceipt(
-  session: AgentSession,
-  id: string,
-  terminalOnly = true,
-) {
-  return session.sessionManager.getEntries().some((entry) => {
-    if (entry.type !== "custom_message" || entry.customType !== "herdr_result")
-      return false;
-    const details = entry.details as
-      { id?: string; terminal?: boolean } | undefined;
-    return details?.id === id && (!terminalOnly || details.terminal === true);
-  });
-}
-
-async function hasDurableHelperReceipt(session: AgentSession, id: string) {
-  if (!hasHelperReceipt(session, id)) return false;
-  const path = session.sessionManager.getSessionFile();
-  if (!path) return false;
-  try {
-    // Pi postpones the first JSONL write until an assistant message exists.
-    const contents = await readFile(path, "utf8");
-    return contents
-      .split("\n")
-      .filter(Boolean)
-      .some((line) => {
-        const entry = JSON.parse(line);
-        return (
-          entry.type === "custom_message" &&
-          entry.customType === "herdr_result" &&
-          entry.details?.id === id &&
-          entry.details?.terminal === true
-        );
-      });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-async function atomicJson(path: string, value: unknown) {
-  const temp = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temp, JSON.stringify(value));
-  await rename(temp, path);
-}
-
-/** Native Pi owns execution and Session history; this service only connects inputs and outputs. */
+/** Persistent admission/scheduling, with Pi Durable responsible for model/tool execution. */
 export async function createAssistant(options: AssistantOptions) {
   const cwd = resolve(options.cwd ?? process.cwd());
   const dataDir = resolve(options.dataDir);
   await mkdir(dataDir, { recursive: true });
-  // A native transaction gives process exclusivity and releases automatically after a crash.
-  const owner = new DatabaseSync(join(dataDir, "owner.sqlite"));
-  try {
-    owner.exec("CREATE TABLE IF NOT EXISTS owner(id INTEGER); BEGIN EXCLUSIVE");
-  } catch {
-    owner.close();
-    throw new Error("助手数据目录正在被另一个进程使用");
-  }
-  const opened = new Set<AgentSession>();
-  try {
-    const models = createAgentModels({
-      modelConfiguration: options.modelConfiguration,
-    });
-    const auth = AuthStorage.create(join(dataDir, "auth.json"));
-    models.registerRuntimeKeys(auth);
-    const registry = ModelRegistry.create(auth);
-    const conversations = new Map<string, Promise<Conversation>>();
-    const client = options.herdr ?? herdrClient;
-    let known: Array<{ id: string; cwd: string }> = [];
-    try {
-      const value = JSON.parse(
-        await readFile(join(dataDir, "conversations.json"), "utf8"),
-      );
-      if (value.version !== 1) throw new Error("不支持的会话索引版本");
-      known = value.conversations;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  await requireFreshNamespace(dataDir);
+  const state = new AssistantState(dataDir);
+  const client = options.herdr ?? herdrClient;
+  const report = options.reportFailure ?? console.error;
+  const previews = new Set<(preview: ReplyPreview) => void>();
+  const helpers = new Map<string, HelperRecord[]>();
+  const helperRecords = (id: string) => {
+    let records = helpers.get(id);
+    if (!records) { records = state.helpers(id); helpers.set(id, records); }
+    return records;
+  };
+  const saveHelpers = async (id: string) => { state.saveHelpers(id, helperRecords(id)); };
+  let closed = false;
+  let acceptance = Promise.resolve();
+  let observing: Promise<void> | undefined;
+  let service!: Awaited<ReturnType<typeof createQueuedAssistant>>;
+  const readyBatches = new Set<string>();
+  const outputs = new Set<(output: AssistantOutput) => void | Promise<void>>();
+  const sending = new Map<string, Promise<void>>();
+  const emit = (output: AssistantOutput): Promise<void> => {
+    if (output.outputId) {
+      const current = sending.get(output.outputId);
+      if (current) return current;
+      if (!state.beginOutput(output.outputId)) return Promise.resolve();
     }
-    const listeners = new Set<
-      (output: AssistantOutput) => void | Promise<void>
-    >();
-    const previewListeners = new Set<(preview: ReplyPreview) => void>();
-    let closed = false;
-    let deliveries = Promise.resolve();
-    const emit = (output: AssistantOutput) => {
-      const sending = deliveries.then(async () => {
-        for (const listener of listeners) await listener(output);
-      });
-      deliveries = sending.catch((error) => {
-        (options.reportFailure ?? console.error)(error);
-      });
-      return sending;
-    };
+    const delivery = Promise.resolve().then(async () => {
+      try {
+        for (const listener of outputs) await listener(output);
+        if (output.outputId) state.finishOutput(output.outputId, "sent");
+      } catch (error) {
+        if (output.outputId) state.finishOutput(output.outputId, "unknown");
+        throw error;
+      }
+    });
+    if (output.outputId) {
+      const id = output.outputId;
+      sending.set(id, delivery);
+      void delivery.then(() => sending.delete(id), () => sending.delete(id));
+    }
+    return delivery;
+  };
+  const workDir = (id: string) => state.conversation(id, cwd);
 
-    async function open(id: string, fresh = false): Promise<Conversation> {
-      const workDir = known.find((entry) => entry.id === id)?.cwd ?? cwd;
-      const directory = join(
-        dataDir,
-        "sessions",
-        createHash("sha256").update(id).digest("hex"),
-      );
-      await mkdir(directory, { recursive: true });
-      let inputs: string[] = [];
-      try {
-        inputs = JSON.parse(
-          await readFile(join(directory, "inputs.json"), "utf8"),
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  function extraTools(id: string): ToolRegistration[] {
+    return [
+      durableHerdrWatch(client, helperRecords(id), () => saveHelpers(id)),
+      defineTool({ name: "send_file", description: "Deliver a local result file requested by the user to this conversation.",
+        parameters: Type.Object({ path: Type.String() }), replay: "unsafe",
+        async execute(args, api) {
+          const path = resolve(workDir(id), args.path);
+          await readFile(path);
+          try { await emit({ conversationId: id, outputId: `${id}:file:${api.callId}`, type: "file", path }); }
+          catch (error) {
+            if (!(error as { externalEffectUnknown?: boolean }).externalEffectUnknown) throw error;
+            return { isError: true, diagnostics: [{ severity: "error" as const, code: "external_effect_unknown", message: String(error) }],
+              output: [{ type: "text", text: `外部发送结果未知。${String(error)}。先核对发送回执与实际收到情况；无法确认时暂停询问，不因新工具调用身份重复发送。` }] };
+          }
+          return { output: [{ type: "text", text: "文件已交给接入层处理。发送结果未知时先核对回执，不重复发送。" }] };
+        } }),
+    ];
+  }
+
+  const executor = await createDurableExecutor({
+    ...options, dataDir, cwd, extraTools, workDir,
+    contextMaterials: (id: string) => {
+      const records = helperRecords(id).filter((record) => !record.delivered);
+      return records.length ? `已有外部委派，先核对真实身份与成果，不因新会话或重启重新派发：\n${JSON.stringify(records)}` : "";
+    },
+    onPreview: (preview: ReplyPreview) => { for (const listener of previews) listener(preview); },
+  });
+
+  async function submitSteer(record: SteerRecord) {
+    const submission = await executor.steer(record.input.conversationId, { ...record.input, requestId: record.key });
+    record.submissionId = submission.id;
+    record.state = "submitted";
+    state.storeSteer(record);
+  }
+  async function reconcileSteers(id: string, targetBatch?: string) {
+    for (const record of state.pendingSteers(id)) {
+      if (targetBatch && record.targetBatch !== targetBatch) continue;
+      if (!record.submissionId) await submitSteer(record);
+      const status = await executor.steerStatus(id, record.submissionId!);
+      if (status?.entry) { record.state = "handled"; state.storeSteer(record); }
+      else if (status?.status === "unanswered") {
+        await service.receive({ ...record.input, kind: "message" });
+        record.state = "handled";
+        state.storeSteer(record);
       }
-      let helpers: HelperRecord[] = [];
-      try {
-        const stored = JSON.parse(
-          await readFile(join(directory, "helpers.json"), "utf8"),
-        );
-        if (stored.version !== 1) throw new Error("不支持的帮手记录版本");
-        helpers = stored.helpers;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+
+  async function execute(batch: ProcessingBatch, control: QueueExecutionContext) {
+    const first = batch.events[0]!;
+    const command = first.text.trim();
+    if (first.kind === "command") {
+      if (command === "/help") {
+        await control.emit({ conversationId: batch.conversationId, type: "text",
+          text: "直接输入按同级 FIFO 排队；/steer 内容 补充当前工作；/reset 重置上下文并保留工作；/resume [批次ID] 继续暂停工作；/model 查看或切换模型。" });
+        return { status: "completed" as const };
       }
-      let saving = Promise.resolve();
-      const saveHelpers = () => {
-        const value = JSON.parse(JSON.stringify({ version: 1, helpers }));
-        saving = saving.then(() =>
-          atomicJson(join(directory, "helpers.json"), value),
-        );
-        return saving;
-      };
-      const settings = SettingsManager.create(workDir, dataDir);
-      if (options.shellPath) settings.setShellPath(options.shellPath);
-      const loader = new DefaultResourceLoader({
-        cwd: workDir,
-        agentDir: dataDir,
-        settingsManager: settings,
-        systemPrompt: options.prompt,
-        additionalSkillPaths: options.skillPaths,
-        extensionFactories: [
-          herdrExtension(client, helpers, saveHelpers),
-          (pi) => {
-            pi.registerTool({
-              name: "send_file",
-              label: "Send file",
-              description:
-                "Send a local result file to the current conversation. Use only for files the user requested.",
-              parameters: Type.Object({ path: Type.String() }),
-              async execute(_callId, args) {
-                const path = resolve(workDir, args.path);
-                await readFile(path);
-                await emit({ conversationId: id, type: "file", path });
-                return {
-                  content: [{ type: "text", text: "文件已交给接入层处理。" }],
-                  details: {},
-                };
-              },
-            });
-          },
-        ],
-      });
-      await loader.reload();
-      let sessionFile: string | undefined;
-      if (!fresh) {
-        try {
-          const pointer = JSON.parse(
-            await readFile(join(directory, "session.json"), "utf8"),
-          );
-          if (pointer.version !== 1 || typeof pointer.path !== "string")
-            throw new Error("会话指针损坏");
-          await access(pointer.path);
-          sessionFile = pointer.path;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        }
+      if (command === "/reset") {
+        await executor.reset(batch.conversationId);
+        await control.emit({ conversationId: batch.conversationId, type: "text", text: "已重置主会话上下文；已接收事件、执行进度和外部委派保留。" });
+        return { status: "completed" as const };
       }
-      // Pi defers creating JSONL until the first assistant response. Pin a fresh reset even before that write.
-      const manager = sessionFile
-        ? SessionManager.open(sessionFile, directory, workDir)
-        : SessionManager.create(workDir, directory);
-      await atomicJson(join(directory, "session.json"), {
-        version: 1,
-        path: manager.getSessionFile(),
-      });
-      const alias = manager
-        .getEntries()
-        .findLast(
-          (entry) =>
-            entry.type === "custom" && entry.customType === "assistant_model",
-        );
-      const selected = models.select(
-        alias?.type === "custom" ? String(alias.data) : undefined,
-      );
-      const { session } = await createAgentSession({
-        cwd: workDir,
-        agentDir: dataDir,
-        authStorage: auth,
-        modelRegistry: registry,
-        model: selected.model,
-        thinkingLevel: selected.model.reasoning ? "low" : "off",
-        settingsManager: settings,
-        resourceLoader: loader,
-        sessionManager: manager,
-        customTools: options.tools,
-      });
-      opened.add(session);
-      const failures = loader.getExtensions().errors;
-      if (failures.length) {
-        session.dispose();
-        throw new Error(
-          `扩展加载失败：${failures.map((error) => error.error).join("; ")}`,
-        );
+      if (/^\/resume(?:\s|$)/.test(command)) {
+        await service.resume(batch.conversationId, command.slice(7).trim() || undefined);
+        await control.emit({ conversationId: batch.conversationId, type: "text", text: "已请求继续暂停的工作；续接前将核对最新指令和已确认成果。" });
+        return { status: "completed" as const };
       }
-      await session.bindExtensions({
-        onError: (error) => {
-          (options.reportFailure ?? console.error)(error);
+      if (/^\/model(?:\s|$)/.test(command)) {
+        const selected = await executor.model(batch.conversationId, command.slice(6).trim() || undefined);
+        await control.emit({ conversationId: batch.conversationId, type: "text", text: selected });
+        return { status: "completed" as const };
+      }
+      if (command === "/steer") {
+        await control.emit({ conversationId: batch.conversationId, type: "text", text: "用法：/steer 内容。运行时补充当前工作，空闲时作为普通输入排队。" });
+        return { status: "completed" as const };
+      }
+    }
+    try {
+      const result = await executor.execute(batch, { ...control,
+        onReady: async () => {
+          readyBatches.add(batch.id);
+          for (const record of state.pendingSteers(batch.conversationId)) {
+            if (record.targetBatch === batch.id && record.state === "pending") await submitSteer(record);
+          }
         },
       });
-      let replyId = "";
-      let pendingModelError: { message: string } | undefined;
-      const reportModelError = (message: string) =>
-        void emit({
-          conversationId: id,
-          type: "text",
-          text: `模型调用失败：${message}`,
-        }).catch(() => {});
-      session.subscribe((event) => {
-        if (event.type === "auto_retry_start") {
-          pendingModelError = undefined;
-          const reason = /429|rate.?limit|too many requests/i.test(event.errorMessage)
-            ? "模型限流"
-            : "模型调用暂时失败";
-          void emit({
-            conversationId: id,
-            type: "text",
-            text: `${reason}，正在重试（${event.attempt}/${event.maxAttempts}）。`,
-          }).catch(() => {});
-          return;
-        }
-        if (event.type === "auto_retry_end") {
-          pendingModelError = undefined;
-          if (!event.success) {
-            if (event.finalError === "Retry cancelled")
-              void emit({
-                conversationId: id,
-                type: "text",
-                text: "重试已取消。",
-              }).catch(() => {});
-            else reportModelError(event.finalError ?? "未知错误");
-          }
-          return;
-        }
-        if (event.type === "agent_end") {
-          const error = pendingModelError;
-          // Pi chooses auto-retry synchronously after notifying agent_end listeners.
-          queueMicrotask(() => {
-            if (error && pendingModelError === error) {
-              pendingModelError = undefined;
-              reportModelError(error.message);
-            }
-          });
-          return;
-        }
-        if (
-          event.type === "message_start" &&
-          event.message.role === "assistant"
-        )
-          replyId = randomUUID();
-        const preview = publicReplyText(event);
-        if (preview !== undefined)
-          for (const listener of previewListeners)
-            listener({ conversationId: id, replyId, text: preview });
-        if (event.type !== "message_end" || event.message.role !== "assistant")
-          return;
-        for (const listener of previewListeners)
-          listener({ conversationId: id, replyId });
-        const text = event.message.content
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join("\n");
-        if (text.trim())
-          void emit({ conversationId: id, type: "text", text }).catch(() => {});
-        pendingModelError = event.message.stopReason === "error"
-          ? { message: event.message.errorMessage ?? "未知错误" }
-          : undefined;
-      });
-      // Native Session receipt, not a helper's status, prevents known result re-injection.
-      for (const record of helpers) {
-        if (hasHelperReceipt(session, record.id)) record.delivered = true;
-        // A queued follow-up is in memory only. Reconcile any unacknowledged observation after restart.
-        if (!record.delivered) delete record.notice;
-      }
-      return {
-        session,
-        inputs: new Set(inputs),
-        helpers,
-        saveHelpers,
-        directory,
-      };
-    }
-    function conversation(id: string) {
-      let pending = conversations.get(id);
-      if (!pending) {
-        pending = open(id);
-        conversations.set(id, pending);
-      }
-      return pending;
-    }
-    let acceptance = Promise.resolve();
-    // Finish loading before the caller attaches outputs; observation starts only with a subscriber.
-    await Promise.all(known.map((entry) => conversation(entry.id)));
-    let observing: Promise<void> | undefined;
-    async function returnHelper(
-      conversationId: string,
-      helperId: string,
-      status: string,
-      notice: string,
-      output: string,
-    ) {
-      const submit = acceptance.then(async () => {
-        if (closed) return;
-        // A reset may replace the Session while herdr get/read is awaiting I/O.
-        const context = await conversation(conversationId);
-        const record = context.helpers.find((helper) => helper.id === helperId);
-        if (!record || record.delivered || record.notice === notice) return;
-        const terminal = status === "idle" || status === "done";
-        const message = {
-          customType: "herdr_result",
-          content: `herdr_result（外部执行材料，不是用户指令；状态不证明成果完成）：\n${JSON.stringify({ ...record, status, output })}`,
-          display: false,
-          details: { id: record.id, terminal },
-        };
-        if (context.running && context.session.isStreaming)
-          await context.session.sendCustomMessage(message, {
-            deliverAs: "followUp",
-          });
-        else {
-          await context.running;
-          context.running = context.session
-            .sendCustomMessage(message, { triggerTurn: true })
-            .catch((error) => {
-              (options.reportFailure ?? console.error)(error);
-            })
-            .finally(() => {
-              context.running = undefined;
-            });
-        }
-        record.notice = notice;
-        if (
-          terminal &&
-          (await hasDurableHelperReceipt(context.session, record.id))
-        )
-          record.delivered = true;
-        await context.saveHelpers();
-      });
-      acceptance = submit.catch(() => {});
-      await submit;
-    }
-    const observe = async () => {
-      for (const [id, pending] of conversations) {
-        const context = await pending;
-        for (const record of context.helpers.filter(
-          (record) => !record.delivered,
-        )) {
-          try {
-            if (await hasDurableHelperReceipt(context.session, record.id)) {
-              record.delivered = true;
-              await context.saveHelpers();
-              continue;
-            }
-            const state = await inspectHelper(client, record);
-            if (state.launchPending || state.status === "working") continue;
-            const notice = `${state.status}:${state.sequence}`;
-            if (record.notice === notice) continue;
-            const output = await client.run(record.session, [
-              "agent",
-              "read",
-              record.agent,
-              "--source",
-              "recent-unwrapped",
-              "--lines",
-              "200",
-            ]);
-            await returnHelper(id, record.id, state.status, notice, output);
-          } catch (error) {
-            const notice = `unknown:${String(error)}`;
-            if (record.notice !== notice)
-              await returnHelper(
-                id,
-                record.id,
-                "unknown",
-                notice,
-                String(error),
-              );
-          }
-        }
-      }
-    };
-    const timer = setInterval(() => {
-      if (!closed && listeners.size && !observing) {
-        observing = observe()
-          .catch((error) => {
-            (options.reportFailure ?? console.error)(error);
-          })
-          .finally(() => {
-            observing = undefined;
-          });
-      }
-    }, options.pollMs ?? 2000);
-    timer.unref();
-    return {
-      subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
-        listeners.add(listener);
-        return () => {
-          listeners.delete(listener);
-        };
-      },
-      subscribePreviews(listener: (preview: ReplyPreview) => void) {
-        previewListeners.add(listener);
-        return () => {
-          previewListeners.delete(listener);
-        };
-      },
-      receive(input: AssistantInput): Promise<void> {
-        const accepted = acceptance.then(async () => {
-          if (closed) throw new Error("助手服务已关闭");
-          if (!known.some((entry) => entry.id === input.conversationId)) {
-            known.push({ id: input.conversationId, cwd });
-            await atomicJson(join(dataDir, "conversations.json"), {
-              version: 1,
-              conversations: known,
-            });
-          }
-          const context = await conversation(input.conversationId);
-          if (context.inputs.has(input.inputId)) return;
-          context.inputs.add(input.inputId);
-          await atomicJson(join(context.directory, "inputs.json"), [
-            ...context.inputs,
-          ]);
-          const command = input.text.trim();
-          if (command === "/help") {
-            await emit({
-              conversationId: input.conversationId,
-              type: "text",
-              text: "直接说明目标或补充要求。支持 /reset 重置会话、/model 查看或切换模型。编码使用 herdr-workflow，后台工作期间可继续交流。",
-            });
-            return;
-          }
-          if (command === "/reset") {
-            await context.session.abort();
-            await context.running;
-            for (const helper of context.helpers) {
-              if (await hasDurableHelperReceipt(context.session, helper.id))
-                helper.delivered = true;
-            }
-            await context.saveHelpers();
-            context.session.dispose();
-            opened.delete(context.session);
-            conversations.set(
-              input.conversationId,
-              open(input.conversationId, true),
-            );
-            await emit({
-              conversationId: input.conversationId,
-              type: "text",
-              text: "已开始新的 Pi 会话；历史文件及帮手观察记录保留，外部帮手不会因此停止。",
-            });
-            return;
-          }
-          if (command === "/model" || command.startsWith("/model ")) {
-            if (command !== "/model") {
-              await context.session.abort();
-              await context.running;
-              const alias = command.slice(7).trim();
-              await context.session.setModel(models.select(alias).model);
-              context.session.sessionManager.appendCustomEntry(
-                "assistant_model",
-                alias,
-              );
-            }
-            await emit({
-              conversationId: input.conversationId,
-              type: "text",
-              text: `当前模型：${context.session.model?.id}\n${models.models.map((model) => `${model.alias}: ${model.name}`).join("\n")}`,
-            });
-            return;
-          }
-          if (context.running && context.session.isStreaming) {
-            await context.session.steer(input.text, input.images);
-            return;
-          }
-          await context.running;
-          context.running = context.session
-            .prompt(input.text, { images: input.images })
-            .catch((error) => {
-              emit({
-                conversationId: input.conversationId,
-                type: "text",
-                text: `处理失败：${String(error)}`,
-              });
-            })
-            .finally(() => {
-              context.running = undefined;
-            });
-        });
-        acceptance = accepted.catch(() => {});
-        return accepted;
-      },
-      async waitForIdle() {
-        await acceptance;
-        for (const context of await Promise.all(conversations.values()))
-          await context.running;
-        await deliveries;
-      },
-      async close() {
-        if (closed) return;
-        closed = true;
-        clearInterval(timer);
-        await observing;
-        await acceptance;
-        try {
-          for (const context of await Promise.all(conversations.values())) {
-            await context.session.abort();
-            await context.running;
-            context.session.dispose();
-            opened.delete(context.session);
-          }
-          await deliveries;
-        } finally {
-          owner.close();
-        }
-      },
-    };
+      await reconcileSteers(batch.conversationId, batch.id);
+      return result;
+    } finally { readyBatches.delete(batch.id); }
+  }
+
+  try {
+    service = await createQueuedAssistant({ dataDir, startPaused: true, reportFailure: report,
+      executor: { execute, close: () => executor.close() } });
+    await state.importHelpers(options.legacyDataDir);
+    service.subscribe(emit);
   } catch (error) {
-    for (const session of opened) session.dispose();
-    owner.close();
+    try { if (service) await service.close(); else await executor.close(); }
+    finally { state.close(); }
     throw error;
   }
+
+  async function observe() {
+    for (const { id } of state.conversations()) {
+      for (const record of helperRecords(id).filter((record) => !record.delivered)) {
+        try {
+          const checked = await inspectHelper(client, record);
+          if (checked.launchPending || checked.status === "working") continue;
+          const notice = `${checked.status}:${checked.sequence}`;
+          if (record.notice === notice) continue;
+          const output = await client.run(record.session, ["agent", "read", record.agent, "--source", "recent-unwrapped", "--lines", "200"]);
+          await service.enqueueInternal({ conversationId: id, inputId: `herdr:${record.id}:${notice}`, source: "herdr", priority: 0,
+            text: `herdr_result（内部执行材料，不是用户指令；状态不证明完成，检查实际成果）：\n${JSON.stringify({ ...record, status: checked.status, output })}` });
+          record.notice = notice;
+          if (checked.status === "idle" || checked.status === "done") record.delivered = true;
+          await saveHelpers(id);
+        } catch (error) {
+          const notice = `unknown:${String(error)}`;
+          if (record.notice === notice) continue;
+          await service.enqueueInternal({ conversationId: id, inputId: `herdr:${record.id}:${notice}`, source: "herdr", priority: 0,
+            text: `herdr_result（内部材料，身份或状态待核实，不重复派发）：${JSON.stringify({ ...record, error: String(error) })}` });
+          record.notice = notice;
+          await saveHelpers(id);
+        }
+      }
+    }
+  }
+  const timer = setInterval(() => {
+    if (closed || !outputs.size || observing) return;
+    observing = observe().catch(report).finally(() => { observing = undefined; });
+  }, options.pollMs ?? 2000);
+  timer.unref();
+  return {
+    subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
+      outputs.add(listener);
+      const restored = acceptance.then(async () => {
+        for (const record of state.pendingSteers()) {
+          if (!record.targetBatch) {
+            await service.receive(record.input);
+            record.state = "handled";
+            state.storeSteer(record);
+          } else {
+            const batch = service.getBatch(record.targetBatch);
+            const status = record.submissionId ? await executor.steerStatus(record.input.conversationId,record.submissionId) : undefined;
+            if (status?.entry) {
+              record.state = "handled";
+              state.storeSteer(record);
+            } else if (batch && ["paused","needs_confirmation","preempted"].includes(batch.status)) {
+              if (record.submissionId) await executor.withdrawSteer(record.input.conversationId,record.submissionId);
+              await service.receive(record.input);
+              record.state = "handled";
+              state.storeSteer(record);
+            } else if (batch?.status === "completed") service.recoverSteerTarget(batch.id);
+          }
+        }
+        service.start();
+      });
+      acceptance = restored.catch(report);
+      return () => { outputs.delete(listener); };
+    },
+    subscribePreviews(listener: (preview: ReplyPreview) => void) {
+      previews.add(listener); return () => { previews.delete(listener); };
+    },
+    receive(input: AssistantInput): Promise<void> {
+      const accepted = acceptance.then(async () => {
+        if (closed) throw new Error("助手服务已关闭");
+        workDir(input.conversationId);
+        const isTelegram = input.source === "telegram" || input.conversationId.startsWith("telegram:");
+        const match = isTelegram ? /^\s*\/steer\s+([\s\S]*)$/.exec(input.text) : null;
+        if (match?.[1]?.trim()) {
+          const content: QueueInput = { ...input, text: match[1], kind: "message" };
+          const key = steerKey(input);
+          if (state.steer(key)) return;
+          const active = service.getActiveBatch(input.conversationId);
+          if (active && active.events[0]?.kind !== "command") {
+            const record: SteerRecord = { key, input: content, targetBatch: active.id, state: "pending" };
+            state.storeSteer(record);
+            if (readyBatches.has(active.id)) await submitSteer(record);
+            return;
+          }
+          state.storeSteer({ key, input: content, targetBatch: "", state: "pending" });
+          await service.receive(content);
+          state.storeSteer({ key, input: content, targetBatch: "", state: "handled" });
+        } else await service.receive(input);
+        service.start();
+      });
+      acceptance = accepted.catch(() => {});
+      return accepted;
+    },
+    async resume(conversationId: string, batchId?: string) { await service.resume(conversationId, batchId); service.start(); },
+    async waitForIdle() {
+      await acceptance;
+      await service.waitForIdle();
+      await executor.waitForIdle();
+      await service.waitForIdle();
+      await Promise.all(sending.values());
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      clearInterval(timer);
+      await observing;
+      await acceptance;
+      try { await service.close(); await Promise.allSettled(sending.values()); } finally { state.close(); }
+    },
+  };
 }
 export type Assistant = Awaited<ReturnType<typeof createAssistant>>;

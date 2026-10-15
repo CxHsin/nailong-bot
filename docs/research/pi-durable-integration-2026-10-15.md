@@ -1,5 +1,7 @@
 # Pi Durable 接入验证
 
+> 本文保留正式实现前的独立实验环境与 9 项证据。后续队列、执行器和入口切换状态见 [当前验收](../durable-assistant-acceptance-20261015.md)，不将其混算为本实验通过项。
+
 日期：2026-10-15。范围来自[队列与持久工作流讨论](event-queue-durable-workflow-2026-10-15.md)中用户对“先做接入验证，再决定采用”的同意。本次完成实验，没有切换正式入口。实验及工具清理说明后，用户确认采用，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。
 
 ## 结论

@@ -1,82 +1,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-for (const scenario of ["recover", "exhaust", "reject", "disabled", "cancel"] as const) {
-  test(`native Pi retry messages: ${scenario}`, { timeout: 10000 }, async () => {
-    let requests = 0;
-    const f = await assistantFixture(
-      (_wire, response) => {
-        requests++;
-        if (scenario === "recover" && requests > 1) {
-          sendChatCompletion(response, "任务完成");
-          return;
-        }
-        response.writeHead(scenario === "reject" ? 401 : 429, {
-          "content-type": "application/json",
-        });
-        response.end(JSON.stringify({
-          error: { message: scenario === "reject" ? "invalid api key" : "rate limit" },
-        }));
-      },
-      async (directory) => {
-        await mkdir(join(directory, ".pi"), { recursive: true });
-        await writeFile(join(directory, ".pi", "settings.json"), JSON.stringify({
-          retry: {
-            enabled: scenario !== "disabled",
-            maxRetries: 1,
-            baseDelayMs: scenario === "cancel" ? 5000 : 1,
-            provider: { maxRetries: 0 },
-          },
-        }));
-        return {};
-      },
-    );
-    try {
-      const retryStarted = scenario === "cancel"
-        ? new Promise<void>((resolve) => {
-          const unsubscribe = f.app.subscribe((output) => {
-            if (output.type === "text" && output.text.includes("正在重试")) {
-              unsubscribe();
-              resolve();
-            }
-          });
-        })
-        : undefined;
-      await f.app.receive({ conversationId: "retry", inputId: "1", text: "执行任务" });
-      if (retryStarted) {
-        await retryStarted;
-        await f.app.receive({ conversationId: "retry", inputId: "2", text: "/reset" });
-      }
-      await f.app.waitForIdle();
-      const replies = f.outputs.flatMap((output) => output.type === "text" ? [output.text] : []);
-      assert.equal(requests, scenario === "recover" || scenario === "exhaust" ? 2 : 1);
-      if (scenario === "recover") {
-        assert.deepEqual(replies, ["模型限流，正在重试（1/1）。", "任务完成"]);
-        // A later normal turn must not reuse the previous retry's error.
-        await f.app.receive({ conversationId: "retry", inputId: "2", text: "下一个任务" });
-        await f.app.waitForIdle();
-        const lastReply = f.outputs.at(-1);
-        assert.equal(lastReply?.type === "text" && lastReply.text, "任务完成");
-      } else if (scenario === "exhaust") {
-        assert.equal(replies.length, 2);
-        assert.equal(replies[0], "模型限流，正在重试（1/1）。");
-        assert.match(replies[1] ?? "", /^模型调用失败：.*rate limit/);
-      } else if (scenario === "cancel") {
-        assert.equal(replies.length, 3);
-        assert.equal(replies[0], "模型限流，正在重试（1/1）。");
-        assert.equal(replies[1], "重试已取消。");
-        assert.match(replies[2] ?? "", /^已开始新的 Pi 会话/);
-      } else {
-        assert.equal(replies.length, 1);
-        assert.match(replies[0] ?? "", /^模型调用失败：/);
-        assert.match(replies[0] ?? "", scenario === "reject" ? /invalid api key/ : /rate limit/);
-      }
-    } finally {
-      await f.close();
-    }
-  });
-}
+function fail(response: Parameters<typeof sendChatCompletion>[0],status=429){response.writeHead(status,{"content-type":"application/json"});response.end(JSON.stringify({error:{message:status===401?"invalid api key":"rate limit"}}));}
+
+test("temporary model failure retries only the request and then allows the next input",{timeout:15000},async()=>{
+  let requests=0;const f=await assistantFixture((_wire,response)=>{requests++;if(requests===1)fail(response);else sendChatCompletion(response,"任务完成");});
+  try{
+    await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();
+    assert.equal(requests,2);assert.equal(f.outputs.filter((out)=>out.type==="text"&&out.text==="任务完成").length,1);
+    await f.app.receive({conversationId:"retry",inputId:"2",text:"下一个任务"});await f.app.waitForIdle();
+    assert.equal(requests,3);assert.equal(f.outputs.filter((out)=>out.type==="text"&&out.text==="任务完成").length,2);
+  }finally{await f.close();}
+});
+
+test("four failed requests pause once, survive restart, allow other input and require explicit resume",{timeout:30000},async()=>{
+  let requests=0;let failing=true;const f=await assistantFixture((_wire,response)=>{requests++;if(failing)fail(response);else sendChatCompletion(response,"continued");});
+  try{
+    await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();
+    assert.equal(requests,4);
+    const pauses=f.outputs.filter((out)=>out.type==="text"&&/暂停/.test(out.text));assert.equal(pauses.length,1);
+    await f.reopen();await f.app.waitForIdle();assert.equal(requests,4);
+    assert.equal(f.outputs.filter((out)=>out.type==="text"&&/暂停/.test(out.text)).length,1);
+    failing=false;await f.app.receive({conversationId:"retry",inputId:"2",text:"other request"});await f.app.waitForIdle();assert.equal(requests,5);
+    await f.app.resume("retry");await f.app.waitForIdle();assert.equal(requests,6);
+    assert.equal(f.outputs.filter((out)=>out.type==="text"&&out.text==="continued").length,2);
+  }finally{await f.close();}
+});
+
+test("authentication errors pause without provider or executor retries",{timeout:10000},async()=>{
+  let requests=0;const f=await assistantFixture((_wire,response)=>{requests++;fail(response,401);});
+  try{
+    await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();
+    assert.equal(requests,1);assert.equal(f.outputs.filter((out)=>out.type==="text"&&/暂停/.test(out.text)).length,1);
+  }finally{await f.close();}
+});

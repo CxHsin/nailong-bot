@@ -1,5 +1,7 @@
 # 原生 Pi 主助手验收（2026-10-14）
 
+> 历史验收：以下结果对应本文各自记录的原生 Session 提交，不作为后续队列与 Durable 执行保证。退役前源码可查 [769249c](https://github.com/CxHsin/nailong-bot/tree/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/assistant)；当前入口与验证见 [操作说明](personal-agent-operations.md)、[持久工作流验收](durable-assistant-acceptance-20261015.md)。
+
 规格 [#196](https://github.com/CxHsin/nailong-bot/issues/196)，任务 [#197](https://github.com/CxHsin/nailong-bot/issues/197)。实施基准 `727a294293463332e55558fa3e5ba518719d6890`，development。当前入口为原生 Pi + Telegram/CLI 接入 + herdr-workflow；旧 Host 证据不能替代本轮运行结果。
 
 ## 自动化边界

@@ -8,7 +8,7 @@ import {
   formatSkillsForPrompt, loadSkills, loadProjectContextFiles,
 } from "@mariozechner/pi-coding-agent";
 import { configuredModel } from "../../../src/agent/model-config.ts";
-import { herdrExtension } from "../../../src/assistant/herdr.ts";
+import { durableHerdrWatch } from "../../../src/assistant/herdr.ts";
 
 export function adaptedModels(configuration) {
   const models = createModels();
@@ -47,14 +47,5 @@ export function resourceSections(cwd, agentDir, skillPaths) {
 // Reuse the real herdr_watch validation/identity implementation. This adapter is
 // deliberately limited to that extension, not a generic legacy extension host.
 export function adaptedHerdrWatch(client, records, save) {
-  let original;
-  herdrExtension(client, records, save)({ registerTool(tool) { original = tool; } });
-  return defineTool({
-    name: original.name, description: original.description,
-    parameters: original.parameters, replay: "unsafe",
-    async execute(args, api) {
-      const result = await original.execute(api.callId, args);
-      return { output: result.content, details: result.details };
-    },
-  });
+  return durableHerdrWatch(client, records, save);
 }

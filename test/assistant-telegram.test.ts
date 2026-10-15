@@ -42,6 +42,29 @@ const update = (id: number, actor = 42, photo = false) => ({
   },
 });
 
+test("unknown remote file acceptance blocks a second tool call and pauses for verification", { timeout: 12000 }, async () => {
+  let requests = 0; let documents = 0;
+  const f = await telegramFixture((_wire, response) => {
+    requests++;
+    if (requests < 3) sendChatCompletion(response, "", [{ index: 0, id: `send-${requests}`, type: "function",
+      function: { name: "send_file", arguments: '{"path":"report.txt"}' } }]);
+    else sendChatCompletion(response, "I cannot verify the delivery; please check Telegram before continuing.");
+  }, async (method) => {
+    if (method === "sendDocument") { documents++; await writeFile(join(f.directory, "remote-accepted.txt"), "one document"); throw new Error("ECONNRESET after remote acceptance"); }
+    return new ApiResponse(JSON.stringify({ ok: true, result: { message_id: 10, date: 0, chat: { id: 42, type: "private" } } }), { headers: { "content-type": "application/json" } });
+  });
+  try {
+    await writeFile(join(f.directory, "report.txt"), "one requested document");
+    await f.app.receive({ conversationId: "telegram:private:42", source: "telegram", inputId: "file-request", text: "Send report.txt once." });
+    await f.app.waitForIdle();
+    assert.equal(documents, 1);
+    const receipts = await readFile(join(f.directory, "telegram-sends.jsonl"), "utf8");
+    assert.match(receipts, /unknown/); assert.match(receipts, /report.txt/); assert.match(receipts, /outputId/);
+    await f.app.receive({ conversationId: "telegram:private:42", source: "telegram", inputId: "other", text: "Just discuss another question." });
+    await f.app.waitForIdle(); assert.equal(documents, 1);
+  } finally { await f.close(); }
+});
+
 async function telegramFixture(
   provider: (wire: Wire, response: ServerResponse) => void,
   send?: (method: string, body: unknown) => ApiResponse | Promise<ApiResponse>,

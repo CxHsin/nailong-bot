@@ -1,5 +1,7 @@
 # 原生 Pi 实机测试补充（2026-10-14）
 
+> 历史实机记录：以下 PID、会话路径、模型与发送证据仅说明记录时现场，不表示当前仍运行。新队列与 Durable 入口见 [操作说明](personal-agent-operations.md)、[当前验收](durable-assistant-acceptance-20261015.md)；保留原实测结论及限制。
+
 基准 `e0b78b994349d46518ec429f7a80e17d1e30e428`，development；规格 [#196](https://github.com/CxHsin/nailong-bot/issues/196)、实施 [#197](https://github.com/CxHsin/nailong-bot/issues/197)。本次用户明确要求“开始进行真实测试”，包含向配置的 Telegram 主人实际发送测试文件与消息。
 
 ## 入口与配置

@@ -7,7 +7,7 @@ import { writeFile } from "node:fs/promises";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("official CLI shares exclusive data ownership and resumes the saved native conversation", async () => {
+test("official CLI shares exclusive data ownership and resumes the saved durable conversation", async () => {
   const entry = resolve("src/cli/main.ts");
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.filter((message) => message.role === "user").length > 1)

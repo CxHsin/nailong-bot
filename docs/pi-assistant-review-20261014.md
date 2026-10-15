@@ -1,5 +1,7 @@
 # 双向评审记录（2026-10-14）
 
+> 历史评审：以下结论保留当时基准与范围。后续持久队列与 Pi Durable 切换见 [当前验收](durable-assistant-acceptance-20261015.md)；旧 Session 的输入 steering 与回执实现不再代表当前调度规则。
+
 按 [code-review skill](C:/Users/Cx/.codex/skills/code-review/SKILL.md) 对实施基准 `727a294293463332e55558fa3e5ba518719d6890` → 实现提交 `7930a79922b64fac64ad661fc1156d3a1c20e6c2` 进行两个独立只读评审；修复后分别核对相关差异。规格 [#196](https://github.com/CxHsin/nailong-bot/issues/196)，实施 [#197](https://github.com/CxHsin/nailong-bot/issues/197)。
 
 ## Standards

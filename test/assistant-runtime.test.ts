@@ -1,782 +1,147 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm, mkdir, cp } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, basename } from "node:path";
-import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { createAssistant } from "../src/assistant/runtime.js";
-import { sendChatCompletion } from "./fixtures/chat-completion.js";
+import { join } from "node:path";
+import { Type } from "typebox";
 import { assistantFixture } from "./fixtures/assistant.js";
+import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("reset immediately after a visible helper return retains its durable acknowledgement", async () => {
-  let directory = "";
-  let status = "working";
-  let returns = 0;
-  let reconciled!: () => void;
-  const checked = new Promise<void>((resolve) => {
-    reconciled = resolve;
-  });
-  const f = await assistantFixture(
-    (wire, response) => {
-      const last = JSON.stringify(wire.messages.at(-1));
-      if (last.includes("watch coder"))
-        sendChatCompletion(response, "", [
-          {
-            index: 0,
-            id: "ack-watch",
-            type: "function",
-            function: {
-              name: "herdr_watch",
-              arguments: JSON.stringify({
-                session: "fixture",
-                agent: "coder",
-                paneId: "w1:p1",
-                workspaceId: "w1",
-                cwd: directory,
-                promptPath: join(directory, "prompt.txt"),
-              }),
-            },
-          },
-        ]);
-      else if (last.includes("herdr_result")) {
-        returns++;
-        sendChatCompletion(response, "visible result");
-      } else sendChatCompletion(response, "watching");
-    },
-    async (cwd) => {
-      directory = cwd;
-      await writeFile(join(cwd, "prompt.txt"), "fixture");
-      return {
-        pollMs: 100,
-        herdr: {
-          async run(_session, args) {
-            if (args[1] === "read") return "fixture result";
-            if (returns) reconciled();
-            return JSON.stringify({
-              result: {
-                agent: {
-                  name: "coder",
-                  pane_id: "w1:p1",
-                  workspace_id: "w1",
-                  cwd,
-                  agent_status: status,
-                  state_change_seq: status === "working" ? 1 : 2,
-                },
-              },
-            });
-          },
-        },
-      };
-    },
-  );
-  let timer: ReturnType<typeof setTimeout> | undefined;
+function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => {resolve=done;}); return {promise,resolve}; }
+
+test("failed helper import releases the service lock so corrected data can start in the same process", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-import-failure-"));
+  const legacyDataDir = join(directory, "legacy");
+  const helperDir = join(legacyDataDir, "sessions", createHash("sha256").update("one").digest("hex"));
+  await mkdir(helperDir, { recursive: true });
+  await writeFile(join(legacyDataDir, "conversations.json"), JSON.stringify({ version: 1, conversations: [{ id: "one", cwd: directory }] }));
+  await writeFile(join(helperDir, "helpers.json"), "{broken json");
+  const options = { cwd: directory, dataDir: join(directory, "fresh"), legacyDataDir,
+    modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions" as const, model: "local", apiKey: "test", baseUrl: "http://127.0.0.1:1" }] } };
+  let app: Awaited<ReturnType<typeof createAssistant>> | undefined;
   try {
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "watch coder",
-    });
-    await f.app.waitForIdle();
-    status = "done";
-    await new Promise<void>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error("no first result")), 3000);
-      const unsubscribe = f.app.subscribe((output) => {
-        if (output.type === "text" && output.text === "visible result") {
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        }
-      });
-    });
-    await f.app.waitForIdle();
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "/reset",
-    });
-    // An unfixed reset queries and returns the helper again; fixed acknowledgement skips it.
-    await Promise.race([
-      checked,
-      new Promise((resolve) => setTimeout(resolve, 250)),
-    ]);
-    await f.app.waitForIdle();
-    assert.equal(returns, 1);
-  } finally {
-    clearTimeout(timer);
-    await f.close();
-  }
+    await assert.rejects(createAssistant(options), SyntaxError);
+    await writeFile(join(helperDir, "helpers.json"), JSON.stringify({ version: 1, helpers: [] }));
+    app = await createAssistant(options);
+    await app.receive({ conversationId: "one", inputId: "help", text: "/help" });
+    await app.waitForIdle();
+  } finally { await app?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("restart from pre-first-reply disk state does not lose a helper receipt held only in memory", async () => {
-  let directory = "";
-  let status = "working";
-  let held = false;
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => {
-    release = resolve;
+test("priority preemption preserves the background generation retry budget", { timeout: 30000 }, async () => {
+  let background = 0; let direct = 0; let injected = false;
+  const f = await assistantFixture((wire, response) => {
+    if (JSON.stringify(wire.messages.at(-1)).includes("priority-user")) { direct++; sendChatCompletion(response, "user handled"); }
+    else { background++; response.writeHead(503); response.end("temporarily unavailable"); }
   });
-  let observed!: () => void;
-  const saved = new Promise<void>((resolve) => {
-    observed = resolve;
-  });
-  let queries = 0;
-  const f = await assistantFixture(
-    async (wire, response) => {
-      const last = JSON.stringify(wire.messages.at(-1));
-      if (last.includes("watch coder"))
-        sendChatCompletion(response, "", [
-          {
-            index: 0,
-            id: "durable-watch",
-            type: "function",
-            function: {
-              name: "herdr_watch",
-              arguments: JSON.stringify({
-                session: "fixture",
-                agent: "coder",
-                paneId: "w1:p1",
-                workspaceId: "w1",
-                cwd: directory,
-                promptPath: join(directory, "prompt.txt"),
-              }),
-            },
-          },
-        ]);
-      else if (last.includes("herdr_result")) {
-        if (!held) {
-          held = true;
-          await hold;
-          if (!response.destroyed)
-            sendChatCompletion(response, "old pending turn");
-        } else sendChatCompletion(response, "disk state recovered");
-      } else sendChatCompletion(response, "watching");
-    },
-    async (cwd) => {
-      directory = cwd;
-      await writeFile(join(cwd, "prompt.txt"), "fixture");
-      return {
-        pollMs: 10,
-        herdr: {
-          async run(_session, args) {
-            if (args[1] === "read") return "fixture artifact";
-            if (held && ++queries >= 2) observed();
-            return JSON.stringify({
-              result: {
-                agent: {
-                  name: "coder",
-                  pane_id: "w1:p1",
-                  workspace_id: "w1",
-                  cwd,
-                  agent_status: status,
-                  state_change_seq: status === "working" ? 1 : 2,
-                },
-              },
-            });
-          },
-        },
-      };
-    },
-  );
-  let restarted: Awaited<ReturnType<typeof createAssistant>> | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "watch coder",
-    });
-    await f.app.waitForIdle();
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "/reset",
-    });
-    status = "done";
-    await saved;
-    // Copy the actual on-disk crash boundary before graceful abort can flush an assistant entry.
-    const snapshot = join(f.directory, "crash-snapshot");
-    await cp(f.options.dataDir, snapshot, {
-      recursive: true,
-      filter: (path) => !basename(path).startsWith("owner.sqlite"),
-    });
-    restarted = await createAssistant({ ...f.options, dataDir: snapshot });
-    await f.app.close();
-    release();
-    const answers: string[] = [];
-    await new Promise<void>((resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error("lost in-memory helper receipt")),
-        3000,
-      );
-      restarted!.subscribe((output) => {
-        if (output.type === "text") {
-          answers.push(output.text);
-          if (output.text === "disk state recovered") {
-            clearTimeout(timer);
-            resolve();
-          }
-        }
-      });
-    });
-    await restarted.waitForIdle();
-    assert.deepEqual(answers, ["disk state recovered"]);
-  } finally {
-    clearTimeout(timer);
-    release();
-    await restarted?.close();
-    await f.close();
-  }
-});
-
-test("a helper read crossing reset returns only to the new main Session", async () => {
-  let directory = "";
-  let status = "working";
-  let reading!: () => void;
-  const readStarted = new Promise<void>((resolve) => {
-    reading = resolve;
-  });
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let returnRequests = 0;
-  const f = await assistantFixture(
-    (wire, response) => {
-      const last = JSON.stringify(wire.messages.at(-1));
-      if (last.includes("start OLD_ONLY"))
-        sendChatCompletion(response, "", [
-          {
-            index: 0,
-            id: "reset-watch",
-            type: "function",
-            function: {
-              name: "herdr_watch",
-              arguments: JSON.stringify({
-                session: "fixture",
-                agent: "coder",
-                paneId: "w1:p1",
-                workspaceId: "w1",
-                cwd: directory,
-                promptPath: join(directory, "prompt.txt"),
-              }),
-            },
-          },
-        ]);
-      else if (last.includes("herdr_result")) {
-        returnRequests++;
-        assert.doesNotMatch(JSON.stringify(wire.messages), /OLD_ONLY/);
-        sendChatCompletion(response, "new Session received return");
-      } else sendChatCompletion(response, "watching");
-    },
-    async (cwd) => {
-      directory = cwd;
-      await writeFile(join(cwd, "prompt.txt"), "fixture");
-      return {
-        pollMs: 10,
-        herdr: {
-          async run(_session, args) {
-            if (args[1] === "read") {
-              reading();
-              await hold;
-              return "new result";
-            }
-            return JSON.stringify({
-              result: {
-                agent: {
-                  name: "coder",
-                  pane_id: "w1:p1",
-                  workspace_id: "w1",
-                  cwd,
-                  agent_status: status,
-                  state_change_seq: status === "working" ? 1 : 2,
-                },
-              },
-            });
-          },
-        },
-      };
-    },
-  );
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "start OLD_ONLY",
-    });
-    await f.app.waitForIdle();
-    status = "done";
-    await readStarted;
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "/reset",
-    });
-    const returned = new Promise<void>((resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error("no return after reset")),
-        3000,
-      );
-      const unsubscribe = f.app.subscribe((output) => {
-        if (
-          output.type === "text" &&
-          output.text === "new Session received return"
-        ) {
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        }
-      });
-    });
-    release();
-    await returned;
-    await f.app.waitForIdle();
-    assert.equal(returnRequests, 1);
-  } finally {
-    clearTimeout(timer);
-    release();
-    await f.close();
-  }
-});
-
-test("a helper return queued behind an active turn survives restart before Session insertion", async () => {
-  let status = "working";
-  let queriesAfterRead = 0;
-  let read = false;
-  let queued!: () => void;
-  const observedTwice = new Promise<void>((resolve) => {
-    queued = resolve;
-  });
-  let entered!: () => void;
-  const active = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let directory = "";
-  const f = await assistantFixture(
-    async (wire, response) => {
-      const last = JSON.stringify(wire.messages.at(-1));
-      if (last.includes("watch coder"))
-        sendChatCompletion(response, "", [
-          {
-            index: 0,
-            id: "queued-watch",
-            type: "function",
-            function: {
-              name: "herdr_watch",
-              arguments: JSON.stringify({
-                session: "fixture",
-                agent: "coder",
-                paneId: "w1:p1",
-                workspaceId: "w1",
-                cwd: directory,
-                promptPath: join(directory, "prompt.txt"),
-              }),
-            },
-          },
-        ]);
-      else if (last.includes("pause turn")) {
-        entered();
-        await hold;
-        if (!response.destroyed) sendChatCompletion(response, "old turn");
-      } else if (last.includes("herdr_result"))
-        sendChatCompletion(response, "recovered helper return");
-      else sendChatCompletion(response, "watching");
-    },
-    async (cwd) => {
-      directory = cwd;
-      await writeFile(join(cwd, "prompt.txt"), "fixture work");
-      return {
-        pollMs: 10,
-        herdr: {
-          async run(_session, args) {
-            if (args[1] === "read") {
-              read = true;
-              return "fixture result";
-            }
-            if (read && ++queriesAfterRead >= 2) queued();
-            return JSON.stringify({
-              result: {
-                agent: {
-                  name: "coder",
-                  pane_id: "w1:p1",
-                  workspace_id: "w1",
-                  cwd,
-                  agent_status: status,
-                  state_change_seq: status === "working" ? 1 : 2,
-                },
-              },
-            });
-          },
-        },
-      };
-    },
-  );
-  try {
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "watch coder",
-    });
-    await f.app.waitForIdle();
-    await f.app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "pause turn",
-    });
-    await active;
-    status = "done";
-    await Promise.race([
-      observedTwice,
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("helper not queued")), 3000),
-      ),
-    ]);
-    await f.app.close();
-    release();
-    await f.reopen();
-    await Promise.race([
-      new Promise<void>((resolve) => {
-        const unsubscribe = f.app.subscribe((output) => {
-          if (
-            output.type === "text" &&
-            output.text === "recovered helper return"
-          ) {
-            unsubscribe();
-            resolve();
-          }
-        });
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("lost queued return")), 3000),
-      ),
-    ]);
-    await f.app.waitForIdle();
-    assert.equal(
-      f.outputs.filter(
-        (output) =>
-          output.type === "text" && output.text === "recovered helper return",
-      ).length,
-      1,
-    );
-  } finally {
-    release();
-    await f.close();
-  }
-});
-
-test("assistant writes through native Pi tools, replies without settlement and resumes its Session", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-assistant-"));
-  const observed: string[] = [];
-  const server = createServer(async (request, response) => {
-    let body = "";
-    for await (const part of request) body += part;
-    const wire = JSON.parse(body);
-    const names = wire.tools.map(
-      (tool: { function: { name: string } }) => tool.function.name,
-    );
-    assert.ok(names.includes("write"));
-    assert.equal(names.includes("work_permission"), false);
-    assert.equal(names.includes("complete_work"), false);
-    const last = wire.messages.at(-1);
-    if (
-      last.role === "user" &&
-      JSON.stringify(last.content).includes("remember lotus")
-    ) {
-      sendChatCompletion(response, "", [
-        {
-          index: 0,
-          id: "write-note",
-          type: "function",
-          function: {
-            name: "write",
-            arguments: JSON.stringify({ path: "note.txt", content: "lotus" }),
-          },
-        },
-      ]);
-    } else {
-      assert.match(JSON.stringify(wire.messages), /remember lotus/);
-      sendChatCompletion(response, "lotus saved");
+  f.app.subscribe(async (output) => {
+    if (!injected && output.type === "text" && output.text.includes("有限重试")) {
+      injected = true;
+      await f.app.receive({ conversationId: "one", inputId: "user", text: "priority-user" });
     }
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const options = {
-    cwd: directory,
-    dataDir: join(directory, "fresh"),
-    modelConfiguration: {
-      defaultModel: "local",
-      models: [
-        {
-          alias: "local",
-          api: "openai-completions" as const,
-          baseUrl: `http://127.0.0.1:${address.port}`,
-          model: "local",
-          apiKey: "test",
-        },
-      ],
-    },
-  };
-  let app = await createAssistant(options);
-  app.subscribe((output) => {
-    if (output.type === "text") observed.push(output.text);
-  });
   try {
-    await assert.rejects(createAssistant(options), /数据目录.*使用/);
-    await app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "remember lotus",
-    });
-    await app.waitForIdle();
-    assert.equal(await readFile(join(directory, "note.txt"), "utf8"), "lotus");
-    assert.deepEqual(observed, ["lotus saved"]);
-    await app.close();
-    app = await createAssistant(options);
-    app.subscribe((output) => {
-      if (output.type === "text") observed.push(output.text);
-    });
-    await app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "remember lotus",
-    });
-    await app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "what name?",
-    });
-    await app.waitForIdle();
-    assert.deepEqual(observed, ["lotus saved", "lotus saved"]);
-  } finally {
-    await app.close();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
-  }
+    await f.app.receive({ conversationId: "one", inputId: "background", source: "cron", text: "original background request" });
+    await f.app.waitForIdle();
+    assert.equal(direct, 1); assert.equal(background, 4);
+    await f.reopen(); await f.app.waitForIdle(); assert.equal(background, 4);
+    await f.app.resume("one"); await f.app.waitForIdle(); assert.equal(background, 8, "explicit user resume starts a new finite budget");
+  } finally { await f.close(); }
 });
 
-test("herdr observation runs in background, returns to the right Session and is not replayed after restart", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-herdr-"));
-  await writeFile(join(directory, "prompt.txt"), "write result.txt");
-  let helperState = "working";
-  let queries = 0;
-  const herdr = {
-    async run(_session: string, args: string[]) {
-      queries++;
-      if (args[1] === "get")
-        return JSON.stringify({
-          result: {
-            agent: {
-              name: "coder",
-              pane_id: "w1:p1",
-              workspace_id: "w1",
-              cwd: directory,
-              agent_status: helperState,
-              state_change_seq: helperState === "working" ? 2 : 3,
-            },
-          },
-        });
-      return "helper wrote result.txt; inspect actual file";
-    },
-  };
-  const answers: string[] = [];
-  const server = createServer(async (request, response) => {
-    let body = "";
-    for await (const part of request) body += part;
-    const wire = JSON.parse(body);
-    const last = JSON.stringify(wire.messages.at(-1));
-    if (last.includes("start coder"))
-      sendChatCompletion(response, "", [
-        {
-          index: 0,
-          id: "watch",
-          type: "function",
-          function: {
-            name: "herdr_watch",
-            arguments: JSON.stringify({
-              session: "test",
-              agent: "coder",
-              paneId: "w1:p1",
-              workspaceId: "w1",
-              cwd: directory,
-              promptPath: join(directory, "prompt.txt"),
-            }),
-          },
-        },
-      ]);
-    else if (last.includes("herdr_result"))
-      sendChatCompletion(response, "helper result received");
-    else
-      sendChatCompletion(
-        response,
-        last.includes("unrelated chat")
-          ? "chat remains responsive"
-          : "coder is running",
-      );
+function waitForText(f: Awaited<ReturnType<typeof assistantFixture>>, text: string) {
+  return new Promise<void>((resolve,reject)=>{
+    const timer=setTimeout(()=>{unsubscribe();reject(new Error(`No output: ${text}`));},5000);
+    const unsubscribe=f.app.subscribe((output)=>{if(output.type==="text"&&output.text===text){clearTimeout(timer);unsubscribe();resolve();}});
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const options = {
-    cwd: directory,
-    dataDir: join(directory, "fresh"),
-    herdr,
-    pollMs: 10,
-    modelConfiguration: {
-      defaultModel: "local",
-      models: [
-        {
-          alias: "local",
-          api: "openai-completions" as const,
-          baseUrl: `http://127.0.0.1:${address.port}`,
-          model: "local",
-          apiKey: "test",
-        },
-      ],
-    },
-  };
-  let app = await createAssistant(options);
-  app.subscribe((output) => {
-    if (output.type === "text") answers.push(output.text);
-  });
-  try {
-    await app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "start coder",
-    });
-    await app.waitForIdle();
-    await app.receive({
-      conversationId: "one",
-      inputId: "2",
-      text: "unrelated chat",
-    });
-    await app.waitForIdle();
-    assert.deepEqual(answers, ["coder is running", "chat remains responsive"]);
-    // Restart while the helper is still running; no user message should be needed to resume observation.
-    await app.close();
-    app = await createAssistant(options);
-    app.subscribe((output) => {
-      if (output.type === "text") answers.push(output.text);
-    });
-    await writeFile(join(directory, "result.txt"), "helper artifact");
-    helperState = "done";
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("no helper return")),
-        3000,
-      );
-      const unsubscribe = app.subscribe((output) => {
-        if (
-          output.type === "text" &&
-          output.text === "helper result received"
-        ) {
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        }
-      });
-    });
-    assert.ok(queries > 1);
-    assert.equal(
-      await readFile(join(directory, "result.txt"), "utf8"),
-      "helper artifact",
-    );
-    await app.waitForIdle();
-    await app.close();
-    app = await createAssistant(options);
-    app.subscribe((output) => {
-      if (output.type === "text") answers.push(output.text);
-    });
-    await app.receive({
-      conversationId: "one",
-      inputId: "3",
-      text: "continue",
-    });
-    await app.waitForIdle();
-    assert.equal(
-      answers.filter((text) => text === "helper result received").length,
-      1,
-    );
-  } finally {
-    await app.close();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
-  }
+}
+
+async function helperFixture(options:{crossRead?:boolean}={}) {
+  let directory="";let status="working";let results=0;let reads=0;
+  const reading=deferred();const releaseRead=deferred();const inputs:string[]=[];
+  const f=await assistantFixture((wire,response)=>{
+    const last=JSON.stringify(wire.messages.at(-1));inputs.push(JSON.stringify(wire.messages));
+    if(last.includes("watch coder"))sendChatCompletion(response,"",[{index:0,id:"watch",type:"function",function:{name:"herdr_watch",arguments:JSON.stringify({session:"fixture",agent:"coder",paneId:"w1:p1",workspaceId:"w1",cwd:directory,promptPath:join(directory,"prompt.txt")})}}]);
+    else if(last.includes("herdr_result")){results++;sendChatCompletion(response,"checked helper result");}
+    else sendChatCompletion(response,"ordinary reply");
+  },async(cwd)=>{directory=cwd;await writeFile(join(cwd,"prompt.txt"),"inspect result.txt");return {pollMs:10,herdr:{async run(_session,args){
+    if(args[1]==="read"){reads++;reading.resolve();if(options.crossRead)await releaseRead.promise;return "helper artifact, inspect result.txt";}
+    return JSON.stringify({result:{agent:{name:"coder",pane_id:"w1:p1",workspace_id:"w1",cwd,agent_status:status,state_change_seq:status==="working"?1:2}}});
+  }}};});
+  return {...f,get app(){return f.app;},get results(){return results;},get reads(){return reads;},inputs,reading,releaseRead,done(){status="done";}};
+}
+
+test("helper result acknowledgement survives reset and reopening without reading it again",{timeout:12000},async()=>{
+  const f=await helperFixture();
+  try{
+    await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder OLD_ONLY"});await f.app.waitForIdle();
+    const result=waitForText(f,"checked helper result");f.done();await result;await f.app.waitForIdle();
+    await f.app.receive({conversationId:"one",inputId:"2",text:"/reset"});await f.app.waitForIdle();await f.reopen();
+    await f.app.receive({conversationId:"one",inputId:"3",text:"new conversation content"});await f.app.waitForIdle();
+    assert.equal(f.results,1);assert.equal(f.reads,1);assert.doesNotMatch(f.inputs.at(-1)!,/OLD_ONLY/);
+  }finally{f.releaseRead.resolve();await f.close();}
 });
 
-test("skills and extensions load natively and tool errors return to the model", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "pi-resources-"));
-  await mkdir(join(directory, ".pi", "extensions"), { recursive: true });
-  await mkdir(join(directory, ".pi", "skills", "fixture"), { recursive: true });
-  await writeFile(
-    join(directory, ".pi", "skills", "fixture", "SKILL.md"),
-    "---\nname: fixture\ndescription: FIXTURE_SKILL_DISCOVERY\n---\nUse for fixture work.",
-  );
-  await writeFile(
-    join(directory, ".pi", "extensions", "fixture.ts"),
-    `export default function(pi) { pi.registerTool({name:'fixture_failure',label:'failure',description:'fixture',parameters:{type:'object',properties:{}},async execute(){throw new Error('fixture tool failed')}}); }`,
-  );
-  const server = createServer(async (request, response) => {
-    let body = "";
-    for await (const part of request) body += part;
-    const wire = JSON.parse(body);
-    assert.match(JSON.stringify(wire.messages), /FIXTURE_SKILL_DISCOVERY/);
-    if (wire.messages.at(-1).role !== "tool")
-      sendChatCompletion(response, "", [
-        {
-          index: 0,
-          id: "failure",
-          type: "function",
-          function: { name: "fixture_failure", arguments: "{}" },
-        },
-      ]);
-    else {
-      assert.match(JSON.stringify(wire.messages.at(-1)), /fixture tool failed/);
-      sendChatCompletion(response, "explained failure");
-    }
+test("a helper read crossing reset returns internal material to the new context once",{timeout:12000},async()=>{
+  const f=await helperFixture({crossRead:true});
+  try{
+    await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder OLD_ONLY"});await f.app.waitForIdle();
+    f.done();await f.reading.promise;
+    await f.app.receive({conversationId:"one",inputId:"2",text:"/reset"});await f.app.waitForIdle();
+    const result=waitForText(f,"checked helper result");f.releaseRead.resolve();await result;await f.app.waitForIdle();
+    assert.equal(f.results,1);assert.doesNotMatch(f.inputs.at(-1)!,/OLD_ONLY/);
+  }finally{f.releaseRead.resolve();await f.close();}
+});
+
+test("a running helper survives service restart and does not block ordinary discussion",{timeout:12000},async()=>{
+  const f=await helperFixture();
+  try{
+    await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder"});await f.app.waitForIdle();
+    await f.app.receive({conversationId:"one",inputId:"2",text:"unrelated discussion"});await f.app.waitForIdle();
+    assert.equal(f.results,0);assert.equal(f.outputs.filter((out)=>out.type==="text"&&out.text==="ordinary reply").length,2);
+    await f.reopen();const result=waitForText(f,"checked helper result");f.done();await result;await f.app.waitForIdle();
+    assert.equal(f.results,1);assert.equal(f.reads,1);
+    assert.equal(f.outputs.filter((out)=>out.type==="text"&&out.text.includes("helper artifact")).length,0);
+  }finally{f.releaseRead.resolve();await f.close();}
+});
+
+test("assistant writes a real artifact and deduplicates source identity after reopening",{timeout:12000},async()=>{
+  let writes=0;const inputs:string[]=[];
+  const f=await assistantFixture((wire,response)=>{
+    const last=wire.messages.at(-1)!;inputs.push(JSON.stringify(wire.messages));
+    assert.ok(wire.tools.some((tool)=>tool.function.name==="write"));
+    assert.ok(!wire.tools.some((tool)=>tool.function.name==="complete_work"));
+    if(last.role==="user"&&JSON.stringify(last.content).includes("remember lotus")){
+      writes++;sendChatCompletion(response,"",[{index:0,id:"write",type:"function",function:{name:"write",arguments:'{"path":"note.txt","content":"lotus"}'}}]);
+    }else sendChatCompletion(response,"lotus saved");
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const app = await createAssistant({
-    cwd: directory,
-    dataDir: join(directory, "fresh"),
-    modelConfiguration: {
-      defaultModel: "local",
-      models: [
-        {
-          alias: "local",
-          api: "openai-completions",
-          baseUrl: `http://127.0.0.1:${address.port}`,
-          model: "local",
-          apiKey: "test",
-        },
-      ],
-    },
+  try{
+    const input={conversationId:"one",inputId:"1",text:"remember lotus"};
+    await f.app.receive(input);await f.app.waitForIdle();assert.equal(await readFile(join(f.directory,"note.txt"),"utf8"),"lotus");
+    await f.reopen();await f.app.receive(input);await f.app.receive({conversationId:"one",inputId:"2",text:"what name?"});await f.app.waitForIdle();
+    assert.equal(writes,1);assert.match(inputs.at(-1)!,/remember lotus/);
+    assert.deepEqual(f.outputs.filter((out)=>out.type==="text").map((out)=>out.text),["lotus saved","lotus saved"]);
+  }finally{await f.close();}
+});
+
+test("project instructions, skills and configured tools load and tool errors return to the model",{timeout:12000},async()=>{
+  const seen:string[]=[];
+  const f=await assistantFixture((wire,response)=>{
+    seen.push(JSON.stringify(wire.messages));
+    if(wire.messages.at(-1)!.role!=="tool")sendChatCompletion(response,"",[{index:0,id:"failure",type:"function",function:{name:"fixture_failure",arguments:"{}"}}]);
+    else sendChatCompletion(response,"explained failure");
+  },async(directory)=>{
+    await mkdir(join(directory,".pi","skills","fixture"),{recursive:true});
+    await writeFile(join(directory,".pi","skills","fixture","SKILL.md"),"---\nname: fixture\ndescription: FIXTURE_SKILL_DISCOVERY\n---\nUse for fixture work.");
+    await writeFile(join(directory,"AGENTS.md"),"FIXTURE_PROJECT_RULE");
+    return {tools:[{name:"fixture_failure",label:"failure",description:"fixture",parameters:Type.Object({}),async execute(){throw new Error("fixture tool failed");}}]};
   });
-  const answers: string[] = [];
-  app.subscribe((output) => {
-    if (output.type === "text") answers.push(output.text);
-  });
-  try {
-    await app.receive({
-      conversationId: "one",
-      inputId: "1",
-      text: "try fixture",
-    });
-    await app.waitForIdle();
-    assert.deepEqual(answers, ["explained failure"]);
-  } finally {
-    await app.close();
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(directory, { recursive: true, force: true });
-  }
+  try{
+    await f.app.receive({conversationId:"one",inputId:"1",text:"try fixture"});await f.app.waitForIdle();
+    assert.match(seen[0]!,/FIXTURE_SKILL_DISCOVERY/);assert.match(seen[0]!,/FIXTURE_PROJECT_RULE/);assert.match(seen.at(-1)!,/fixture tool failed/);
+    const lastOutput=f.outputs.at(-1);
+    assert.equal(lastOutput?.type==="text"&&lastOutput.text,"explained failure");
+  }finally{await f.close();}
 });

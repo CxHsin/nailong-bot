@@ -11,7 +11,7 @@ export async function assistantEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ) {
   const dataDir = resolve(
-    env.ASSISTANT_DATA_DIR?.trim() || "data/pi-assistant-v1",
+    env.ASSISTANT_DATA_DIR?.trim() || "data/pi-durable-v1",
   );
   const cwd = resolve(env.ASSISTANT_WORK_DIR?.trim() || process.cwd());
   const capabilities = await capabilityEnvironment(env);
@@ -24,6 +24,7 @@ export async function assistantEnvironment(
       web = await connectTinyfish(env.TINYFISH_API_KEY.trim());
     const app = await createAssistant({
       dataDir,
+      legacyDataDir: resolve(env.ASSISTANT_LEGACY_DATA_DIR?.trim() || "data/pi-assistant-v1"),
       cwd,
       modelConfiguration: modelEnvironment(env),
       prompt: await readFile(

@@ -1,14 +1,14 @@
 # Nailong Bot Agent Context
 
-One personal assistant uses native Pi through Telegram or CLI. Current production baseline: [ADR-0010](docs/adr/0010-native-pi-assistant.md), [spec #196](https://github.com/CxHsin/nailong-bot/issues/196). Accepted next direction: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [conclusion #200](https://github.com/CxHsin/nailong-bot/issues/200), [spec #201](https://github.com/CxHsin/nailong-bot/issues/201); implementation tasks #202–#205 and migration are pending. Older Host terminology below has been retired from the online path; historical ADRs keep their original evidence.
+One personal assistant uses a nailong-owned persistent Queue System and Pi Durable 1.2.0 through Telegram or CLI. Current design: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [spec #201](https://github.com/CxHsin/nailong-bot/issues/201); migration verification is recorded in [current acceptance](docs/durable-assistant-acceptance-20261015.md). [ADR-0010](docs/adr/0010-native-pi-assistant.md) and older Host terminology retain historical evidence.
 
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
 
-**Session**: Pi-native model exchanges, tools, compaction and steering. A completed model turn does not prove the user's goal or an external process has completed.
+**Session**: The main agent's model context within a Conversation. Resetting that context does not cancel queued or executing work. A completed model turn does not prove the user's goal or an external process has completed.
 
-**Assistant Service**: Thin local input/output connection to Pi Sessions, with exclusive data-directory ownership, conversation pointers, input deduplication and minimal helper observation. It owns no generic Task settlement or permission framework.
+**Assistant Service**: Local coordination of authenticated input/output, the Queue System, Durable Workflow execution and helper materials. It owns exclusive data-directory access and per-Conversation serialization, with no generic Task settlement or permission framework.
 
 **Channel**: Authenticates input and delivers text, images and files. Telegram renders rich messages and temporary public reply previews; a preview is not a final send receipt.
 
@@ -18,9 +18,9 @@ One personal assistant uses native Pi through Telegram or CLI. Current productio
 
 **Delegation**: Work entrusted to an external helper through herdr-workflow. The main assistant checks actual files, diffs and command results before continuing the user's goal. Status and self-report do not prove success.
 
-**Helper Observation**: Minimal versioned record of session, agent, workspace, pane, cwd and prompt identity. The Pi extension observes an already dispatched helper in the background and returns external materials to the correct main Session. Restart queries real identity and state; it never blindly launches work again.
+**Helper Observation**: Saved session, agent, workspace, pane, cwd and prompt identity for an already dispatched helper. Returns are internal materials, saved before delivery to the correct main agent after queued direct input. Restart queries real identity and state; it never blindly launches work again.
 
-**Steering**: New user input delivered through native Pi steering during an active tool turn. Supplements for an external helper are separately routed by the skill; unrelated conversation stays with the main assistant.
+**Steering**: Explicit user supplementation of current main-agent work; see Explicit Steering below. Supplements for an external helper are separately routed by the skill.
 
 **Stop**: Explicit request handled against the actual external helper identity and process state. Unknown termination is reported honestly; existing effects remain.
 
@@ -32,9 +32,9 @@ One personal assistant uses native Pi through Telegram or CLI. Current productio
 
 **Historical Host / Task / Attempt / Akasha / Plan**: Retired online concepts retained in older documentation and offline diagnostics. The new data namespace neither loads nor migrates those records. Proactive responsibilities and timers are deferred.
 
-## Agreed design language: queue and workflow
+## Queue and workflow
 
-These terms describe the confirmed direction in the [queue and workflow discussion](docs/research/event-queue-durable-workflow-2026-10-15.md), not additional guarantees of the current runtime. [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md) selects Pi Durable for main-agent execution and a nailong-owned persistent queue for routing, deduplication, priority and FIFO; production migration is pending. This replaces native Steering as the planned scheduling policy: equal-priority direct inputs wait in arrival order.
+These terms follow the [confirmed specification](https://github.com/CxHsin/nailong-bot/issues/201) and [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md). Equal-priority direct inputs wait in arrival order; ordinary input does not implicitly steer current work. Implementation verification belongs in the acceptance record, not in these definitions.
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
@@ -49,3 +49,5 @@ These terms describe the confirmed direction in the [queue and workflow discussi
 **Event Priority**: The ordering that permits higher-priority input to interrupt lower-priority processing. Direct user inputs have equal priority to each other and wait in arrival order; they outrank background input.
 
 **Durable Workflow**: Saved execution progress and confirmed model/tool results that allow interrupted work to continue without repeating completed operations solely because execution restarted. It is separate from conversation history and helper-local context.
+
+**Paused Work**: A retained Processing Turn awaiting explicit user continuation or verification of an unknown effect. Restart preserves this state; `/resume` explicitly requests continuation within the same Conversation.

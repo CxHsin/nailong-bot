@@ -1,5 +1,7 @@
 # 持久化工作流与记忆系统讨论
 
+> 本文保留讨论时基线与尚未收敛的记忆问题。已确认的持久队列规格为 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，后续入口状态见 [当前验收](../durable-assistant-acceptance-20261015.md)。
+
 日期：2026-10-15。状态：讨论进行中；下列确认项不是完整规格，也不表示已实现。讨论参考《常驻主动型智能体如何工作》课程笔记第 3、5 章；PDF 位于 `D:/Course/Paper/outputs/常驻主动型智能体/常驻主动型智能体如何工作_notes.pdf`。
 
 后续[队列系统与持久工作流讨论](event-queue-durable-workflow-2026-10-15.md)已确认新的恢复规则：重启后自动恢复，而不是每次等待继续指令；`/reset` 保留事件、执行进度和委派。执行引擎已选定 Pi Durable，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。本文件保留此前记忆讨论的原始决策语境，涉及上述行为与选型时以后续确认项为准。记忆系统的其余问题不属于本次队列工作的范围。

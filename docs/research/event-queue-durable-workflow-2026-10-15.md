@@ -1,5 +1,7 @@
 # 事件队列系统与持久工作流讨论
 
+> 以下记录规格形成时的基线与确认过程。后续实现与迁移的实际状态见 [当前验收](../durable-assistant-acceptance-20261015.md)，日常使用见 [操作说明](../personal-agent-operations.md)。
+
 日期：2026-10-15。状态：行为、技术选型、实现细节与验收边界均已确认，正式规格为 [#201](https://github.com/CxHsin/nailong-bot/issues/201)；实现与迁移验收待完成，亦不表示现有运行时已实现。
 
 用户先同意做 Pi Durable 接入验证；[实际验证报告](pi-durable-integration-2026-10-15.md)记录 9 项通过、适配成本与验证边界。澄清在用工具与闲置扩展参数后，用户确认更新方案：采用 Pi Durable 承载主 agent 持久执行，nailong 自有队列负责路由、去重、优先级与 FIFO，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。以下约定是已接受的目标行为，正式入口尚未切换。

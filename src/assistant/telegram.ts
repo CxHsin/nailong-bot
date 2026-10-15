@@ -45,9 +45,10 @@ export async function connectTelegram(options: {
   async function send(
     kind: string,
     action: () => Promise<{ message_id: number }>,
+    identity?: { outputId?: string; conversationId: string; path?: string },
   ) {
     const id = randomUUID();
-    await record({ id, kind, status: "sending" });
+    await record({ id, kind, ...identity, status: "sending" });
     try {
       const result = await drafts.withoutDrafts(action);
       await record({ id, status: "sent", messageId: result.message_id });
@@ -55,6 +56,8 @@ export async function connectTelegram(options: {
       const failure = error as { error_code?: number };
       await record({ id, status: failure.error_code ? "rejected" : "unknown" });
       reportFailure(error);
+      if (!failure.error_code) throw Object.assign(new Error(`Telegram delivery ${id} has an unknown external result. Inspect receipt ${receipts}; do not resend without verification.`, { cause: error }),
+        { externalEffectUnknown: true, receiptPath: receipts, deliveryId: id });
       throw error;
     }
   }
@@ -63,6 +66,7 @@ export async function connectTelegram(options: {
     if (output.type === "file") {
       await send("file", () =>
         bot.api.sendDocument(ownerId, new InputFile(output.path)),
+        { outputId: output.outputId, conversationId: output.conversationId, path: output.path },
       );
       return;
     }
@@ -107,6 +111,7 @@ export async function connectTelegram(options: {
       await app.receive({
         conversationId,
         inputId: String(update.messageId),
+        source: "telegram",
         text: update.text ?? "请分析这张图片。",
         images: update.images,
       });
