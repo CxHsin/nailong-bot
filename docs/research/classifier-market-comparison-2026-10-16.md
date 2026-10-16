@@ -1,5 +1,7 @@
 # 上下文决策分类模型注册与选型调查
 
+用户随后澄清需要的是 TypeSafe Jev 一类专用决策模型。当前选型与注册建议见 [Jev 同类专用决策产品调查](system-one-decision-alternatives-2026-10-16.md)；下文保留此前对通用语言模型的调查，不作为该请求的选型结论。
+
 调查日期：2026-10-16（北京时间）。针对 [#215](https://github.com/CxHsin/nailong-bot/issues/215) 中的中文 request、supplement、cancel、clarify 分类及目标定位；现有默认总超时 8 秒，输入预算 8,192、输出预算 1,024 token。本文是公开官方资料调查，不是实际延迟或准确率评测，没有注册账户、充值、使用新凭据或修改运行时代码。
 
 ## 注册建议
