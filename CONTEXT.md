@@ -22,7 +22,7 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 **Helper Observation**: Saved session, agent, workspace, pane, cwd and prompt identity for an already dispatched helper. Returns are internal materials, saved before delivery to the correct main agent after queued direct input. Restart queries real identity and state; it never blindly launches work again.
 
-**Steering**: Explicit user supplementation of current main-agent work; see Explicit Steering below. Supplements for an external helper are separately routed by the skill.
+**Steering**: The Durable mechanism that delivers an identified Work Supplement at a supported input boundary. The former user command is retired.
 
 **Stop**: Explicit request handled against the actual external helper identity and process state. Unknown termination is reported honestly; existing effects remain.
 
@@ -46,9 +46,9 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 ## Queue and workflow
 
-These terms follow the [confirmed specification](https://github.com/CxHsin/nailong-bot/issues/201) and [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md). Equal-priority direct inputs wait in arrival order; ordinary input does not implicitly steer current work. Implementation verification belongs in the acceptance record, not in these definitions.
+These terms follow [spec #201](https://github.com/CxHsin/nailong-bot/issues/201), [spec #215](https://github.com/CxHsin/nailong-bot/issues/215) and [ADR-0013](docs/adr/0013-contextual-input-routing.md). Independent direct requests wait in arrival order; Work Supplements and cancellation refer to identified work. Implementation verification belongs in the acceptance record, not in these definitions.
 
-Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-contextual-input-routing.md), [conclusion #214](https://github.com/CxHsin/nailong-bot/issues/214) and [spec #215](https://github.com/CxHsin/nailong-bot/issues/215): contextual Work Supplements and retirement of `/steer`. The runtime still follows the explicit steering contract below until the new design is implemented and verified.
+Input routing follows contextual Work Supplements and retirement of the dedicated user command. Current implementation and live verification status are recorded in [routing acceptance](docs/contextual-input-routing-acceptance-20261016.md).
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
@@ -58,7 +58,9 @@ Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-co
 
 **Input Batch**: An ordered group of already queued ordinary Input Events selected when a Conversation is idle or its current Processing Turn ends. Each event retains its identity and message boundary; grouping does not imply a shared goal. Selection adds no timed wait and stops at commands or a change of source or priority.
 
-**Explicit Steering**: A user-authored `/steer` command that supplements current work at the next supported input boundary. Multiple accepted supplements may be read together in order, retaining their identities. Ordinary input remains queued for a later Processing Turn; steering is separate from stopping or priority preemption, and does not immediately stop running tools.
+**Work Target**: A stable reference to one independent user objective, preserving its original input and FIFO position. An Input Event can express several targets or actions; an Input Batch is their execution container.
+
+**Routing Action**: One ordered request, supplement, cancellation or clarification from an original Input Event, with a stable identity and confirmed delivery progress. A model chooses meaning and a supplied target; execution facts determine whether the action applies.
 
 **Event Priority**: The ordering that permits higher-priority input to interrupt lower-priority processing. Direct user inputs have equal priority to each other and wait in arrival order; they outrank background input.
 
@@ -66,7 +68,7 @@ Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-co
 
 **Paused Work**: A retained Processing Turn awaiting explicit user continuation or verification of an unknown effect. Restart preserves this state; `/resume` explicitly requests continuation within the same Conversation.
 
-## Input intent vocabulary for the accepted replacement design
+## Input intent
 
 **Input Intent**: The user's meaning in an Input Event, interpreted with the relevant ongoing work and conversation context. It includes whether the message supplements existing work, requests separate work, or cancels identified work.
 

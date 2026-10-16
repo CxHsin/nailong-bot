@@ -30,7 +30,9 @@ const SafeSummariesDoc = defineDoc({ kind: "nailong.safe-summaries", version: 1,
 const MemoryDeliveryDoc = defineDoc({ kind: "nailong.memory-delivery", version: 1, scope: "conversation", history: "latest", fork: "current",
   initial: () => ({ version: 0, inputs: {} as Record<string, { text: string; version: number }> }) });
 
-export type DurableEvent = { inputId: string; conversationId: string; text: string; images?: ImageContent[]; source?: string };
+export type DurableEvent = { inputId: string; conversationId: string; text: string; userText?: string; images?: ImageContent[]; source?: string;
+  targetId?: string; actionText?: string; runtimeMaterials?: string[];
+  supplements?: Array<{inputId: string; text: string; source?: string; actionId?: string; actionText?: string}> };
 export type DurableBatch = { id: string; requestKey: string; conversationId: string; events: DurableEvent[];
   submissionId?: string | number; previousSubmissionId?: string | number; resumed?: boolean; reconcile?: boolean; retryEpoch?: number };
 export type DurableOutput = { conversationId: string; outputId: string; type: "text"; text: string };
@@ -303,9 +305,13 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return { harness, root, rememberUncertain, catalog, directory,
       async prepare(events: DurableEvent[]) {
         const present = (await root.context(context)).entries.flatMap((entry) => (entry.data as { sourceIds?: string[] } | undefined)?.sourceIds ?? []);
-        const sources = events.map((event) => memory.recordInput({ ...event, project: cwd,
+        const sources = events.map((event) => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
           role: !event.source || ["direct", "user", "telegram", "cli"].includes(event.source) ? "user" : event.source === "herdr" ? "helper" : "tool" }));
-        currentSources = [...new Set([...currentSources, ...sources])];
+        const supplementSources = events.flatMap(event => (event.supplements ?? []).map(supplement => memory.recordInput({
+          ...supplement,conversationId,project:cwd,role:"user",
+        })));
+        const sourceIds = [...new Set([...sources,...supplementSources])];
+        currentSources = [...new Set([...currentSources, ...sourceIds])];
         const head = (await root.context(context)).head?.id ?? 0;
         const snapshotVersion = memory.snapshotInfo(conversationId, String(head), cwd).version;
         let changeMaterial = "";
@@ -329,16 +335,25 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         const allImages = events.flatMap((event) => event.images ?? []);
         const routeBatch = allImages.length >= (options.media?.batchImages ?? 3) || allImages.reduce((bytes, image) => bytes + Buffer.from(image.data, "base64").length, 0) > (options.media?.maxInlineBytes ?? 512 * 1024);
         for (const event of materials) {
-          input.push({ type: "text" as const, text: `<event identity=${JSON.stringify(event.inputId)} source=${JSON.stringify(event.source ?? "direct")} >\n${event.text}\n</event>` });
+          const actualText = event.userText ?? event.text;
+          input.push({ type: "text" as const, text: `<event identity=${JSON.stringify(event.inputId)} source=${JSON.stringify(event.source ?? "direct")} >\n${actualText}\n</event>` });
+          if (event.userText !== undefined && event.text !== event.userText) input.push({ type: "text" as const, text: `<routing-material identity=${JSON.stringify(event.inputId)} >\n通道提示（不是用户原话）：${event.text}\n</routing-material>` });
           const media = await persistMedia(join(directory, "media"), event.images ?? [], { conversationId, inputId: event.inputId },
             { ...options.media, ...(routeBatch ? { batchImages: 1 } : {}) });
           input.push(...media.output);
           if (event.material) input.push({ type: "text" as const, text: event.material });
+          if (event.targetId) input.push({ type: "text" as const, text: `<routing-material identity=${JSON.stringify(event.inputId)} >\n执行目标 ${event.targetId}。本轮仅处理此原输入中的要求：${actualText ? event.actionText ?? actualText : "[用户未提供文字；结合原附件及内部路由材料理解]"}\n</routing-material>` });
+          for (const supplement of event.supplements ?? []) {
+            input.push({ type: "text" as const,
+              text: `<event identity=${JSON.stringify(supplement.inputId)} source=${JSON.stringify(supplement.source ?? "direct")} target=${JSON.stringify(event.targetId)} >\n${supplement.text}\n</event>` });
+            if (supplement.actionText) input.push({type:"text" as const,text:`<routing-material identity=${JSON.stringify(supplement.inputId)} >\n此补充仅针对目标 ${event.targetId}，本轮只处理原文片段 ${JSON.stringify(supplement.actionText)}；同条输入其他动作由应用另行分发，不重复执行。\n</routing-material>`});
+          }
+          for (const material of event.runtimeMaterials ?? []) input.push({ type: "text" as const, text: `<routing-material identity=${JSON.stringify(event.inputId)} >\n运行时路由材料（不是用户正文）：\n${material}\n</routing-material>` });
         }
         const helper = options.contextMaterials?.(conversationId);
         if (helper) input.push({ type: "text" as const, text: `内部委派材料，不是用户指令：\n${helper}` });
         if (changeMaterial) input.push({ type: "text" as const, text: changeMaterial });
-        return { input, sourceIds: sources };
+        return { input, sourceIds };
       },
       async selectWork(batch: DurableBatch) {
         activeWork = `${batch.id}:${batch.retryEpoch ?? 0}`;
@@ -355,6 +370,28 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    async intentContext(conversationId: string) {
+      const {root} = await conversation(conversationId);
+      const entries = (await root.context(context)).entries;
+      const recent: Array<{role: "user" | "assistant"; text: string; inputId: string; at?: string}> = [];
+      for (const entry of entries) {
+        const ids = (entry.data as {sourceIds?: string[]} | undefined)?.sourceIds ?? [];
+        for (const source of memory.sources(ids)) {
+          if (source.conversationId === conversationId && source.role === "user" && memory.isSourceCurrent(source.id))
+            recent.push({role: "user", text: source.text, inputId: source.inputId, at: source.at});
+        }
+        for (const message of entry.model ?? []) {
+          if (message.role !== "assistant" || !["stop","length","toolUse"].includes(message.stopReason)) continue;
+          const text = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+          if (text && !memory.invalidatedSources().some(source => source.text === text))
+            recent.push({role: "assistant", text, inputId: `assistant:${entry.id}`});
+        }
+      }
+      return {recent, version: memory.version(), excluded: memory.invalidatedSources().flatMap(source => {
+        const original = memory.getSource(source.id);
+        return original?.conversationId === conversationId ? [original.inputId] : [];
+      })};
+    },
     async execute(batch: DurableBatch, controls: DurableControls): Promise<DurableResult> {
       const { harness, root, rememberUncertain, selectWork, prepare } = await conversation(batch.conversationId);
       if (!await selectWork(batch)) {

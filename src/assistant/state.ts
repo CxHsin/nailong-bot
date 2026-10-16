@@ -4,11 +4,15 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { HelperRecord } from "./herdr.js";
 import type { QueueInput } from "./queue.js";
+import type { HelperControlRecord } from "./helper-control.js";
 
 export type SteerRecord = {
   key: string;
   input: QueueInput;
   targetBatch: string;
+  eventId?: string;
+  actionId?: string;
+  targetId?: string;
   submissionId?: string;
   state: "pending" | "submitted" | "handled";
 };
@@ -22,6 +26,9 @@ export class AssistantState {
       CREATE TABLE IF NOT EXISTS helpers(conversation TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(conversation,id));
       CREATE TABLE IF NOT EXISTS steers(key TEXT PRIMARY KEY,conversation TEXT NOT NULL,payload TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS outputs(id TEXT PRIMARY KEY,status TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS helper_controls(conversation TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(conversation,id));
+      CREATE TABLE IF NOT EXISTS output_targets(conversation TEXT NOT NULL,id TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(conversation,id));
+      CREATE TABLE IF NOT EXISTS reply_targets(conversation TEXT NOT NULL,message TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(conversation,message));
       CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
   }
   conversation(id: string, cwd: string) {
@@ -56,6 +63,27 @@ export class AssistantState {
   }
   beginOutput(id: string) {
     return this.db.prepare("INSERT OR IGNORE INTO outputs VALUES(?,'sending')").run(id).changes > 0;
+  }
+  helperControl(conversation: string, id: string): HelperControlRecord | undefined {
+    const row = this.db.prepare("SELECT payload FROM helper_controls WHERE conversation=? AND id=?").get(conversation,id) as {payload:string}|undefined;
+    return row && JSON.parse(row.payload);
+  }
+  saveHelperControl(conversation: string, record: HelperControlRecord) {
+    this.db.prepare("INSERT OR REPLACE INTO helper_controls VALUES(?,?,?)").run(conversation,record.id,JSON.stringify(record));
+  }
+  helperControls(conversation: string): HelperControlRecord[] {
+    return (this.db.prepare("SELECT payload FROM helper_controls WHERE conversation=? ORDER BY rowid").all(conversation) as Array<{payload:string}>).map(row=>JSON.parse(row.payload));
+  }
+  saveOutputTargets(conversation: string, id: string, targets: string[]) {
+    this.db.prepare("INSERT OR REPLACE INTO output_targets VALUES(?,?,?)").run(conversation,id,JSON.stringify(targets));
+  }
+  recordReply(conversation: string, message: string, outputId: string) {
+    const row = this.db.prepare("SELECT targets FROM output_targets WHERE conversation=? AND id=?").get(conversation,outputId) as {targets:string}|undefined;
+    if (row) this.db.prepare("INSERT OR REPLACE INTO reply_targets VALUES(?,?,?)").run(conversation,message,row.targets);
+  }
+  replyTargets(conversation: string, message: string): string[] {
+    const row = this.db.prepare("SELECT targets FROM reply_targets WHERE conversation=? AND message=?").get(conversation,message) as {targets:string}|undefined;
+    return row ? JSON.parse(row.targets) : [];
   }
   finishOutput(id: string, status: "sent" | "unknown") {
     this.db.prepare("UPDATE outputs SET status=? WHERE id=?").run(status,id);

@@ -29,7 +29,7 @@ export async function sanitizeMemoryContext(messages: readonly Message[], memory
     const content = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;
     return { ...message, content: content.map((part) => {
       if (part.type !== "text") return part;
-      const eventIdentity = part.text.match(/^<event identity=("(?:[^"\\]|\\.)*")/);
+      const eventIdentity = part.text.match(/^<(?:event|routing-material) identity=("(?:[^"\\]|\\.)*")/);
       if (eventIdentity) {
         const inputId: unknown = JSON.parse(eventIdentity[1]!);
         if (excluded.some((entry) => {

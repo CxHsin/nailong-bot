@@ -52,6 +52,7 @@ export async function connectTelegram(options: {
     try {
       const result = await drafts.withoutDrafts(action);
       await record({ id, status: "sent", messageId: result.message_id });
+      if (identity?.outputId) app.recordReply(identity.conversationId,String(result.message_id),identity.outputId);
     } catch (error) {
       const failure = error as { error_code?: number };
       await record({ id, status: failure.error_code ? "rejected" : "unknown" });
@@ -96,7 +97,7 @@ export async function connectTelegram(options: {
               throw error;
             return bot.api.sendRichMessage(ownerId, plain);
           }
-        });
+        }, {outputId:output.outputId,conversationId:output.conversationId});
       } catch {
         /* Receipts retain rejection/ambiguity; later pages can still be delivered. */
       }
@@ -113,6 +114,8 @@ export async function connectTelegram(options: {
         inputId: String(update.messageId),
         source: "telegram",
         text: update.text ?? "请分析这张图片。",
+        userText: update.text ?? "",
+        replyToMessageId: update.replyToMessageId === undefined ? undefined : String(update.replyToMessageId),
         images: update.images,
       });
       started();

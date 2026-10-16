@@ -7,6 +7,22 @@ import { connectTinyfish } from "../agent/tinyfish.js";
 import { createAssistant } from "./runtime.js";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import type { IntentOptions } from "./intent.js";
+
+export function intentEnvironment(env: NodeJS.ProcessEnv): IntentOptions {
+  const intent: IntentOptions = {};
+  const model = env.ASSISTANT_INTENT_MODEL?.trim();
+  if (model) intent.model = model;
+  const fields = { timeoutMs: "TIMEOUT_MS", inputTokens: "INPUT_TOKENS", outputTokens: "OUTPUT_TOKENS", recentTurns: "RECENT_TURNS" } as const;
+  for (const [key, suffix] of Object.entries(fields)) {
+    const name = `ASSISTANT_INTENT_${suffix}`;
+    const raw = env[name]?.trim(); if (!raw) continue;
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} 必须为正整数`);
+    intent[key as keyof typeof fields] = value;
+  }
+  return intent;
+}
 
 const positive = () => Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 }));
 const contextSchema = Type.Object({
@@ -43,6 +59,7 @@ export async function assistantEnvironment(
       legacyDataDir: resolve(env.ASSISTANT_LEGACY_DATA_DIR?.trim() || "data/pi-assistant-v1"),
       cwd,
       modelConfiguration: modelEnvironment(env),
+      intent: intentEnvironment(env),
       prompt: await readFile(
         resolve(env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md"),
         "utf8",

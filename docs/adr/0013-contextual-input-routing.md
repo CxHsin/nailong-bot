@@ -14,4 +14,4 @@ status: accepted
 
 ## 实现状态
 
-设计已确认，正式规格已发布，运行代码尚未迁移。当前运行时仍按 ADR-0011 的已验收实现处理普通 FIFO 和显式 `/steer`；本 ADR 不代表入口已删除或意图路由已上线。规格 #215 明确模型配置、预算、超时、动作与目标关联、helper 快速控制路径、持久化恢复协议及验收场景。用户已确认以 Assistant Service 完整行为链路为主要测试边界，另做少量真实模型、Telegram 和 herdr 受控验收。
+实现任务 [#216](https://github.com/CxHsin/nailong-bot/issues/216)–[#219](https://github.com/CxHsin/nailong-bot/issues/219) 在 development 实现独立分类、稳定目标与有序动作、持久调度、helper 控制及 Telegram 回复关联，退役用户 `/steer` 入口。当前验证与真实链路缺口见[路由验收记录](../contextual-input-routing-acceptance-20261016.md)，不由本 ADR 推导部署状态。未配置分类别名时保留原文兜底；原 Durable 目录兼容升级，不清空队列、补充或委派记录。

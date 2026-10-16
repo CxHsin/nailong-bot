@@ -17,7 +17,16 @@ for (const phase of ["tool-result","output","steer-admitted"] as const) {
     let recovering=false;
     const server=createServer(async(request,response)=>{
       let raw="";for await(const part of request)raw+=part;
-      const wire=JSON.parse(raw);requests++;
+      const wire=JSON.parse(raw);
+      if(wire.model==="router"){
+        const context=JSON.parse(wire.messages.at(-1).content);
+        const text=context.current.text;
+        const target=context.works.find((work:{status:string})=>work.status==="running");
+        const actions=text==="amend date Thursday"&&target?[{kind:"supplement",text,target:target.id}]:[{kind:"request",text}];
+        response.writeHead(200,{"content-type":"application/json"});
+        response.end(JSON.stringify({choices:[{message:{role:"assistant",content:JSON.stringify({actions})},finish_reason:"stop"}]}));return;
+      }
+      requests++;
       if(wire.messages.at(-1)?.role==="user"&&JSON.stringify(wire.messages.at(-1)).includes("amend date Thursday")){
         sendChatCompletion(response,"Thursday recorded");return;
       }
@@ -32,7 +41,7 @@ for (const phase of ["tool-result","output","steer-admitted"] as const) {
     });
     await new Promise<void>((resolve)=>server.listen(0,"127.0.0.1",resolve));
     const address=server.address();assert.ok(address&&typeof address!=="string");
-    await writeFile(join(directory,"options.json"),JSON.stringify({cwd:directory,dataDir:join(directory,"durable"),modelConfiguration:{defaultModel:"local",models:[{alias:"local",api:"openai-completions",model:"local",apiKey:"test",baseUrl:`http://127.0.0.1:${address.port}`}]}}));
+    await writeFile(join(directory,"options.json"),JSON.stringify({cwd:directory,dataDir:join(directory,"durable"),intent:{model:"router"},modelConfiguration:{defaultModel:"local",models:[{alias:"local",api:"openai-completions",model:"local",apiKey:"test",baseUrl:`http://127.0.0.1:${address.port}`},{alias:"router",api:"openai-completions",model:"router",apiKey:"test",baseUrl:`http://127.0.0.1:${address.port}`}]}}));
     function child(mode:string){
       const process=fork(resolve("test/fixtures/assistant-service-child.ts"),[directory,mode],{execArgv:["--import","tsx"],windowsHide:true,silent:true});
       let logs="";process.stdout?.on("data",(part)=>logs+=part);process.stderr?.on("data",(part)=>logs+=part);

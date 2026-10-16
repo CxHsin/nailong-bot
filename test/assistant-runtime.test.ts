@@ -63,8 +63,8 @@ async function helperFixture(options:{crossRead?:boolean}={}) {
   const reading=deferred();const releaseRead=deferred();const inputs:string[]=[];
   const f=await assistantFixture((wire,response)=>{
     const last=JSON.stringify(wire.messages.at(-1));inputs.push(JSON.stringify(wire.messages));
-    if(last.includes("watch coder"))sendChatCompletion(response,"",[{index:0,id:"watch",type:"function",function:{name:"herdr_watch",arguments:JSON.stringify({session:"fixture",agent:"coder",paneId:"w1:p1",workspaceId:"w1",cwd:directory,promptPath:join(directory,"prompt.txt")})}}]);
-    else if(last.includes("herdr_result")){results++;sendChatCompletion(response,"checked helper result");}
+    if(last.includes("herdr_result")){results++;sendChatCompletion(response,"checked helper result");}
+    else if(last.includes("watch coder"))sendChatCompletion(response,"",[{index:0,id:"watch",type:"function",function:{name:"herdr_watch",arguments:JSON.stringify({session:"fixture",agent:"coder",paneId:"w1:p1",workspaceId:"w1",cwd:directory,promptPath:join(directory,"prompt.txt")})}}]);
     else sendChatCompletion(response,"ordinary reply");
   },async(cwd)=>{directory=cwd;await writeFile(join(cwd,"prompt.txt"),"inspect result.txt");return {pollMs:10,herdr:{async run(_session,args){
     if(args[1]==="read"){reads++;reading.resolve();if(options.crossRead)await releaseRead.promise;return "helper artifact, inspect result.txt";}

@@ -2,7 +2,7 @@
 
 Windows 上的个人助手：一个 Telegram bot 对应一个主 agent。Telegram 和 CLI 共用持久接入服务；nailong 队列负责接收、去重、会话路由、优先级和合批，Pi Durable 1.2.0 保存模型与工具执行进度。编码通过 herdr-workflow 委派给 Codex 或 Claude Code，再由主助手检查成果。
 
-当前规格 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，实现任务 [#202](https://github.com/CxHsin/nailong-bot/issues/202)、[#203](https://github.com/CxHsin/nailong-bot/issues/203)、[#204](https://github.com/CxHsin/nailong-bot/issues/204)、[#205](https://github.com/CxHsin/nailong-bot/issues/205)，架构见 [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md)。切换验证状态与限制见 [验收记录](docs/durable-assistant-acceptance-20261015.md)。
+持久执行规格为 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，上下文输入路由规格为 [#215](https://github.com/CxHsin/nailong-bot/issues/215)。架构见 [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md) 与 [ADR-0013](docs/adr/0013-contextual-input-routing.md)，验证状态见 [路由验收记录](docs/contextual-input-routing-acceptance-20261016.md)。
 
 ## 使用
 
@@ -17,7 +17,7 @@ Windows 上的个人助手：一个 Telegram bot 对应一个主 agent。Telegra
 | 续接指定会话 | `npm run send -- "继续" --conversation-id telegram:private:42` |
 | JSON 输出 | `npm run send -- "问题" --ndjson` |
 
-支持 `/help`、`/model`、`/model 别名`、`/reset`、`/steer 内容`、`/resume [批次ID]`。普通新消息按同级 FIFO 排队；当前轮结束后，将已经排队的连续普通消息按原顺序交给下一轮，不等待固定时间窗。仅显式 `/steer` 补充当前工作；空闲时其正文作为普通消息入队。后台工作优先级低于直接输入，外部帮手的补充要求与停止通过 skill 核对真实身份后执行。
+支持 `/help`、`/model`、`/model 别名`、`/reset`、`/resume [批次ID]`。直接用自然语言交办、补充或取消工作；独立请求按 FIFO 排队，排队目标的补充保留原位置，当前工作的补充在执行器输入边界读取。显式取消保留已有成果，实际停止需核实。分类模型通过 `ASSISTANT_INTENT_MODEL` 独立选择；未配置或判断失败时，原输入交给主助手处理。旧 `/steer` 命令提示改用自然语言。
 
 Telegram 仅接收配置主人的私聊，支持文字、图片、Markdown 富消息、分页、临时正文预览和文件。格式被明确拒绝时回退文本；发送结果不明保留记录，不自动重发。细节见 [操作说明](docs/personal-agent-operations.md)。
 

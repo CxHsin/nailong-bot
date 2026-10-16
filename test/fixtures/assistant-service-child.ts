@@ -7,7 +7,8 @@ const options = JSON.parse(await readFile(join(directory,"options.json"),"utf8")
 const app = await createAssistant(options);
 process.on("message",async(message)=>{
   if((message as {type?:string}).type!=="steer")return;
-  await app.receive({conversationId:"one",inputId:"supplement",source:"telegram",text:"/steer amend date Thursday"});
+  await app.receive({conversationId:"one",inputId:"supplement",source:"telegram",text:"amend date Thursday"});
+  await app.waitForRouting();
   process.send?.({type:"steer-admitted"});
 });
 app.subscribe(async (output) => {

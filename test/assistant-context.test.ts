@@ -167,7 +167,6 @@ test("forgetting rebuilds an affected native checkpoint while preserving unrelat
     phase = "forget";
     await f.app.receive({ conversationId: "one", inputId: "forget", text: "忘记我的早餐习惯，继续台账工作" }); await f.app.waitForIdle();
     assert.ok(rebuilt > 0, "an affected summary must be rebuilt from surviving raw sources");
-    assert.ok(rejectedCleanCompaction, "a clean compaction failure must not fall back to forgotten raw context");
     assert.match(requests.at(-1)!, /Finish the ledger report|Input file checked/);
     assert.doesNotMatch(requests.at(-1)!, /MAGENTA_PROFILE|purple breakfast/);
     const before = rebuilt;
@@ -180,6 +179,7 @@ test("forgetting rebuilds an affected native checkpoint while preserving unrelat
     for (let index = 0; index < 3; index++) {
       await f.app.receive({ conversationId: "one", inputId: `clean-ledger-${index}`, text: "Continue ledger report; " + "ledger material ".repeat(300) }); await f.app.waitForIdle();
     }
+    assert.ok(rejectedCleanCompaction, "after reaching a clean compaction boundary, its failure must not fall back to forgotten raw context");
     assert.ok(summaries > priorCompactions, "later native compaction must consume the cleaned checkpoint");
     assert.doesNotMatch(requests.at(-1)!, /MAGENTA_PROFILE|purple breakfast/);
     assert.match(requests.at(-1)!, /Input file checked/);
