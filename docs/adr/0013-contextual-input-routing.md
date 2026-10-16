@@ -4,7 +4,7 @@ status: accepted
 
 # 按上下文识别输入意图，由持久队列执行路由
 
-2026-10-16，用户确认采用独立快速模型，结合当前消息及回复关系、近期对话和实际工作列表，识别输入的动作与目标，再由程序按确定规则路由。[设计结论 #214](https://github.com/CxHsin/nailong-bot/issues/214)是后续规格的依据，[讨论记录](../research/intent-aware-input-routing-2026-10-16.md)保留逐轮确认。
+2026-10-16，用户确认采用独立快速模型，结合当前消息及回复关系、近期对话和实际工作列表，识别输入的动作与目标，再由程序按确定规则路由。[设计结论 #214](https://github.com/CxHsin/nailong-bot/issues/214)是[正式规格 #215](https://github.com/CxHsin/nailong-bot/issues/215)的依据，[讨论记录](../research/intent-aware-input-routing-2026-10-16.md)保留逐轮确认，规格另有[本地归档](../research/contextual-input-routing-spec-2026-10-16.md)。
 
 此决定替代 [ADR-0011](0011-durable-main-agent-and-conversation-queue.md)中普通输入不隐式补充、必须使用 `/steer` 的约束：自然语言补充关联当前、排队或后台 helper 工作，移除用户输入入口 `/steer`。无关请求仍按 FIFO；取消尽快发起对应中断并核实实际停止。耗时工作继续由 herdr helper 在后台执行，主 Bot 处理后续输入。合批保留各条消息的身份和独立目标，不等待固定时间窗。
 
@@ -14,4 +14,4 @@ status: accepted
 
 ## 实现状态
 
-设计已确认，运行代码尚未迁移。当前运行时仍按 ADR-0011 的已验收实现处理普通 FIFO 和显式 `/steer`；本 ADR 不代表入口已删除或意图路由已上线。正式规格需明确模型配置、预算、超时、动作与目标关联、helper 快速控制路径、持久化恢复协议及验收场景。
+设计已确认，正式规格已发布，运行代码尚未迁移。当前运行时仍按 ADR-0011 的已验收实现处理普通 FIFO 和显式 `/steer`；本 ADR 不代表入口已删除或意图路由已上线。规格 #215 明确模型配置、预算、超时、动作与目标关联、helper 快速控制路径、持久化恢复协议及验收场景。用户已确认以 Assistant Service 完整行为链路为主要测试边界，另做少量真实模型、Telegram 和 herdr 受控验收。

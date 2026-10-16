@@ -48,7 +48,7 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 These terms follow the [confirmed specification](https://github.com/CxHsin/nailong-bot/issues/201) and [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md). Equal-priority direct inputs wait in arrival order; ordinary input does not implicitly steer current work. Implementation verification belongs in the acceptance record, not in these definitions.
 
-Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-contextual-input-routing.md) and [conclusion #214](https://github.com/CxHsin/nailong-bot/issues/214): contextual Work Supplements and retirement of `/steer`. The runtime still follows the explicit steering contract below until the new design is implemented and verified.
+Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-contextual-input-routing.md), [conclusion #214](https://github.com/CxHsin/nailong-bot/issues/214) and [spec #215](https://github.com/CxHsin/nailong-bot/issues/215): contextual Work Supplements and retirement of `/steer`. The runtime still follows the explicit steering contract below until the new design is implemented and verified.
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
