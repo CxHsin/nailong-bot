@@ -4,6 +4,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { defineTool } from "@mariozechner/pi-coding-agent";
 import type { TSchema } from "typebox";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 type ToolSource = { source: string; tools: ToolDefinition[] };
 
 export type McpConfig = { name: string; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string>; timeoutMs?: number };
@@ -26,12 +27,20 @@ export async function connectMcp(config: McpConfig) {
       description: tool.description ?? `MCP ${config.name}: ${tool.name}`, parameters: tool.inputSchema as TSchema,
       async execute(_id, args, signal) {
         const result = await client.callTool({ name: tool.name, arguments: args as Record<string, unknown> }, undefined, { timeout, signal });
-        if (result.isError) throw new Error(JSON.stringify(result.content));
-        const content = (Array.isArray(result.content) ? result.content : []).flatMap((part) => {
+        const content = (Array.isArray(result.content) ? result.content : []).flatMap<TextContent | ImageContent>((part) => {
           if (part.type === "text" && typeof part.text === "string") return [{ type: "text" as const, text: part.text }];
-          return [{ type: "text" as const, text: JSON.stringify(part) }];
+          if (part.type === "image" && typeof part.data === "string" && typeof part.mimeType === "string") {
+            return [{ type: "image" as const, data: part.data, mimeType: part.mimeType }];
+          }
+          if (part.type === "resource_link") return [{ type: "text" as const, text: `Resource: ${part.uri}${part.name ? ` (${part.name})` : ""}` }];
+          if (part.type === "resource" && part.resource && typeof part.resource === "object") {
+            const resource = part.resource as { uri?: string; text?: string; mimeType?: string };
+            return [{ type: "text" as const, text: `Resource: ${resource.uri ?? "unknown"}${resource.mimeType ? ` (${resource.mimeType})` : ""}${resource.text === undefined ? "" : `\n${resource.text}`}` }];
+          }
+          return [{ type: "text" as const, text: `MCP ${String(part.type)} material retained in typed tool details.` }];
         });
-        return { content, details: { structuredContent: result.structuredContent } };
+        if (result.isError) content.unshift({ type: "text", text: "MCP tool reported an error. Inspect the returned evidence before retrying." });
+        return { content, details: { structuredContent: result.structuredContent, mcpContent: result.content, isError: result.isError === true } };
       } })) };
     return { source, close: () => client.close() };
   } catch (error) { await client.close().catch(() => {}); throw error; }

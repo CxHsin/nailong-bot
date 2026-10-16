@@ -2,6 +2,8 @@
 
 One personal assistant uses a nailong-owned persistent Queue System and Pi Durable 1.2.0 through Telegram or CLI. Current design: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [spec #201](https://github.com/CxHsin/nailong-bot/issues/201); migration verification is recorded in [current acceptance](docs/durable-assistant-acceptance-20261015.md). [ADR-0010](docs/adr/0010-native-pi-assistant.md) and older Host terminology retain historical evidence.
 
+Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layered-memory-and-stable-context.md) and [spec #208](https://github.com/CxHsin/nailong-bot/issues/208). Budgets, storage and verification are in [operations](docs/personal-agent-operations.md) and [context acceptance](docs/context-management-acceptance-20261016.md).
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -30,7 +32,17 @@ One personal assistant uses a nailong-owned persistent Queue System and Pi Durab
 
 **Send Receipt**: Telegram's minimal sending/sent/rejected/unknown record. Unknown sends are not automatically retried. This is separate from the success of the user's work.
 
-**Historical Host / Task / Attempt / Akasha / Plan**: Retired online concepts retained in older documentation and offline diagnostics. The new data namespace neither loads nor migrates those records. Proactive responsibilities and timers are deferred.
+**Long-term Memory**: Shared sourced MEMORY facts/preferences, SELF understanding/relationship, and global or Work Directory topics. Current user corrections replace old claims. Memory helps understanding; Durable Workflow and external evidence determine execution state.
+
+**Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
+
+**Memory Snapshot**: Actual resident memory material saved for one context generation. Ordinary changes append immediately; compaction or reset starts a new snapshot. Forgetting invalidates affected snapshots, recalled material and derived summaries immediately.
+
+**Tool Archive**: Persistent original tool output with a stable reference, bounded view and searchable provenance. Known references can be paged directly; missing references can be discovered without replaying the tool. It shares the Conversation data lifetime.
+
+**Default Forgetting**: Retracts derived memories and excludes the corresponding original sources and their derivatives from automatic recall and learning. Unrelated work progress remains available. Original records remain; physical deletion is a separate request.
+
+**Historical Host / Task / Attempt / Akasha / Plan**: Retired implementations retained in older documentation and offline diagnostics. Production memory uses a new namespace and never imports their records. Proactive responsibilities and timers are deferred.
 
 ## Queue and workflow
 

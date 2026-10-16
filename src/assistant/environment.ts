@@ -5,6 +5,17 @@ import { modelEnvironment } from "../agent/model-config.js";
 import { connectMcp } from "../agent/mcp-catalog.js";
 import { connectTinyfish } from "../agent/tinyfish.js";
 import { createAssistant } from "./runtime.js";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+
+const positive = () => Type.Optional(Type.Integer({ minimum: 1, maximum: 1_000_000 }));
+const contextSchema = Type.Object({
+  archive: Type.Optional(Type.Object(Object.fromEntries(["thresholdBytes", "previewBytes", "readBytes", "maxReadBytes", "readLines", "maxReadLines", "searchLimit", "maxSearchLimit", "searchBytes"].map((key) => [key, positive()])), { additionalProperties: false })),
+  memory: Type.Optional(Type.Object(Object.fromEntries(["residentBytes", "topicBytes", "akashaBytes", "inputBytes", "searchResults", "readBytes"].map((key) => [key, positive()])), { additionalProperties: false })),
+  media: Type.Optional(Type.Object({ batchImages: positive(), maxInlineBytes: positive() }, { additionalProperties: false })),
+  compaction: Type.Optional(Type.Object({ enabled: Type.Optional(Type.Boolean()), reserveTokens: positive(), keepRecentTokens: positive(),
+    backgroundTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })) }, { additionalProperties: false })),
+}, { additionalProperties: false });
 
 /** Uses a fresh namespace; never runs legacy migrations or loads Akasha. */
 export async function assistantEnvironment(
@@ -14,6 +25,10 @@ export async function assistantEnvironment(
     env.ASSISTANT_DATA_DIR?.trim() || "data/pi-durable-v1",
   );
   const cwd = resolve(env.ASSISTANT_WORK_DIR?.trim() || process.cwd());
+  const contextFile = env.ASSISTANT_CONTEXT_CONFIG_FILE?.trim();
+  const contextInput: unknown = contextFile ? JSON.parse(await readFile(resolve(contextFile), "utf8")) : {};
+  if (!Value.Check(contextSchema, contextInput)) throw new Error("ASSISTANT_CONTEXT_CONFIG_FILE 配置无效");
+  const contextConfig = contextInput as Pick<Parameters<typeof createAssistant>[0], "archive" | "memory" | "media" | "compaction">;
   const capabilities = await capabilityEnvironment(env);
   const connections: Awaited<ReturnType<typeof connectMcp>>[] = [];
   let web: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
@@ -23,6 +38,7 @@ export async function assistantEnvironment(
     if (env.TINYFISH_API_KEY?.trim())
       web = await connectTinyfish(env.TINYFISH_API_KEY.trim());
     const app = await createAssistant({
+      ...contextConfig,
       dataDir,
       legacyDataDir: resolve(env.ASSISTANT_LEGACY_DATA_DIR?.trim() || "data/pi-assistant-v1"),
       cwd,

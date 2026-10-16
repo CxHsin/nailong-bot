@@ -1,6 +1,6 @@
 # 持久队列主助手操作说明
 
-当前规格 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，架构 [ADR-0011](adr/0011-durable-main-agent-and-conversation-queue.md)，验证状态见 [切换验收](durable-assistant-acceptance-20261015.md)。nailong 负责输入接收与会话调度，Pi Durable 1.2.0 保存主 agent 执行进度。
+当前队列与执行规格 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，架构 [ADR-0011](adr/0011-durable-main-agent-and-conversation-queue.md)，验证状态见 [切换验收](durable-assistant-acceptance-20261015.md)。上下文与记忆遵循 [#208](https://github.com/CxHsin/nailong-bot/issues/208) 和 [ADR-0012](adr/0012-layered-memory-and-stable-context.md)，见[上下文验收](context-management-acceptance-20261016.md)。nailong 负责输入接收与会话调度，Pi Durable 1.2.0 保存主 agent 执行进度。
 
 ## Telegram 如何接入
 
@@ -50,4 +50,39 @@ herdr-workflow 负责派发、确认接收、转交要求、停止和独立成�
 
 重试耗尽后保留进度、暂停并通知一次，等待明确继续，其他输入仍可处理。重启保持主动暂停或待核实状态。工具与业务错误交回模型判断，不机械重试任意 Shell。外部操作结果不明时先核实：确认完成则采用结果，确认未执行才执行，无法确认则暂停询问。停止、抢占、重置都不能撤销已有影响。
 
-cron、邮件、Slack、完整分层记忆、herdr 内部步骤恢复和服务器部署不在本次范围。`run:diagnose`、`context:diagnose` 和旧 `migrate` 为旧日志离线工具，不能用于恢复新版执行。历史验收只适用于其记录的基准，进程强杀证据不能推导断电持久性或跨系统 exactly-once。
+cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围外。`run:diagnose`、`context:diagnose` 和旧 `migrate` 为旧日志离线工具，不能用于恢复新版执行。历史验收只适用于其记录的基准，进程强杀证据不能推导断电持久性或跨系统 exactly-once。
+
+## 上下文与长期记忆
+
+每个压缩代固定实际 system 记忆快照，重启复用原内容。新记忆和纠正通过有身份的追加材料即时交给主模型，压缩或 reset 才归并到新快照。真实项目指令或工具配置改变时重新加载。当前编码顺序为 project、skills、memory、material-routing、恢复提示（需要时）、SDK instructions；工具定义顺序固定，由 provider 编码器处理协议。
+
+`assistant-memory.sqlite` 保存来源、版本、纠正关系、遗忘规则、已完成的检索与快照。`memory/MEMORY.md`、`SELF.md`、`topics/` 是程序维护的可读档案，直接编辑 Markdown 不会导入记忆。MEMORY 保存用户事实及偏好，SELF 保存有用户原话依据的理解和关系，全局及项目 topic 保存经历。项目身份是实际工作目录；自然项目名放在 topic 中。
+
+每条真实用户输入分别准备主题和 Akasha 原文召回，合批共享总预算；工具续步和 reopen 复用已记录结果，包括零命中。当前召回是本地词项/中文双字匹配，跨主题改述可能需要显式 `memory_search`；已知来源用 `memory_read` 分页。旧 Host/Akasha 未导入，工具全文保留在工具归档。
+
+明确要求记住、纠正或忘记时，主助手调用 `memory_write` / `memory_forget` 立即处理。写入须引用真实用户原话并匹配当前版本；纠正使用 supersede，撤回使用 retract。压缩完成后的后台提炼只读取实际覆盖的原始用户记录，经相同治理边界写入，helper 只能提供候选。
+
+默认忘记撤回派生记忆并持久排除相关来源及助手改写，立即清理快照、已保存的召回和追加材料；受影响摘要从存活原文及 Durable 记录定位重建，保留其他任务进度。reset 不遗忘长期记忆；默认忘记保留原始记录，不表示彻底物理删除。
+
+## 工具原件、媒体与预算
+
+长工具结果首次返回即落在 `executions/<会话 SHA-256>/archives/`，模型只接收状态、受限预览和 `archive:` 引用。已知引用直接 `archive_read`；未知引用通过 `archive_search` 按关键词、工具、命令、时间或文件定位。分页同时约束 UTF-8 字节和行数，超长单行使用 nextOffset 继续；搜索也有有限候选和游标。一次读取不自动预取下一页。原件与 Conversation 数据共同保留，无自动过期删除；索引损坏、无匹配和原件缺失会分别报告。
+
+媒体保存在同级 `media/`，manifest 保留来源、类型和顺序。简单图片保持视觉输入；批量或大媒体在送入主模型前转为 manifest 与 helper 指引。高成本独立资料或媒体工作复用 herdr-workflow 和原 helper 身份，回传简洁结论及必要路径，主助手按需核验。浏览任务先确认 helper 能连接对应登录 tab。
+
+可选 `ASSISTANT_CONTEXT_CONFIG_FILE` 指向 JSON 文件，路径相对启动目录。可部分设置 archive、memory、media、compaction，其余使用默认值：
+
+| 配置 | 默认值 | 目的/上限 |
+| --- | --- | --- |
+| archive.thresholdBytes / previewBytes | 16384 / 4096 | 在 SDK 保留上限前卸载；预览最大 8192 |
+| archive.readBytes / maxReadBytes | 8192 / 32768 | 每页字节；硬上限 32768 |
+| archive.readLines / maxReadLines | 100 / 500 | 每页行数；硬上限 500 |
+| archive.searchLimit / maxSearchLimit / searchBytes | 10 / 50 / 8192 | 候选硬上限 50，响应预算最高 16384 字节 |
+| memory.residentBytes / topicBytes / akashaBytes | 6000 / 3000 / 4000 | 分开约束并按来源/事实去重 |
+| memory.inputBytes / searchResults / readBytes | 8000 / 8 / 6000 | 每批自动材料总预算、显式搜索数、原文每页 |
+| media.batchImages / maxInlineBytes | 3 / 524288 | 达到图片数或超过字节阈值时转 manifest |
+| compaction | Pi Durable 1.2.0 默认策略 | 可覆盖 enabled、reserveTokens、keepRecentTokens、backgroundTokens |
+
+预算是保守起点，不是模型最优参数。例如 `{"archive":{"previewBytes":2048},"memory":{"inputBytes":6000}}`。压缩沿用原生容量与后台机制，未增加固定空闲计时；配置较小模型窗口时须为 SDK 的输出安全余量留空间，真实验收采用 16000 窗口、6000 reserve、1200 keepRecent。
+
+各会话 `requests.jsonl` 保存实际 provider 请求字节、模型、时间、延迟及 usage，不保存凭据和请求正文。未提供的 usage/cache 指标为 null；相同前缀不能证明远端缓存命中，配置价格为零也不能证明省钱。

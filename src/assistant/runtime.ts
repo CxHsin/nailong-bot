@@ -8,6 +8,7 @@ import { herdrClient, durableHerdrWatch, inspectHelper, type HelperRecord, type 
 import { createQueuedAssistant, type QueueExecutionContext, type ProcessingBatch } from "./queued-service.js";
 import type { QueueInput } from "./queue.js";
 import { createDurableExecutor } from "./durable-executor.js";
+import type { DurableExecutorOptions } from "./durable-executor.js";
 import { AssistantState, requireFreshNamespace, steerKey, type SteerRecord } from "./state.js";
 import type { ReplyPreview } from "../telegram/draft-preview.js";
 
@@ -27,6 +28,11 @@ export type AssistantOptions = {
   pollMs?: number;
   reportFailure?: (error: unknown) => void;
   shellPath?: string;
+  archive?: DurableExecutorOptions["archive"];
+  memory?: DurableExecutorOptions["memory"];
+  media?: DurableExecutorOptions["media"];
+  compaction?: DurableExecutorOptions["compaction"];
+  onRequestMetrics?: DurableExecutorOptions["onRequestMetrics"];
 };
 
 /** Persistent admission/scheduling, with Pi Durable responsible for model/tool execution. */
