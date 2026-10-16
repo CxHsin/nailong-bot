@@ -41,9 +41,7 @@
 
 `ASSISTANT_INTENT_MODEL` 指向 `MODEL_NAMES` 中已配置凭据的别名，独立于 `/model`。未配置时以 `not_configured` 原文兜底；非法别名启动时报错。默认总超时 8000ms、估算输入 8192 token、输出 1024 token、近期 6 个用户轮次及确认助手文字，可用同前缀的 `TIMEOUT_MS`、`INPUT_TOKENS`、`OUTPUT_TOKENS`、`RECENT_TURNS` 环境变量覆盖。正整数及模型窗口校验在启动时完成。判断无工具、非流式且不重试；超时的迟到结果无效。
 
-可选 `ASSISTANT_INTENT_PROVIDER=clef` 启用 Cloudflare 专用决策接口，此时 `ASSISTANT_INTENT_MODEL` 只接受 `clef-flash`（默认）或 `clef`，凭据读取 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`。不修改主 Bot 的模型配置。Clef 选择绑定工作身份的完整动作，真实回复关系直接出现在候选描述中；明确指定其他对象仍可覆盖回复关系。不确定时交主 Bot 澄清，复合要求以 `compound` 原文兜底，不切分后执行其中一项。
-
-Clef 输入预算计入状态、问题和全部选项描述；最多保留 126 项工作（每项补充/取消两个选项，另加新请求、不确定、复合共 255 项），省略项标记不完整，继续受既有目标校验限制。Flash/Clef 的输入预算上限分别为 24576/65536 个估算 token；此接口没有生成式输出，`OUTPUT_TOKENS` 不发送给 Clef。可选 `ASSISTANT_INTENT_MIN_CONFIDENCE` 为 0–1，低于门槛仅澄清；默认不使用门槛。分数未经本项目校准，不以小样本推荐通用值。快照保留候选、选择与置信分数，不记录凭据。
+Cloudflare 通用文本模型可通过现有 `openai-completions` 模型别名接入，base URL 为 `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1`，使用 Workers AI Token 和完整模型名。专用 Clef 入口已按用户要求删除，分类配置恢复为通用模型别名；历史结论见[旧评测](research/clef-joint-routing-evaluation-2026-10-17.md)。通用模型的合成 API 评测入口为 `scripts/acceptance/cloudflare-routing-live.ts`，读取已有 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`，不启动 Bot 或更改运行配置。
 
 Telegram 原消息和发送回执关联回复目标；一条回复对应多个目标时保留全部候选。图片无真实说明文字时直接兜底，保留原图；默认图片提示不充当用户意图。歧义、超时、预算不足或无效结果通过独立运行时材料告知主助手，原话及身份保留。
 

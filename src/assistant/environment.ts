@@ -12,20 +12,7 @@ import type { IntentOptions } from "./intent.js";
 export function intentEnvironment(env: NodeJS.ProcessEnv): IntentOptions {
   const intent: IntentOptions = {};
   const model = env.ASSISTANT_INTENT_MODEL?.trim();
-  const provider = env.ASSISTANT_INTENT_PROVIDER?.trim() || "model";
-  if (provider === "clef") {
-    const selected = model || "clef-flash";
-    if (selected !== "clef-flash" && selected !== "clef") throw new Error("ASSISTANT_INTENT_MODEL 必须为 clef-flash 或 clef");
-    intent.clef = { model: selected, accountId: env.CLOUDFLARE_ACCOUNT_ID?.trim() ?? "", apiToken: env.CLOUDFLARE_API_TOKEN?.trim() ?? "" };
-    const minimum = env.ASSISTANT_INTENT_MIN_CONFIDENCE?.trim();
-    if (minimum) {
-      const value = Number(minimum);
-      if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error("ASSISTANT_INTENT_MIN_CONFIDENCE 必须在 0 到 1 之间");
-      intent.clef.minConfidence = value;
-    }
-  } else if (provider === "model") {
-    if (model) intent.model = model;
-  } else throw new Error("ASSISTANT_INTENT_PROVIDER 必须为 model 或 clef");
+  if (model) intent.model = model;
   const fields = { timeoutMs: "TIMEOUT_MS", inputTokens: "INPUT_TOKENS", outputTokens: "OUTPUT_TOKENS", recentTurns: "RECENT_TURNS" } as const;
   for (const [key, suffix] of Object.entries(fields)) {
     const name = `ASSISTANT_INTENT_${suffix}`;

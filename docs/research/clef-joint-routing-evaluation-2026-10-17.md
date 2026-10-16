@@ -1,5 +1,7 @@
 # Clef 完整动作路由的实现与真实 API 验收
 
+历史记录：本次实现后来按用户要求退役，专用适配器、配置及验收脚本均已删除。以下描述保留当时的状态与证据；[原适配器](https://github.com/CxHsin/nailong-bot/blob/d090d92979a7fbe471ca2c074de5d48291c787f2/src/assistant/intent-clef.ts)、[原脚本](https://github.com/CxHsin/nailong-bot/blob/d090d92979a7fbe471ca2c074de5d48291c787f2/scripts/acceptance/clef-routing-live.ts)。当前入口见[操作说明](../personal-agent-operations.md)。
+
 2026-10-17，任务 [#220](https://github.com/CxHsin/nailong-bot/issues/220)，关联规格 [#215](https://github.com/CxHsin/nailong-bot/issues/215)。基准为 development 的 `a235df2` 加本次改动。此前的[双问题实验](clef-live-evaluation-2026-10-17.md)保留为历史证据。
 
 ## 结论

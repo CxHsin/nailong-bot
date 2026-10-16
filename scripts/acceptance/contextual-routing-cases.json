@@ -235,5 +235,140 @@
       "target": "annual"
     },
     "cohort": "original"
+  },
+  {
+    "name": "明确他指覆盖回复",
+    "text": "停止季度收入图表，销售报表继续。",
+    "replyTargets": [
+      "report"
+    ],
+    "expected": {
+      "kind": "cancel",
+      "target": "chart"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "回复图表但独立新请求",
+    "text": "另外帮我翻译一句英文：Good morning。",
+    "replyTargets": [
+      "chart"
+    ],
+    "expected": {
+      "kind": "request",
+      "target": "none"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "一条回复关联多项工作",
+    "text": "这个暂停一下。",
+    "replyTargets": [
+      "report",
+      "chart"
+    ],
+    "semantic": "cancel",
+    "expected": {
+      "kind": "clarify",
+      "target": "ambiguous"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "明确否定中断",
+    "text": "图表先别停，把背景改成白色。",
+    "expected": {
+      "kind": "supplement",
+      "target": "chart"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "无回复且单一工作",
+    "text": "这个先停下来。",
+    "works": [
+      {
+        "id": "chart",
+        "summary": "生成季度收入图表",
+        "status": "queued"
+      }
+    ],
+    "expected": {
+      "kind": "cancel",
+      "target": "chart"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "中文省略补充",
+    "text": "图表用折线的，金额统一万元。",
+    "expected": {
+      "kind": "supplement",
+      "target": "chart"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "两目标复合修改",
+    "text": "报表改成 CSV，图表换成折线图。",
+    "expected": {
+      "kind": "compound",
+      "target": "multiple"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "同目标先取消后新建",
+    "text": "取消本月销售报表，再做一份下月的。",
+    "expected": {
+      "kind": "compound",
+      "target": "report"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "自然提问不是停止命令",
+    "text": "为什么季度收入图表还没有完成？",
+    "expected": {
+      "kind": "request",
+      "target": "none"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "引用取消不授权执行",
+    "text": "请把“取消销售报表”翻译成英文。",
+    "expected": {
+      "kind": "request",
+      "target": "none"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "完整名称支持不完整候选",
+    "text": "停止生成季度收入图表。",
+    "works": [
+      {
+        "id": "chart",
+        "summary": "生成季度收入图表",
+        "status": "queued"
+      }
+    ],
+    "incomplete": true,
+    "expected": {
+      "kind": "cancel",
+      "target": "chart"
+    },
+    "cohort": "fresh"
+  },
+  {
+    "name": "未知对象不能取消已知工作",
+    "text": "那个视频压缩任务先别做了。",
+    "expected": {
+      "kind": "clarify",
+      "target": "ambiguous"
+    },
+    "semantic": "cancel",
+    "cohort": "fresh"
   }
 ]

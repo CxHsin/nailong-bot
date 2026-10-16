@@ -1,5 +1,7 @@
 # Clef 中文上下文决策 API 实测
 
+历史记录：用户随后要求移除 Clef 程序，当前已删除专用入口和实验脚本。以下结论和命令仅对应当时的版本；[原脚本永久链接](https://github.com/CxHsin/nailong-bot/blob/1161899/scripts/acceptance/clef-live.ts)，当前入口见[操作说明](../personal-agent-operations.md)。
+
 2026-10-17（北京时间），使用用户已填入本地 `.env` 的 Cloudflare Account ID 和 Workers AI API token 进行真实 HTTP 调用。只发送合成场景；没有启动 Telegram、helper 或新 workspace，没有切换生产分类器，也没有将密钥保存到结果或提交中。
 
 ## 结论与范围
@@ -52,7 +54,7 @@ API 适合提供类别、候选目标及不确定性信号；目前证据不足�
 
 ## 复跑与证据
 
-[脚本](../../scripts/acceptance/clef-live.ts)从环境读取凭据，单次请求上限 8 秒。会发送真实 API 请求；任何场景不匹配时最终以退出码 1 报告，仍保存全部场景结果。
+[历史脚本](https://github.com/CxHsin/nailong-bot/blob/1161899/scripts/acceptance/clef-live.ts)从环境读取凭据，单次请求上限 8 秒。会发送真实 API 请求；任何场景不匹配时最终以退出码 1 报告，仍保存全部场景结果。
 
 ```powershell
 node --env-file=.env --import tsx scripts/acceptance/clef-live.ts C:/Users/Cx/AppData/Local/Temp/nailong-clef-eval-20261017/flash clef-flash
