@@ -99,7 +99,7 @@ heartbeat PID 35000 由验收者按 PID、启动时间和命令行精确核验�
 
 证据包含 `inputs.jsonl`、`routing.jsonl`、持久路由决定、`outputs.jsonl`、`requests.jsonl`、`telegram-sends.jsonl` 及实际文件。第二轮写入 `STOP` 后正常关闭轮询，已确认测试 Node 进程退出。
 
-### 第三轮：运行中补充
+### 第三轮：运行中补充与无说明图片
 
 用户继续授权真实评测后，在独立目录 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-telegram-live-20261016-r3/` 运行相同主模型与分类别名 `ds`，分类仍采用默认 8 秒超时。验收工具最多保持 90 秒，进入真实工具边界时由 Bot 通知用户；外部 `RELEASE` 文件只用于在确认补充已提交后释放工具，不替代实际分类或补充消费。
 
@@ -109,9 +109,18 @@ heartbeat PID 35000 由验收者按 PID、启动时间和命令行精确核验�
 | 562：改 CSV，文件名 `live-report.csv` | 14:48:52.787Z 收到，原工具仍在运行；真实分类得到 supplement，定位消息 561 的稳定目标。动作 `6fff3b80-2e55-438e-b589-ff301d546fc4:0` 提交至 Durable submission 15，补充消费记录最终为 handled |
 | 工具正常结束后交付 | 14:49:34.823Z 原工具正常退出，没有因普通补充被中断；首次写入即为 `live-report.csv`，未生成旧版 Markdown。文件含月份与销售额两列、12000 和 15000 两行数据；文件消息 564、结果消息 565 均有 sent 回执 |
 
-这次补齐了真实 Telegram 运行中补充及交付证据；首次请求分类失败仍单独保留，不将主模型兜底成功算作分类成功。`boundaries.jsonl`、`routing-decisions.json`、Durable 日志、`telegram-sends.jsonl` 和实际 CSV 可以相互核对原文、目标、消费及交付。无说明图片的真实原图兜底仍待接收验收。
+这次补齐了真实 Telegram 运行中补充及交付证据；首次请求分类失败仍单独保留，不将主模型兜底成功算作分类成功。`boundaries.jsonl`、`routing-decisions.json`、Durable 日志、`telegram-sends.jsonl` 和实际 CSV 可以相互核对原文、目标、消费及交付。
 
-本次增量记录提交时，第三轮测试轮询仍在运行等待图片，未收到新的照片 update；该状态不表示图片验收完成或轮询已关闭。验收者已通过 Bot 消息 566 通知用户发送无说明文字的照片，后续收到后须核对原图进入主请求、实际回答及发送回执，再正常关闭本轮轮询。
+提交 `2c0f892` 时轮询仍在等待图片。随后用户发送无 caption 照片消息 567，于 2026-10-16 23:03:35.980（北京时间）收到，完成以下核验：
+
+| 图片链路 | 真实证据 |
+| --- | --- |
+| 接收与路由 | Telegram update 无 caption；持久输入 `userText=""`，分类快照当前正文为空、`hasImages=true`，直接记录 `needs_visual` 兜底，没有将默认提示作为用户路由意图 |
+| 原附件与模型材料 | 下载 Telegram 提供的最大照片版本：JPEG，1280×853，128,926 字节。Durable 主模型输入 entry 28 保留空用户事件，默认提示单独标注“不是用户原话”；图片与下载后持久输入的 SHA-256 均为 `dffc19e38fdc4f1e369d221dee5dcd0e387d41208b9b6b70a665270c348b4946`，逐字节一致 |
+| 实际回答与交付 | 主模型 `ds` 实际视觉请求约 5,237 ms 完成，描述人物背影、百叶窗光影、床铺及相机等，与验收者独立查看附件相符；未将照片解释为 CSV 修改。结果消息 568 有 sent 回执 |
+| 正常收尾 | 核对交付后写入 `STOP`，测试进程正常退出（exit 0），核查原测试 PID 9072 已不存在，没有启动第二轮询器 |
+
+照片证据位于同目录 `photos.jsonl`、`photo-evidence.json`、`photo-567.jpg`、原始 update、Durable 记录、模型请求指标及发送回执。这里的附件一致性指 Telegram 实际交付的照片版本，不对 Telegram 上传前的文件作推断。真实原图兜底及本轮 Telegram 验收已完成；helper 孤儿进程的自动停止仍无成功证据，按前文保留 unknown 与人工清理限制。
 
 本次仅修改真实验收脚本及本文。脚本独立严格 TypeScript 检查通过；`npm run docs:check` 的 85 文档、320 本地链接通过，`git diff --check` 通过。下文 193 项全仓测试及构建结果适用于实现提交 `8370915`，本次未修改运行时代码，不重复计为新一轮全仓验证。
 
