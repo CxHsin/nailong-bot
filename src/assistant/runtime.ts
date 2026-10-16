@@ -418,7 +418,7 @@ export async function createAssistant(options: AssistantOptions) {
     },
     async resume(conversationId: string, batchId?: string) { await service.resume(conversationId, batchId); service.start(); },
     recordReply(conversationId: string, messageId: string, outputId: string) { state.recordReply(conversationId,messageId,outputId); },
-    routingStatus(conversationId: string) { return {model:options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
+    routingStatus(conversationId: string) { return {model:options.intent?.clef?.model ?? options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
     async waitForRouting() { await acceptance; while (routing.size) await Promise.all(routing.values()); },
     async waitForIdle() {
       await acceptance;

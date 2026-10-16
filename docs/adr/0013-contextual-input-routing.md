@@ -15,3 +15,5 @@ status: accepted
 ## 实现状态
 
 实现任务 [#216](https://github.com/CxHsin/nailong-bot/issues/216)–[#219](https://github.com/CxHsin/nailong-bot/issues/219) 在 development 实现独立分类、稳定目标与有序动作、持久调度、helper 控制及 Telegram 回复关联，退役用户 `/steer` 入口。当前验证与真实链路缺口见[路由验收记录](../contextual-input-routing-acceptance-20261016.md)，不由本 ADR 推导部署状态。未配置分类别名时保留原文兜底；原 Durable 目录兼容升级，不清空队列、补充或委派记录。
+
+2026-10-17，用户同意在既有入口中增加可选的 Clef 专用适配器（[#220](https://github.com/CxHsin/nailong-bot/issues/220)），不扩展通用聊天模型协议。专用模型只选择绑定真实目标的完整动作，程序继续检查候选完整性和执行状态。回复关系直接描述在候选中，明确指定其他目标时采用指定对象。不确定时澄清；复合消息无法由此接口提供有序原文片段，完整保留交主 Bot 处理。该取舍保留原模型别名路径的多动作能力，配置和限制见[操作说明](../personal-agent-operations.md)。
