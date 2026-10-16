@@ -2,6 +2,8 @@
 
 调查日期：2026-10-16。本文核对公开的一手产品页、API 文档和定价；没有注册、充值或发起带密钥的推理。范围是用户指定的 TypeSafe Jev 及其他公司的同类专用决策产品。
 
+后续：用户配置 Cloudflare 凭据后，2026-10-17 已完成 [Clef 与 Clef Flash 的真实中文 API 实测](clef-live-evaluation-2026-10-17.md)，该记录单独区分接口可用性、样本判断和生产接入状态。
+
 ## 结论
 
 用户提供的 Jev 属于读取状态、回答调用者定义的封闭问题、返回选项概率的专用决策模型。符合这一接口和产品定位、且已经找到公开托管 API 与注册入口的替代品包括 **Bespoke Labs Nimble、Perplexity Decider、Nace.AI Drex、Cloudflare Clef、Fastino GLiDE**。它们能够在请求中给定业务类别和候选任务，不必先训练固定类别分类器；这与只负责在几个 LLM 间选模型的路由服务不同。
