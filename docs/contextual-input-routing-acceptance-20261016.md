@@ -60,6 +60,29 @@ heartbeat PID 35000 由验收者按 PID、启动时间和命令行精确核验�
 
 完整报告和原始身份、发送、进程、清理证据位于 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-herdr-live-20261016/REPORT.md`。故障现场保留，共享 herdr 服务和其他 pane 保留。
 
+### 真实主 Bot 忙碌时的完整链路补测
+
+继续验收时，通过实际 `createAssistant.receive`、真实持久队列和 Durable，使用主模型 `ds`、独立分类别名 `gpt`（默认 8 秒）及真实 herdr，在专用 workspace `wP`、pane `wP:p1`、helper `routing-service-2247` 进行了两组输入。主模型实际调用 `herdr_watch` 登记 helper，并实际调用 `acceptance_hold` 保持主工具运行；没有替换模型或 herdr 响应。
+
+两组均未通过及时控制验收：首组补充在约 6.2 秒返回 `invalid_result`，第二组缩短原文并明确 `replyToInputId=register` 后仍在 8 秒超时；自然语言取消均返回 `invalid_result`。主工具保持期间没有 herdr prompt 发送回执或 `adoption.json`。原文均保留并排队，释放主工具后主模型如实说明尚未补充或停止，不能算作控制成功，也没有对未知发送盲目重试。
+
+两驱动正常关闭后，由验收者向该 helper 发送 Escape，再按保存的 PID、启动时间及命令行核对并清理 heartbeat PID 28688。独立检查确认进程消失、心跳文件 14,210 字节在两秒内不再增长；这是人工清理，不能作为应用取消成功。共享 herdr 服务和故障现场保留。完整输入、路由、真实模型指标、CLI 回执及清理证据见 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-service-herdr-live-20261016-224735/REPORT.md`。
+
+随后仅做一组 `ds` 分类对照，保持默认 8 秒及 1,024 输出 token，使用新目录和专用 workspace `wQ`、pane `wQ:p1`、helper `routing-ds-2255`，主模型仍为 `ds`。该别名此前已在 Telegram 运行中补充成功，故用于核对完整 helper 链路；没有修改生产配置或替换外部响应。
+
+| UTC 时间 | 真实效果 |
+| --- | --- |
+| 14:57:49.269 | 主模型已实际登记 helper，随后实际进入 `acceptance_hold`；收到明确回复登记输入的补充 |
+| 14:57:52.149 | 分类约 2,874 ms 返回有效 supplement，定位目标 `22e37749-760d-45aa-aec0-b3e61ed84114:0` |
+| 14:57:52.193 | 真实 herdr prompt 提交稳定动作 `30300c4f-40fa-4a31-9ec1-a77cab42f244:0`，只发送一次；此时仅确认 sent |
+| 14:58:02.258 | 独立读取 helper 实际写入的 `adoption.json`，动作、目标及原文匹配；主工具仍未释放。这补齐了真实主 Bot 忙碌时的及时转交与实际采纳证据 |
+| 14:58:04.813 | 新收到的自然语言取消约 2,550 ms 返回有效 cancel；14:58:06.184 真实 Escape 及进程核验后如实返回 unknown |
+| 14:58:12.830 | 最后才释放主工具，后续主模型核实心跳子进程仍在运行，没有报告已停止 |
+
+本组登记输入分类因 HTTP 200 响应 `finish_reason=length`、内容为空而兜底，1,024 输出 token 被推理耗尽；无关慢请求分类的 JSON 含 request 不允许的 `target:""`、`candidates:[]`，整体校验拒绝并保留原文。临时驱动记录了实际响应正文和状态，没有保存凭据或请求头。这些属于模型输出协议失败，不能算全部分类成功，也不由此推导总体准确率。
+
+应用取消未能确认孤儿心跳停止，验收者按 PID、启动时间和命令行精确核对后清理 PID 15000；进程消失、心跳文件 3,850 字节两秒稳定。人工清理仍不算自动停止成功。驱动正常关闭，共享服务保留。完整报告、模型响应、真实投递、采纳文件和清理证据见 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-service-ds-live-20261016-225545/REPORT.md`；前两组失败记录保留，不继续重复试跑。
+
 ## Telegram 与交付检查
 
 用户明确授权后，使用[真实验收脚本](../scripts/acceptance/routing-telegram-live.ts)接管 `@NibHsinBot` 测试轮询，数据保存在独立临时目录。首次测试中模型混用 Git Bash `/tmp` 与 Windows 路径，文件发送失败后搜索文件系统；已停止该进程，保留现场，并在验收提示中明确相对文件路径后重新运行。未改动生产数据或 `.env`。
@@ -74,7 +97,23 @@ heartbeat PID 35000 由验收者按 PID、启动时间和命令行精确核验�
 | 分类失败兜底 | 前两次输入记录 `classifier_error` 后完整交主 Bot；第三次回复定位成功。没有自动执行错误控制。不能将前两次主 Bot 完成请求算作分类成功 |
 | 无说明图片 | 本轮未收到图片，真实原图兜底尚待验收；受控 bridge 测试已覆盖 |
 
-证据包含 `inputs.jsonl`、`routing.jsonl`、持久路由决定、`outputs.jsonl`、`requests.jsonl`、`telegram-sends.jsonl` 及实际文件。写入 `STOP` 后正常关闭轮询，已确认测试 Node 进程退出。真实运行中补充、原图兜底，以及真实主 Bot 忙碌时的 helper 控制仍未完成，不能由受控测试替代。
+证据包含 `inputs.jsonl`、`routing.jsonl`、持久路由决定、`outputs.jsonl`、`requests.jsonl`、`telegram-sends.jsonl` 及实际文件。第二轮写入 `STOP` 后正常关闭轮询，已确认测试 Node 进程退出。
+
+### 第三轮：运行中补充
+
+用户继续授权真实评测后，在独立目录 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-telegram-live-20261016-r3/` 运行相同主模型与分类别名 `ds`，分类仍采用默认 8 秒超时。验收工具最多保持 90 秒，进入真实工具边界时由 Bot 通知用户；外部 `RELEASE` 文件只用于在确认补充已提交后释放工具，不替代实际分类或补充消费。
+
+| 真实消息及行为 | 结果与证据 |
+| --- | --- |
+| 561：生成 `live-report.md` 并先等待 | 14:48:41.990Z 收到；初次分类 `classifier_error`，原文安全兜底。实际报表工具 14:48:52.674Z 进入等待 |
+| 562：改 CSV，文件名 `live-report.csv` | 14:48:52.787Z 收到，原工具仍在运行；真实分类得到 supplement，定位消息 561 的稳定目标。动作 `6fff3b80-2e55-438e-b589-ff301d546fc4:0` 提交至 Durable submission 15，补充消费记录最终为 handled |
+| 工具正常结束后交付 | 14:49:34.823Z 原工具正常退出，没有因普通补充被中断；首次写入即为 `live-report.csv`，未生成旧版 Markdown。文件含月份与销售额两列、12000 和 15000 两行数据；文件消息 564、结果消息 565 均有 sent 回执 |
+
+这次补齐了真实 Telegram 运行中补充及交付证据；首次请求分类失败仍单独保留，不将主模型兜底成功算作分类成功。`boundaries.jsonl`、`routing-decisions.json`、Durable 日志、`telegram-sends.jsonl` 和实际 CSV 可以相互核对原文、目标、消费及交付。无说明图片的真实原图兜底仍待接收验收。
+
+本次增量记录提交时，第三轮测试轮询仍在运行等待图片，未收到新的照片 update；该状态不表示图片验收完成或轮询已关闭。验收者已通过 Bot 消息 566 通知用户发送无说明文字的照片，后续收到后须核对原图进入主请求、实际回答及发送回执，再正常关闭本轮轮询。
+
+本次仅修改真实验收脚本及本文。脚本独立严格 TypeScript 检查通过；`npm run docs:check` 的 85 文档、320 本地链接通过，`git diff --check` 通过。下文 193 项全仓测试及构建结果适用于实现提交 `8370915`，本次未修改运行时代码，不重复计为新一轮全仓验证。
 
 ## 最终本地验证
 
