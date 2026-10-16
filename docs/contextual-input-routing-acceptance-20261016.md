@@ -102,6 +102,14 @@ heartbeat PID 35000 由验收者按 PID、启动时间和命令行精确核验�
 
 完整报告及实际父链、CLI、进程、活动和无关对照证据位于 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-foreground-live-20261016-230908/REPORT.md`，主会话收尾见 `controller-cleanup.json`。本次未修改运行时代码或生产配置，共享服务和未知状态的 pane 现场保留。
 
+### 用户指出后的退出与 workspace 收尾
+
+用户指出 workspace 累积及 `/exit` 退出方式后，重新核对 [herdr 工作流第 4 节](../.agents/skills/herdr-workflow/SKILL.md)：保存成果及证据后应关闭本任务 pane/workspace。此前任务进程已核验并清理，仍以保留故障现场为由持续保留四个测试 workspace，属于验收收尾不完整；保留日志不要求持续占用活动 workspace。
+
+向仍处于空闲状态的三个 Codex helper 输入 `/exit` 并实际提交后，终端回到 Shell，原 Codex PID 22916、31480、6572 均消失，`herdr agent list` 为空。随后关闭本轮专用 workspace `wN`、`wP`、`wQ`、`wR`，回执均成功；最终 workspace 列表仅余原项目 `wB`（nailong bot），共享服务 running/compatible。日志、会话恢复标识和成果仍保存在原临时目录，退出及关闭证据另存 `C:/Users/Cx/AppData/Local/Temp/nailong-routing-workspace-cleanup-20261016/`。
+
+此前测试的是 Escape 中断轮次，没有测试 `/exit` 对仍在运行的脱离父链任务的影响。因此旧孤儿结果不能推出 `/exit` 也无法清理，更不能把中断轮次与结束整个 helper 混为同一失败。当前实测证明 `/exit` 能正常退出这三个 helper；该步骤发生时测试后台任务已清理，不额外宣称证明了任意 detached 子进程的退出。后续整项 helper 结束优先正常退出并关闭 workspace，单轮取消保留其独立语义，不为本轮收尾新增通用进程追踪系统。
+
 ## Telegram 与交付检查
 
 用户明确授权后，使用[真实验收脚本](../scripts/acceptance/routing-telegram-live.ts)接管 `@NibHsinBot` 测试轮询，数据保存在独立临时目录。首次测试中模型混用 Git Bash `/tmp` 与 Windows 路径，文件发送失败后搜索文件系统；已停止该进程，保留现场，并在验收提示中明确相对文件路径后重新运行。未改动生产数据或 `.env`。
