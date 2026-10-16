@@ -48,7 +48,7 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 These terms follow the [confirmed specification](https://github.com/CxHsin/nailong-bot/issues/201) and [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md). Equal-priority direct inputs wait in arrival order; ordinary input does not implicitly steer current work. Implementation verification belongs in the acceptance record, not in these definitions.
 
-Input handling is being redesigned in the [intent routing discussion](docs/research/intent-aware-input-routing-2026-10-16.md). The user has confirmed contextual Work Supplements and retirement of `/steer`; the runtime still follows the explicit steering contract below until the new design is implemented and verified.
+Input handling has a confirmed replacement design in [ADR-0013](docs/adr/0013-contextual-input-routing.md) and [conclusion #214](https://github.com/CxHsin/nailong-bot/issues/214): contextual Work Supplements and retirement of `/steer`. The runtime still follows the explicit steering contract below until the new design is implemented and verified.
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
@@ -66,7 +66,7 @@ Input handling is being redesigned in the [intent routing discussion](docs/resea
 
 **Paused Work**: A retained Processing Turn awaiting explicit user continuation or verification of an unknown effect. Restart preserves this state; `/resume` explicitly requests continuation within the same Conversation.
 
-## Input intent vocabulary under discussion
+## Input intent vocabulary for the accepted replacement design
 
 **Input Intent**: The user's meaning in an Input Event, interpreted with the relevant ongoing work and conversation context. It includes whether the message supplements existing work, requests separate work, or cancels identified work.
 
