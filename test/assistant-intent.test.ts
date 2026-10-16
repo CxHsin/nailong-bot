@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import { createIntentClassifier } from "../src/assistant/intent.js";
 import type { ModelConfiguration } from "../src/agent/model-config.js";
+import { estimateInput } from "../src/context/input-budget.js";
 
 async function provider(reply: (wire: Record<string, any>, response: ServerResponse) => void) {
   const requests: Record<string, any>[] = [];
@@ -33,6 +34,7 @@ test("classifier uses its configured alias with a tool-free nonstream request an
     assert.equal(f.requests.length, 1); assert.equal(f.requests[0]!.model, "fast");
     assert.equal(f.requests[0]!.stream, false); assert.equal(f.requests[0]!.tools, undefined);
     assert.equal(f.requests[0]!.max_tokens, 1024);
+    assert.equal(f.requests[0]!.response_format, undefined); assert.equal(f.requests[0]!.chat_template_kwargs, undefined);
     assert.match(JSON.stringify(f.requests[0]!.messages), /make a report/);
   } finally { await f.close(); }
 });
@@ -46,6 +48,8 @@ test("an invalid action invalidates the whole decision before any control is exp
     { actions: [{ kind: "clarify", text: "cancel report", candidates: ["invented"] }] },
     { actions: [{ kind: "request", text: "report" }, { kind: "cancel", target: "report", text: "cancel" }] },
     { actions: [{ kind: "cancel", target: "report", text: "cancel" }, { kind: "cancel", target: "report", text: "cancel" }] },
+    { actions: [{ kind: "request", target: "report", text: "cancel report" }] },
+    { actions: [{ kind: "supplement", target: "report", candidates: ["report"], text: "cancel report" }] },
   ];
   for (const decision of invalid) {
     const f = await provider((_wire, response) => complete(response, decision));
@@ -54,6 +58,70 @@ test("an invalid action invalidates the whole decision before any control is exp
       assert.deepEqual(result.actions, []); assert.equal(result.reason, "invalid_result");
     } finally { await f.close(); }
   }
+});
+
+test("Cloudflare routing sends model-specific thinking controls and strict action shapes on the actual wire", async () => {
+  const f = await provider((_wire, response) => complete(response, { actions: [{ kind: "request", text: "hello" }], reason: "" }));
+  const originalFetch = globalThis.fetch;
+  const local = f.configuration.models[1]!.baseUrl;
+  globalThis.fetch = (_url, init) => originalFetch(`${local}/chat/completions`, init);
+  try {
+    for (const model of ["@cf/qwen/qwen3-30b-a3b-fp8", "@cf/zai-org/glm-4.7-flash"]) {
+      const configuration = { ...f.configuration, models: [{ ...f.configuration.models[1]!, model, reasoning: true, baseUrl: "https://api.cloudflare.com/client/v4/accounts/fixture/ai/v1/" }] };
+      const result = await createIntentClassifier(configuration, { model: "fast" }).classify({ input: { conversationId: "one", inputId: "new", text: "hello" }, works: [], recent: [] });
+      assert.equal(result.actions[0]?.kind, "request");
+      const wire = f.requests.at(-1)!;
+      assert.equal(wire.reasoning_effort, undefined); assert.equal(wire.stream, false); assert.equal(wire.tools, undefined);
+      assert.equal(wire.response_format.type, "json_schema"); assert.equal(wire.response_format.json_schema.strict, true);
+      const schema = wire.response_format.json_schema.schema;
+      assert.equal(schema.additionalProperties, false);
+      const shapes = schema.properties.actions.items.anyOf;
+      assert.deepEqual(shapes.map((shape: any) => shape.required), [["kind", "text"], ["kind", "text", "target"], ["kind", "text", "candidates"]]);
+      assert.ok(shapes.every((shape: any) => shape.additionalProperties === false));
+      const content = wire.messages[1].content as string;
+      if (model.includes("qwen")) {
+        assert.equal(wire.chat_template_kwargs, undefined); assert.ok(content.endsWith("\n/no_think"));
+        assert.equal(JSON.parse(content.slice(0, -"\n/no_think".length)).current.text, "hello");
+      } else {
+        assert.deepEqual(wire.chat_template_kwargs, { enable_thinking: false }); assert.equal(JSON.parse(content).current.text, "hello");
+      }
+    }
+    const otherEndpoint = { ...f.configuration, models: [{ ...f.configuration.models[1]!, model: "@cf/qwen/qwen3-30b-a3b-fp8", reasoning: true }] };
+    await createIntentClassifier(otherEndpoint, { model: "fast" }).classify({ input: { conversationId: "one", inputId: "new", text: "hello" }, works: [], recent: [] });
+    const wire = f.requests.at(-1)!;
+    assert.equal(wire.response_format, undefined); assert.equal(wire.reasoning_effort, "low");
+    assert.equal(JSON.parse(wire.messages[1].content).current.text, "hello");
+  } finally { globalThis.fetch = originalFetch; await f.close(); }
+});
+
+test("Cloudflare schema overhead is charged to the input budget before sending a request", async () => {
+  const f = await provider((_wire, response) => complete(response, { actions: [{ kind: "request", text: "hello" }], reason: "" }));
+  const originalFetch = globalThis.fetch;
+  const local = f.configuration.models[1]!.baseUrl;
+  globalThis.fetch = (_url, init) => originalFetch(`${local}/chat/completions`, init);
+  const configuration = { ...f.configuration, models: [{ ...f.configuration.models[1]!, model: "@cf/qwen/qwen3-30b-a3b-fp8", baseUrl: "https://api.cloudflare.com/client/v4/accounts/fixture/ai/v1" }] };
+  const request = { input: { conversationId: "one", inputId: "new", text: "hello" }, works: [], recent: [] };
+  try {
+    await createIntentClassifier(configuration, { model: "fast" }).classify(request);
+    const wire = f.requests[0]!;
+    const promptTokens = estimateInput({ systemPrompt: wire.messages[0].content, messages: [{ role: "user", content: wire.messages[1].content, timestamp: 0 }] });
+    const inputTokens = promptTokens + 4;
+    const rejected = await createIntentClassifier(configuration, { model: "fast", inputTokens }).classify(request);
+    assert.equal(rejected.reason, "input_budget"); assert.equal(f.requests.length, 1);
+    const ordinary = await createIntentClassifier(f.configuration, { model: "fast", inputTokens }).classify(request);
+    assert.equal(ordinary.actions[0]?.kind, "request"); assert.equal(f.requests.length, 2);
+  } finally { globalThis.fetch = originalFetch; await f.close(); }
+});
+
+test("reasoning-only JSON cannot become a control decision", async () => {
+  const f = await provider((_wire, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ finish_reason: "stop", message: { role: "assistant", content: null, reasoning: '{"actions":[{"kind":"cancel","text":"cancel","target":"report"}]}' } }] }));
+  });
+  try {
+    const result = await createIntentClassifier(f.configuration, { model: "fast" }).classify({ input: { conversationId: "one", inputId: "new", text: "cancel" }, works: [{ id: "report", summary: "report", status: "queued" }], recent: [] });
+    assert.deepEqual(result.actions, []); assert.equal(result.reason, "invalid_result");
+  } finally { await f.close(); }
 });
 
 test("the input budget preserves current text and reply identities while marking omitted candidates", async () => {

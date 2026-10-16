@@ -43,6 +43,8 @@
 
 Cloudflare 通用文本模型可通过现有 `openai-completions` 模型别名接入，base URL 为 `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1`，使用 Workers AI Token 和完整模型名。专用 Clef 入口已按用户要求删除，分类配置恢复为通用模型别名；历史结论见[旧评测](research/clef-joint-routing-evaluation-2026-10-17.md)。通用模型的合成 API 评测入口为 `scripts/acceptance/cloudflare-routing-live.ts`，读取已有 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`，不启动 Bot 或更改运行配置。
 
+分类器对上述官方 Cloudflare 端点的 `@cf/qwen/qwen3-30b-a3b-fp8` 和 `@cf/zai-org/glm-4.7-flash` 请求 JSON Schema 输出，分别约束 request、supplement/cancel、clarify 的字段，并把 Schema 和额外提示计入输入预算。Qwen 在快照之后附加官方软开关 `/no_think`；GLM 发送 `chat_template_kwargs.enable_thinking=false`。这两条分类路径不使用 `reasoning_effort`。Qwen 的硬开关会使本次实测的 Cloudflare 正文为空，故不使用；不从 reasoning 字段提取控制动作。其他模型/端点沿用原协议参数。结构化输出仍需通过原文跨度、可见目标及候选完整性校验；不保证模型选择的目标语义正确，实测局限见[调用修复评测](research/cloudflare-routing-controls-evaluation-2026-10-17.md)。
+
 Telegram 原消息和发送回执关联回复目标；一条回复对应多个目标时保留全部候选。图片无真实说明文字时直接兜底，保留原图；默认图片提示不充当用户意图。歧义、超时、预算不足或无效结果通过独立运行时材料告知主助手，原话及身份保留。
 
 应用接口 `routingStatus(conversationId)` 可查看分类别名、待处理路由及工作身份/进度。`queue.sqlite` 保存原输入、快照来源、决定及动作进度；`assistant.sqlite` 保存补充提交、helper 控制证据和回复关联。未知 helper 发送不自动重发，CLI 接受不表示已采纳；helper 控制按真实身份分别推进，不等待主助手无关工具。
