@@ -26,4 +26,6 @@ Input acceptance is deduplicated before model execution. A crash after acceptanc
 
 ## Implementation and evidence
 
+2026-10-17: [ADR-0014](0014-retire-legacy-code-and-data.md) retires the remaining old offline diagnostics and helper identity import. The following records retain their original baseline; current recovery uses only the active Assistant Service data.
+
 Historical entries at the verified baseline: [Telegram](https://github.com/CxHsin/nailong-bot/blob/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/main.ts), [CLI](https://github.com/CxHsin/nailong-bot/blob/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/cli/main.ts); service [runtime](https://github.com/CxHsin/nailong-bot/blob/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/assistant/runtime.ts), [bridge](https://github.com/CxHsin/nailong-bot/blob/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/assistant/herdr.ts), [channel](https://github.com/CxHsin/nailong-bot/blob/769249cf6e8c08aa5c3d2b257df1fbf870c301e1/src/assistant/telegram.ts). Retired online Host code and protocol-specific tests were removed; offline historical diagnostics remain separate. [Native Session acceptance](../pi-assistant-acceptance-20261014.md) retains its actual test results and real-model limitations.

@@ -9,15 +9,13 @@
   "scripts": {
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "docs:check": "node scripts/check-doc-links.mjs",
-    "run:diagnose": "node --import tsx src/cli/diagnose-run.ts",
-    "context:diagnose": "node --import tsx src/cli/diagnose-context.ts",
     "start": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "agent": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "chat": "node --env-file-if-exists=.env --import tsx src/cli/main.ts chat",
     "send": "node --env-file-if-exists=.env --import tsx src/cli/main.ts send",
-    "migrate": "node --env-file-if-exists=.env --import tsx src/cli/migrate-runtime.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
+    "prebuild": "node scripts/clean-build.mjs",
     "build": "tsc && node scripts/write-build-info.mjs"
   },
   "dependencies": {

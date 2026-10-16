@@ -1,3 +1,5 @@
+> 2026-10-17 退役补注：旧源码链接已固定到核对过的历史提交；旧实现与离线工具按 [ADR-0014](adr/0014-retire-legacy-code-and-data.md)退役。本文保留当时结论，现役行为见[操作说明](personal-agent-operations.md)。
+
 > 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
 
 # Personal Agent 首轮落地核验与改动计划
@@ -18,7 +20,7 @@
 
 安装的 pi-ai/pi-coding-agent 为 0.73.1。pi-ai 的消息类型没有原生搜索块、工具引用或 deferred 标记；OpenAI provider 把工具映射为普通 function，Anthropic provider 未传 defer_loading，二者均不能完整保存原生发现响应。请求补丁不足以解决解析和历史重放。
 
-本项目 [model-config.ts](../src/agent/model-config.ts) 已有 toolSearch/nativeToolSearch 配置，[agent-models.ts](../src/agent/agent-models.ts) 返回 native 标记，但 [personal/pi.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts) 的会话创建没有落实原生搜索适配；不能把配置存在视为功能支持。
+本项目 [model-config.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/agent/model-config.ts) 已有 toolSearch/nativeToolSearch 配置，[agent-models.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/agent/agent-models.ts) 返回 native 标记，但 [personal/pi.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/pi.ts) 的会话创建没有落实原生搜索适配；不能把配置存在视为功能支持。
 
 方案：在自定义 provider/stream 边界实现请求、流式解析和历史转换，保留 Pi agent loop。预注册当前工作可用的工具执行目录；provider 单独控制模型常驻定义及 deferred 目录。服务端搜索事件不作为普通本地工具调用执行；客户端搜索进入本地受控发现处理。工具实际派发始终检查工作身份、定义版本和授权。
 

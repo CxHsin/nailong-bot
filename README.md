@@ -25,12 +25,12 @@ Telegram 仅接收配置主人的私聊，支持文字、图片、Markdown 富�
 
 `ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`，`ASSISTANT_WORK_DIR` 默认启动目录，`AGENT_PROMPT_FILE` 默认 `system-prompt.md`。会话重开沿用原工作目录。同一数据目录同时只允许一个进程；跨 CLI/Telegram 续聊须先停止前一进程。
 
-使用独立执行数据空间，不导入旧会话历史、摘要、工具轨迹、Task 或 Akasha，旧文件不自动删除。切换前先停止旧入口；配置与凭据继续使用，已派发帮手按真实身份核对。接收确认前保存完整输入与材料，意外重启续接已保存的批次和执行进度；明确暂停的工作需 `/resume` 继续。`/reset` 清理主上下文，保留排队输入、进度与委派，不等于取消工作。
+使用独立执行数据空间，不导入旧会话历史、摘要、工具轨迹、Task 或 Akasha。旧实现、离线工具及 helper 导入按 [ADR-0014](docs/adr/0014-retire-legacy-code-and-data.md)退役，遗留数据由一次性维护清理，启动不自动删除资料。现役 helper 按已登记的真实身份接回。接收确认前保存完整输入与材料，意外重启续接已保存的批次和执行进度；明确暂停的工作需 `/resume` 继续。`/reset` 清理主上下文，保留排队输入、进度与委派，不等于取消工作。
 
 临时模型故障最多重试 3 次（含首次共 4 次），基础等待 2 秒，仅执行器负责重试。耗尽后保留进度并暂停，其他输入仍可处理。未知外部效果先核实，无法确认时暂停询问；停止、抢占和重置不会回滚已有影响。
 
-文件与 Shell 继承启动账户权限，工作目录不是沙箱。用户和项目指令继续约束行动；发布、外发、重要删除及合并须有对应授权。主路径移除 Host 权限参数和通用成果结算表单。能力配置见 [能力说明](docs/capabilities.md)。主动能力、服务器、多 bot 和 Akasha 接入暂不实现。
+文件与 Shell 继承启动账户权限，工作目录不是沙箱。用户和项目指令继续约束行动；发布、外发、重要删除及合并须有对应授权。主路径移除 Host 权限参数和通用成果结算表单。能力配置见 [能力说明](docs/capabilities.md)。共享长期记忆和 Akasha 原文召回遵循 [ADR-0012](docs/adr/0012-layered-memory-and-stable-context.md)；主动连接器、服务器和多 bot 仍在范围外。
 
 ## 验证
 
-`src/assistant/` 为当前服务，正式入口是 `src/main.ts` 与 `src/cli/main.ts`。执行 `npm run typecheck`、`npm test`、`npm run build`、`npm run docs:check`；当前接入回归为 `test/assistant-*.test.ts`。历史实验保留当时证据，不代表新版保证；离线诊断命令仍只处理旧日志，不接入主助手。
+`src/assistant/` 为当前服务，正式入口是 `src/main.ts` 与 `src/cli/main.ts`。执行 `npm run typecheck`、`npm test`、`npm run build`、`npm run docs:check`；当前接入回归为 `test/assistant-*.test.ts`。旧日志诊断与迁移命令已退役；历史实验保留当时证据，不代表新版保证。

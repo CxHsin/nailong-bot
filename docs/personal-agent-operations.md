@@ -12,11 +12,11 @@
 
 ## 数据与会话
 
-`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`。显式配置可覆盖，但须使用独立新执行空间；启动检查拒绝把旧 Session 目录当作新空间。不要把它指向 `data/pi-assistant-v1` 或旧 Host 目录。配置、模型端点与凭据接入继续沿用，不导入旧历史、摘要、工具轨迹、Akasha 或 Task，不删除旧目录或成果。
+`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`。显式配置可覆盖，但须使用独立执行空间；启动检查拒绝把旧 Session 目录当作新空间。配置、模型端点与凭据接入继续沿用，不导入旧历史、摘要、工具轨迹、Akasha 或 Task。[ADR-0014](adr/0014-retire-legacy-code-and-data.md)结束旧实现和旧离线工具的支持，遗留数据由明确的一次性维护清理；普通启动不自动删除资料。
 
 新空间分别保存完整输入与固定批次、主执行记录、会话控制与帮手材料，以及通道发送回执。已有外部 herdr 委派须保留并核对真实身份，不能因新会话没有历史就重新派发。工作目录由 `ASSISTANT_WORK_DIR` 指定，默认启动目录，重开会话沿用原目录；`AGENT_PROMPT_FILE` 默认 `system-prompt.md`，`AGENT_SHELL_PATH` 可指定 shell。工作目录与执行数据空间各自独立。
 
-`ASSISTANT_LEGACY_DATA_DIR` 默认 `data/pi-assistant-v1`，只读查找旧会话中的 helper 身份并登记到新空间，不导入对话历史，也不修改旧目录。旧记录损坏时先修正记录再启动。
+旧 Pi helper 身份导入及其配置已退役。现役空间中已登记的 helper 继续按原身份接回，启动无需旧会话目录；不能因旧目录不存在而重新派发外部工作。
 
 新目录中，`queue.sqlite` 保存事件、批次及内部结果，`queue-owner.sqlite` 用于单服务独占，`assistant.sqlite` 保存会话控制、帮手身份和输出交付记录；各会话的 Durable 步骤位于 `executions/<会话标识的 SHA-256>/session.sqlite`，Telegram 发送回执位于 `telegram-sends.jsonl`。备份时停止服务并保留整个数据目录。
 
@@ -63,7 +63,7 @@ herdr-workflow 负责派发、确认接收、转交要求、停止和独立成�
 
 重试耗尽后保留进度、暂停并通知一次，等待明确继续，其他输入仍可处理。重启保持主动暂停或待核实状态。工具与业务错误交回模型判断，不机械重试任意 Shell。外部操作结果不明时先核实：确认完成则采用结果，确认未执行才执行，无法确认则暂停询问。停止、抢占、重置都不能撤销已有影响。
 
-cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围外。`run:diagnose`、`context:diagnose` 和旧 `migrate` 为旧日志离线工具，不能用于恢复新版执行。历史验收只适用于其记录的基准，进程强杀证据不能推导断电持久性或跨系统 exactly-once。
+cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围外。旧 `run:diagnose`、`context:diagnose` 和 `migrate` 命令已退役，当前工作根据现役队列、Durable 与助手记录恢复。历史验收只适用于其记录的基准，进程强杀证据不能推导断电持久性或跨系统 exactly-once。
 
 ## 上下文与长期记忆
 

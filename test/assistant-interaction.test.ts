@@ -75,7 +75,7 @@ test("new durable execution ignores old history and memory databases without del
   const seen:string[]=[];
   const f=await assistantFixture((wire,response)=>{seen.push(JSON.stringify(wire.messages));sendChatCompletion(response,"fresh reply");},async(directory)=>{
     await mkdir(join(directory,"legacy"),{recursive:true});await writeFile(join(directory,"legacy","personal.sqlite"),"LEGACY_SECRET");
-    await writeFile(join(directory,"legacy","personal-memory.sqlite"),"LEGACY_SECRET");return {legacyDataDir:join(directory,"legacy")};
+    await writeFile(join(directory,"legacy","personal-memory.sqlite"),"LEGACY_SECRET");return {};
   });
   try{
     await f.app.receive({conversationId:"one",inputId:"1",text:"new input"});await f.app.waitForIdle();

@@ -28,6 +28,8 @@ nailong 保留未运行事件，每次只向 Harness 提交当前轮次，避免
 
 ## 实现与当前验证
 
+2026-10-17，旧离线诊断、旧日志迁移和旧 Pi helper 身份导入按 [ADR-0014](0014-retire-legacy-code-and-data.md)退役。当前空间中已登记的 helper 继续按原身份恢复；启动不再读取旧会话目录。下文迁移过程与原验收保留当时背景。
+
 正式入口保留 [Telegram](../../src/main.ts) 与 [CLI](../../src/cli/main.ts)，由 [Assistant Service](../../src/assistant/runtime.ts) 连接应用队列与 Durable 执行器，替代旧原生 Session 注册路径。默认执行空间为 `data/pi-durable-v1`；显式指定的目录也须与旧 Session 数据区分，不导入历史、摘要或工具轨迹。旧外部委派按真实身份衔接，不伪造为 Durable 已执行步骤。
 
 模型临时故障默认最多重试 3 次，含首次共 4 次请求，基础等待 2 秒，仅由执行器一层负责。`/resume [批次ID]` 明确继续本会话暂停的工作，省略 ID 时选择本会话全部暂停项；重启不绕过暂停。`/reset` 保留事件、进度和委派，普通消息排队与显式 `/steer` 各自遵循上述边界。

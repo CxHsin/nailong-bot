@@ -21,7 +21,6 @@ export type AssistantOutput = { conversationId: string; outputId?: string } & (
 export type AssistantOptions = {
   cwd?: string;
   dataDir: string;
-  legacyDataDir?: string;
   prompt?: string;
   modelConfiguration: ModelConfiguration;
   intent?: IntentOptions;
@@ -203,7 +202,6 @@ export async function createAssistant(options: AssistantOptions) {
   try {
     service = await createQueuedAssistant({ dataDir, startPaused: true, reportFailure: report,
       executor: { execute, close: () => executor.close() } });
-    await state.importHelpers(options.legacyDataDir);
     service.subscribe(emit);
   } catch (error) {
     try { if (service) await service.close(); else await executor.close(); }

@@ -42,7 +42,7 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 **Default Forgetting**: Retracts derived memories and excludes the corresponding original sources and their derivatives from automatic recall and learning. Unrelated work progress remains available. Original records remain; physical deletion is a separate request.
 
-**Historical Host / Task / Attempt / Akasha / Plan**: Retired implementations retained in older documentation and offline diagnostics. Production memory uses a new namespace and never imports their records. Proactive responsibilities and timers are deferred.
+**Historical Host / Task / Attempt / Akasha / Plan**: Retired systems recorded in historical documentation and versioned source. Their implementations, offline tools and old helper import are retired under [ADR-0014](docs/adr/0014-retire-legacy-code-and-data.md). Production memory uses its own namespace and never imports their records. Proactive responsibilities and timers are deferred.
 
 ## Queue and workflow
 

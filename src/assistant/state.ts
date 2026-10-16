@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, access, readdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { HelperRecord } from "./herdr.js";
 import type { QueueInput } from "./queue.js";
@@ -28,8 +28,7 @@ export class AssistantState {
       CREATE TABLE IF NOT EXISTS outputs(id TEXT PRIMARY KEY,status TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS helper_controls(conversation TEXT NOT NULL,id TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(conversation,id));
       CREATE TABLE IF NOT EXISTS output_targets(conversation TEXT NOT NULL,id TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(conversation,id));
-      CREATE TABLE IF NOT EXISTS reply_targets(conversation TEXT NOT NULL,message TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(conversation,message));
-      CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS reply_targets(conversation TEXT NOT NULL,message TEXT NOT NULL,targets TEXT NOT NULL,PRIMARY KEY(conversation,message));`);
   }
   conversation(id: string, cwd: string) {
     this.db.prepare("INSERT OR IGNORE INTO conversations VALUES(?,?)").run(id, cwd);
@@ -88,30 +87,6 @@ export class AssistantState {
   finishOutput(id: string, status: "sent" | "unknown") {
     this.db.prepare("UPDATE outputs SET status=? WHERE id=?").run(status,id);
   }
-  async importHelpers(legacyDir?: string) {
-    if (!legacyDir) return;
-    const source = resolve(legacyDir);
-    const marker = `helpers-imported:${source}`;
-    if (this.db.prepare("SELECT value FROM metadata WHERE key=?").get(marker)) return;
-    let index: {version: number; conversations: Array<{id:string;cwd:string}>};
-    try { index = JSON.parse(await readFile(join(source, "conversations.json"), "utf8")); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
-    if (index.version !== 1 || !Array.isArray(index.conversations)) throw new Error("旧帮手索引损坏；先核对旧目录");
-    for (const item of index.conversations) {
-      const hash = createHash("sha256").update(item.id).digest("hex");
-      let saved: {version:number;helpers:HelperRecord[]};
-      try { saved = JSON.parse(await readFile(join(source, "sessions", hash, "helpers.json"), "utf8")); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
-      if (saved.version !== 1 || !Array.isArray(saved.helpers)) throw new Error("旧帮手记录损坏；先核对原委派");
-      this.conversation(item.id, item.cwd);
-      const existing = this.helpers(item.id);
-      for (const helper of saved.helpers) {
-        if (!existing.some((known) => known.id === helper.id)) existing.push({ ...helper, notice: undefined });
-      }
-      this.saveHelpers(item.id, existing);
-    }
-    this.db.prepare("INSERT OR REPLACE INTO metadata VALUES(?,?)").run(marker, "1");
-  }
   close() { this.db.close(); }
 }
 
@@ -127,7 +102,7 @@ export async function requireFreshNamespace(dataDir: string) {
       if (entry.isDirectory() && await exists(join(sessions,entry.name,"session.json"))) oldNamespace = true;
     }
   }
-  if (oldNamespace) throw new Error("该目录属于旧 Pi 会话；请把 ASSISTANT_DATA_DIR 指向独立新目录。旧历史不会导入，委派身份可通过 ASSISTANT_LEGACY_DATA_DIR 读回。");
+  if (oldNamespace) throw new Error("该目录属于旧 Pi 会话；请把 ASSISTANT_DATA_DIR 指向独立新目录。");
 }
 
 export function steerKey(input: QueueInput) {

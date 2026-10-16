@@ -56,7 +56,6 @@ export async function assistantEnvironment(
     const app = await createAssistant({
       ...contextConfig,
       dataDir,
-      legacyDataDir: resolve(env.ASSISTANT_LEGACY_DATA_DIR?.trim() || "data/pi-assistant-v1"),
       cwd,
       modelConfiguration: modelEnvironment(env),
       intent: intentEnvironment(env),

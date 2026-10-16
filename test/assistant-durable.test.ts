@@ -67,7 +67,11 @@ test("steering is durably identified, reaches a supported boundary, and keeps dr
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const f = await fixture(async (body, response) => {
     requests.push(body);
-    if (requests.length === 1) { entered(); await gate; sendChatCompletion(response, "first answer"); }
+    if (requests.length === 1) {
+      entered(); await gate;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: "PRIVATE_REASONING_PREVIEW", content: "first answer" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+    }
     else sendChatCompletion(response, "supplement handled");
   });
   const previews: any[] = [];
@@ -86,6 +90,7 @@ test("steering is durably identified, reaches a supported boundary, and keeps dr
     assert.match(JSON.stringify(requests[1].messages), /explicit supplement/);
     assert.deepEqual(outputs.map((output) => output.text), ["first answer", "supplement handled"]);
     assert.ok(previews.some((preview) => preview.text === "first answer"));
+    assert.doesNotMatch(JSON.stringify(previews), /PRIVATE_REASONING_PREVIEW/);
   } finally { release(); await executor.close(); await f.close(); }
 });
 
@@ -93,30 +98,37 @@ test("a completed external tool result is reused across retry exhaustion and exp
   let effects = 0;
   let requests = 0;
   let continueNow = false;
+  const previews: Array<{ text?: string }> = [];
   const f = await fixture((body, response) => {
     requests++;
     if (!JSON.stringify(body.messages).includes("effect-confirmed-42")) sendChatCompletion(response, "", [
-      { index: 0, id: "confirmed-effect", type: "function", function: { name: "create_effect", arguments: "{}" } },
+      { index: 0, id: "confirmed-effect", type: "function", function: { name: "create_effect", arguments: '{"note":"PRIVATE_TOOL_ARGUMENT_PREVIEW"}' } },
     ]);
     else if (!continueNow) { response.writeHead(503); response.end("temporarily unavailable"); }
     else sendChatCompletion(response, "reused confirmed effect");
   });
-  const tools = [{ name: "create_effect", label: "effect", description: "Create one external effect", parameters: Type.Object({}),
-    async execute() { effects++; return { content: [{ type: "text" as const, text: "effect-confirmed-42" }], details: {} }; } }];
-  let executor = await createDurableExecutor({ ...f.options, tools });
+  const tools = [{ name: "create_effect", label: "effect", description: "Create one external effect", parameters: Type.Object({ note: Type.String() }),
+    async execute(_id: string, args: { note: string }) {
+      assert.equal(args.note, "PRIVATE_TOOL_ARGUMENT_PREVIEW");
+      effects++; return { content: [{ type: "text" as const, text: "effect-confirmed-42" }], details: {} };
+    } }];
+  const options = { ...f.options, tools, onPreview: (preview: { text?: string }) => { previews.push(preview); } };
+  let executor = await createDurableExecutor(options);
   let submissionId = "";
   const controls = { emit() {}, recordSubmission(id: string) { submissionId = id; } };
   try {
     assert.equal((await executor.execute(batch(), controls)).status, "paused");
     assert.equal(effects, 1);
     assert.equal(requests, 5, "one tool planning request plus four generation attempts, no provider retry layer");
-    await executor.close(); executor = await createDurableExecutor({ ...f.options, tools });
+    await executor.close(); executor = await createDurableExecutor(options);
     assert.equal((await executor.execute({ ...batch(), submissionId }, controls)).status, "paused");
     assert.equal(requests, 5, "reopen must not bypass exhausted retry budget");
     await executor.reset("one");
     continueNow = true;
     const result = await executor.execute({ ...batch(), requestKey: "batch-1:resume-1", previousSubmissionId: submissionId, resumed: true, reconcile: true, retryEpoch: 1 }, controls);
     assert.equal(result.status, "completed"); assert.equal(effects, 1); assert.equal(requests, 6);
+    assert.ok(previews.some((preview) => preview.text === "reused confirmed effect"));
+    assert.doesNotMatch(JSON.stringify(previews), /PRIVATE_TOOL_ARGUMENT_PREVIEW/);
   } finally { await executor.close(); await f.close(); }
 });
 
