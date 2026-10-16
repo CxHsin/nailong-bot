@@ -116,6 +116,7 @@ export async function connectTelegram(options: {
         text: update.text ?? "请分析这张图片。",
         userText: update.text ?? "",
         replyToMessageId: update.replyToMessageId === undefined ? undefined : String(update.replyToMessageId),
+        replyToMessage: update.replyToMessage,
         images: update.images,
       });
       started();

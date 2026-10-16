@@ -41,6 +41,10 @@
 
 `ASSISTANT_INTENT_MODEL` 指向 `MODEL_NAMES` 中已配置凭据的别名，独立于 `/model`。未配置时以 `not_configured` 原文兜底；非法别名启动时报错。默认总超时 8000ms、估算输入 8192 token、输出 1024 token、近期 6 个用户轮次及确认助手文字，可用同前缀的 `TIMEOUT_MS`、`INPUT_TOKENS`、`OUTPUT_TOKENS`、`RECENT_TURNS` 环境变量覆盖。正整数及模型窗口校验在启动时完成。判断无工具、非流式且不重试；超时的迟到结果无效。
 
+每条普通用户消息持久接收后立即触发路由处理，不等主 Bot 结束当前工作；同一会话按接收顺序判断，不等待凑齐几条消息。每次模型判断提供三类材料：`current` 的用户原文、图片标记与 Telegram 被回复消息的 ID/角色/正文或 caption（不下载被回复的图片），`recent` 的近期用户与 Bot 交流，以及 `works` 的当前、排队和已关联后台 helper 的工作身份、简短目标和状态。`replyTargets` 是由真实回复身份关联出的工作 ID，未知回复仍保留消息信息但不猜造工作关联。没有前置用户消息的已确认 Bot 文字也可进入近期材料。
+
+预算先保留当前消息及回复信息、工作身份与简短目标，再从最近轮次往前添加完整交流；遇到放不下的一轮即停止，不跳过它拼接更旧对话。省略工作候选会标记 `incomplete`，空摘要表示信息不足，不能仅凭残留一项或 running 状态猜选对象。原有 reset、遗忘及会话隔离继续过滤隐式近期材料。纯文字的省略表达结合三类材料判断；只有当前确有图片且这些文字信息仍不足以判断时，才要求视觉。接入与重测证据见[三类上下文修复](research/routing-three-context-evaluation-2026-10-17.md)。
+
 Cloudflare 通用文本模型可通过现有 `openai-completions` 模型别名接入，base URL 为 `https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/ai/v1`，使用 Workers AI Token 和完整模型名。专用 Clef 入口已按用户要求删除，分类配置恢复为通用模型别名；历史结论见[旧评测](research/clef-joint-routing-evaluation-2026-10-17.md)。通用模型的合成 API 评测入口为 `scripts/acceptance/cloudflare-routing-live.ts`，读取已有 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`，不启动 Bot 或更改运行配置。
 
 分类器对上述官方 Cloudflare 端点的 `@cf/qwen/qwen3-30b-a3b-fp8` 和 `@cf/zai-org/glm-4.7-flash` 请求 JSON Schema 输出，分别约束 request、supplement/cancel、clarify 的字段，并把 Schema 和额外提示计入输入预算。Qwen 在快照之后附加官方软开关 `/no_think`；GLM 发送 `chat_template_kwargs.enable_thinking=false`。这两条分类路径不使用 `reasoning_effort`。Qwen 的硬开关会使本次实测的 Cloudflare 正文为空，故不使用；不从 reasoning 字段提取控制动作。其他模型/端点沿用原协议参数。结构化输出仍需通过原文跨度、可见目标及候选完整性校验；不保证模型选择的目标语义正确，实测局限见[调用修复评测](research/cloudflare-routing-controls-evaluation-2026-10-17.md)。

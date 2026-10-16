@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ImageContent } from "@mariozechner/pi-ai";
+import type { ReplyMessage } from "../application/app-types.js";
 
 export type QueueInput = {
   conversationId: string;
@@ -12,6 +13,7 @@ export type QueueInput = {
   kind?: "message" | "command" | "internal";
   userText?: string;
   replyToMessageId?: string;
+  replyToMessage?: ReplyMessage;
   replyToInputId?: string;
   receivedAt?: number;
   runtimeMaterials?: string[];

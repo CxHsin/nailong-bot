@@ -31,7 +31,7 @@ async function helperFixture(options: { prompt?: (agent: string, text: string) =
   const sent = deferred();
   const commands: string[][] = [];
   const mainInputs: Wire[] = [];
-  const contexts: Array<{ current: { text: string }; replyTargets: string[]; works: Array<{ id: string; helperId?: string; summary: string }> }> = [];
+  const contexts: Array<{ current: { text: string }; recent: Array<{role:string;text:string}>; replyTargets: string[]; works: Array<{ id: string; inputId?:string; status:string; helperId?: string; summary: string }> }> = [];
   const f = await assistantFixture(async (wire, response) => {
     if ((wire as Wire & { model?: string }).model === "router") {
       const context = JSON.parse(String(wire.messages.at(-1)!.content));
@@ -89,6 +89,8 @@ test("natural helper supplement is actually submitted while the main durable too
     await f.register();
     await f.app.receive({ conversationId: "one", inputId: "slow-main", text: "主会话慢工具" });
     await f.mainEntered.promise;
+    await f.app.receive({ conversationId: "one", inputId: "queued-report", text: "生成销售报表" });
+    await f.app.waitForRouting();
     await f.app.receive({ conversationId: "one", inputId: "csv", text: "补充 coder：改为 CSV，保留原数据" });
     await bounded(f.sent.promise, "helper submission waited for the unrelated main tool");
     await f.app.waitForRouting();
@@ -98,6 +100,13 @@ test("natural helper supplement is actually submitted while the main durable too
     assert.match(prompt?.[3] ?? "", /补充 coder：改为 CSV，保留原数据/);
     assert.match(prompt?.[3] ?? "", /稳定身份/);
     assert.ok(f.contexts.at(-1)!.works.some((work) => work.helperId && work.summary === "任务 coder"));
+    const snapshot = f.contexts.at(-1)!;
+    assert.equal(snapshot.current.text, "补充 coder：改为 CSV，保留原数据");
+    assert.ok(snapshot.works.some(work => work.inputId === "slow-main" && work.status === "running" && work.summary === "主会话慢工具"));
+    assert.ok(snapshot.works.some(work => work.inputId === "queued-report" && work.status === "queued" && work.summary === "生成销售报表"));
+    assert.ok(snapshot.works.some(work => work.helperId && work.id && work.status === "helper"));
+    assert.ok(snapshot.recent.some(entry => entry.role === "user" && entry.text === "登记 coder"));
+    assert.ok(snapshot.recent.some(entry => entry.role === "assistant" && entry.text === "主会话已处理"));
     assert.ok(f.outputs.some((output) => output.type === "text" && /已转交.*采纳仍待核实/.test(output.text)));
     const notice = f.outputs.find(output => output.type === "text" && /已转交.*采纳仍待核实/.test(output.text))!;
     f.app.recordReply("one", "helper-notice", notice.outputId!);

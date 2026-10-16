@@ -65,7 +65,12 @@ export function registerTelegramInput(bot: Bot, options: {
       let hasStarted = false;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const completed = options.handle({ userId: ctx.from.id, chatType: ctx.chat.type,
-        text, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
+        text, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id,
+        ...(ctx.message.reply_to_message ? { replyToMessage: {
+          role: ctx.message.reply_to_message.from?.id === ctx.me.id ? "assistant" as const : "user" as const,
+          text: ctx.message.reply_to_message.text ?? ctx.message.reply_to_message.caption,
+          hasImages: Boolean(ctx.message.reply_to_message.photo?.length),
+        } } : {}) },
         () => { hasStarted = true; markStarted(); });
       active.add(completed);
       void completed.then(() => { active.delete(completed); }, (error) => {

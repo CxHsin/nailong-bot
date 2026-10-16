@@ -2,6 +2,8 @@
 
 本篇保留修复前基准。后续思考控制与 JSON Schema 调用修复及同组重测见[调用修复评测](cloudflare-routing-controls-evaluation-2026-10-17.md)。
 
+后续审计确认：本轮样本 8、14 中仅包含助手消息的 recent 被组装器丢弃，因此第 14 例没有实际发送用于测试隔离的历史指令。原成绩仅反映当时实际输入，不能视作该历史上下文边界的有效验收；见[上下文修复](routing-three-context-evaluation-2026-10-17.md)。
+
 2026-10-17（北京时间），用户要求复用现有 Cloudflare API Key，并删除 Clef 程序。任务 [#221](https://github.com/CxHsin/nailong-bot/issues/221)，关联 [#215](https://github.com/CxHsin/nailong-bot/issues/215)、[#220](https://github.com/CxHsin/nailong-bot/issues/220)。受检基准为 `d090d92` 加本次改动。
 
 ## 删除与当前入口

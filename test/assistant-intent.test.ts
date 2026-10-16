@@ -153,6 +153,47 @@ test("an incomplete candidate list cannot authorize cancellation by uniqueness",
   } finally { await f.close(); }
 });
 
+test("routing retains assistant-only context and reply information on the actual model request", async () => {
+  const f = await provider((_wire, response) => complete(response, { actions: [{kind: "supplement", text: "只保留金额列。", target: "report"}] }));
+  try {
+    const classifier = createIntentClassifier(f.configuration, {model: "fast"});
+    const input = {conversationId: "one", inputId: "current", text: "只保留金额列。", replyToMessageId: "123", replyToInputId: "original",
+      replyToMessage: {role: "assistant" as const, text: "报表已生成，包含日期和金额两列。", hasImages: false}};
+    const recent = [{role: "assistant" as const, text: "季度图表已开始生成。", inputId: "assistant:earlier"}];
+    const result = await classifier.classify({input, recent, works: [{id: "report", summary: "生成销售报表", status: "running"}], replyTargets: ["report"]});
+    assert.equal(result.actions[0]?.target, "report");
+    const sent = JSON.parse(f.requests[0]!.messages[1].content);
+    assert.deepEqual(sent.recent, recent);
+    assert.deepEqual(sent.current.replyToMessage, input.replyToMessage);
+    assert.equal(sent.current.replyToMessageId, "123"); assert.equal(sent.current.replyToInputId, "original");
+    assert.deepEqual(sent.replyTargets, ["report"]); assert.equal(sent.works[0].summary, "生成销售报表");
+    const mixed = [recent[0]!, {role: "user" as const, inputId: "prior", text: "保持金额列"}, {role: "assistant" as const, inputId: "answer", text: "已确认"}];
+    await classifier.classify({input, recent: mixed, works: [{id: "report", summary: "生成销售报表", status: "running"}]});
+    assert.deepEqual(JSON.parse(f.requests[1]!.messages[1].content).recent, mixed);
+    const over = await classifier.classify({input: {...input, replyToMessage: {...input.replyToMessage, text: "原文".repeat(9000)}}, recent, works: []});
+    assert.equal(over.reason, "input_budget"); assert.equal(f.requests.length, 2);
+  } finally { await f.close(); }
+});
+
+test("bounded routing keeps work goals and a consecutive recent suffix without backfilling older dialogue", async () => {
+  const f = await provider((_wire, response) => complete(response, {actions: [{kind: "request", text: "continue"}]}));
+  try {
+    const classifier = createIntentClassifier(f.configuration, {model: "fast", inputTokens: 2200, recentTurns: 2});
+    const request = {input: {conversationId: "one", inputId: "current", text: "continue"}, works: [{id: "report", summary: "生成销售报表", status: "running"}], recent: [
+      {role: "user" as const, inputId: "old", text: "OLDER_SMALL"},
+      {role: "user" as const, inputId: "large", text: "超".repeat(9000)},
+      {role: "user" as const, inputId: "last", text: "LATEST"},
+      {role: "assistant" as const, inputId: "answer", text: "CONFIRMED"},
+    ]};
+    await classifier.classify(request);
+    const sent = JSON.parse(f.requests[0]!.messages[1].content);
+    assert.equal(sent.works[0].summary, "生成销售报表");
+    assert.deepEqual(sent.recent, request.recent.slice(-2));
+    await createIntentClassifier(f.configuration, {model: "fast", inputTokens: 2200, recentTurns: 3}).classify(request);
+    assert.deepEqual(JSON.parse(f.requests[1]!.messages[1].content).recent, request.recent.slice(-2));
+  } finally { await f.close(); }
+});
+
 test("timeouts and provider failures degrade once without returning late control actions", async () => {
   const timeout = await provider((_wire, response) => { setTimeout(() => complete(response, { actions: [{ kind: "cancel", text: "cancel", target: "report" }] }), 100).unref(); });
   try {

@@ -12,15 +12,16 @@ const botInfo = { id: 1, is_bot: true as const, first_name: "test", username: "t
   can_read_all_group_messages: false, supports_inline_queries: false, can_connect_to_business: false,
   has_main_web_app: false, has_topics_enabled: false, allows_users_to_create_topics: false,
   can_manage_bots: false, supports_join_request_queries: false };
-type Snapshot = { current: { inputId: string; text: string; hasImages: boolean }; replyTargets: string[];
+type Snapshot = { current: { inputId: string; text: string; hasImages: boolean; replyToMessageId?: string;
+  replyToMessage?: {role: "user" | "assistant"; text?: string; hasImages: boolean} }; replyTargets: string[];
   works: Array<{ id: string; inputId: string; summary: string }>; recent: Array<{ role: string; text: string }> };
 
-function update(id: number, options: { text?: string; photo?: boolean; reply?: number } = {}) {
+function update(id: number, options: { text?: string; photo?: boolean; reply?: number; replyText?: string; replyBot?: boolean; replyPhoto?: boolean } = {}) {
   const original = { message_id: options.reply ?? 0, date: 0, chat: { id: 42, type: "private" as const, first_name: "owner" },
-    from: { id: 42, is_bot: false, first_name: "owner" }, text: "original message", reply_to_message: undefined };
-  return { update_id: id, message: { ...original, message_id: id,
+    from: options.replyBot ? botInfo : { id: 42, is_bot: false, first_name: "owner" }, text: options.replyText ?? "original message", reply_to_message: undefined };
+  return { update_id: id, message: { ...original, message_id: id, from: { id: 42, is_bot: false, first_name: "owner" },
     ...(options.photo ? { text: undefined, caption: options.text, photo: [{ file_id: "photo", file_unique_id: "photo", width: 1, height: 1 }] } : { text: options.text ?? "hello" }),
-    ...(options.reply === undefined ? {} : { reply_to_message: original }),
+    ...(options.reply === undefined ? {} : { reply_to_message: options.replyPhoto ? { ...original, text: undefined, caption: options.replyText, photo: [{file_id: "old-photo", file_unique_id: "old-photo", width: 1, height: 1}] } : original }),
   } };
 }
 
@@ -58,11 +59,17 @@ test("Telegram replies to an original user message provide its actual work ident
   const f = await telegramRouterFixture();
   try {
     await f.bot.handleUpdate(update(11, { text: "generate report" })); await f.flush();
-    await f.bot.handleUpdate(update(12, { text: "change report to CSV", reply: 11 })); await f.flush();
+    await f.bot.handleUpdate(update(12, { text: "change report to CSV", reply: 11, replyText: "generate report" })); await f.flush();
     const snapshot = f.snapshots.find((entry) => entry.current.inputId === "12")!;
     const original = snapshot.works.filter((work) => work.inputId === "11");
     assert.equal(original.length, 1); assert.deepEqual(snapshot.replyTargets, original.map((work) => work.id));
     assert.equal(snapshot.current.text, "change report to CSV"); assert.deepEqual(f.errors, []);
+    assert.equal(snapshot.current.replyToMessageId, "11");
+    assert.deepEqual(snapshot.current.replyToMessage, {role: "user", text: "generate report", hasImages: false});
+    const persisted = f.app.routingStatus(conversationId).works.find(work => work.inputId === "12")!.input;
+    assert.equal(persisted.replyToMessage?.text, "generate report");
+    await f.bot.handleUpdate(update(12, { text: "change report to CSV", reply: 11, replyText: "generate report" })); await f.flush();
+    assert.equal(f.snapshots.filter(entry => entry.current.inputId === "12").length, 1);
   } finally { await f.close(); }
 });
 
@@ -71,13 +78,19 @@ test("Telegram replies to a sent multi-target answer retain every original targe
   try {
     await f.bot.handleUpdate(update(21, { text: "generate report; check weather" })); await f.flush();
     const answer = f.sent.find((entry) => entry.method === "sendRichMessage"); assert.ok(answer);
-    await f.bot.handleUpdate(update(22, { text: "which work did that answer cover?", reply: answer.messageId })); await f.flush();
+    await f.bot.handleUpdate(update(22, { text: "which work did that answer cover?", reply: answer.messageId, replyBot: true, replyText: "confirmed answer 1" })); await f.flush();
     const snapshot = f.snapshots.find((entry) => entry.current.inputId === "22")!;
     const original = snapshot.works.filter((work) => work.inputId === "21");
     assert.equal(original.length, 2);
     assert.deepEqual(new Set(snapshot.replyTargets), new Set(original.map((work) => work.id)));
-    await f.bot.handleUpdate(update(23, { text: "what was that?", reply: 999999 })); await f.flush();
-    assert.deepEqual(f.snapshots.find((entry) => entry.current.inputId === "23")!.replyTargets, []);
+    assert.equal(snapshot.current.replyToMessageId, String(answer.messageId));
+    assert.deepEqual(snapshot.current.replyToMessage, {role: "assistant", text: "confirmed answer 1", hasImages: false});
+    await f.bot.handleUpdate(update(23, { text: "what was that?", reply: 999999, replyPhoto: true, replyText: "caption from original photo" })); await f.flush();
+    const unknown = f.snapshots.find((entry) => entry.current.inputId === "23")!;
+    assert.deepEqual(unknown.replyTargets, []);
+    assert.equal(unknown.current.replyToMessageId, "999999");
+    assert.deepEqual(unknown.current.replyToMessage, {role: "user", text: "caption from original photo", hasImages: true});
+    assert.equal(unknown.current.hasImages, false);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });

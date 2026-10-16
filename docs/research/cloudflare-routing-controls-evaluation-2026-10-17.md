@@ -1,5 +1,7 @@
 # Cloudflare 分类调用修复与同组重测
 
+后续核对发现本轮样本 8、14 的助手单独历史被组装器丢弃。此文保留当时实际成绩；不能把第 14 例算作已经验证了嵌入指令隔离。修正三类上下文后的独立重测见[后续记录](routing-three-context-evaluation-2026-10-17.md)，不把前轮全部失败归因于模型能力。
+
 2026-10-17（北京时间）。任务 [#222](https://github.com/CxHsin/nailong-bot/issues/222)，Part of [#215](https://github.com/CxHsin/nailong-bot/issues/215)，承接 [#221](https://github.com/CxHsin/nailong-bot/issues/221)。受检代码为 `development` 的 `defc776` 加本次调用修复；[旧评测](cloudflare-general-routing-evaluation-2026-10-17.md)保留修复前结果。
 
 ## 修复内容与接口探测
