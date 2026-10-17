@@ -14,6 +14,8 @@ status: accepted
 
 ## 实现状态
 
+2026-10-17，[#238](https://github.com/CxHsin/nailong-bot/issues/238)按用户决定收窄独立分类的触发范围：同一会话没有先前未完成工作、主执行轮次或未交付 helper 时，持久记录原文 request 并直接交给主 Bot，免去串行分类延迟。排队、执行中、暂停和待确认工作继续触发分类；完成、取消及已交付 helper 的历史不单独触发，即使当前消息回复了历史对象。判断放在队首处理时，连续输入仍能关联前面刚建立的工作。已有路由决定、去重和恢复规则保留。本地分类配置切回 Cloudflare Qwen3-30B-A3B，沿用 JSON Schema 和 `/no_think`；模型选择仍由独立别名控制。
+
 实现任务 [#216](https://github.com/CxHsin/nailong-bot/issues/216)–[#219](https://github.com/CxHsin/nailong-bot/issues/219) 在 development 实现独立分类、稳定目标与有序动作、持久调度、helper 控制及 Telegram 回复关联，退役用户 `/steer` 入口。当前验证与真实链路缺口见[路由验收记录](../contextual-input-routing-acceptance-20261016.md)，不由本 ADR 推导部署状态。未配置分类别名时保留原文兜底；原 Durable 目录兼容升级，不清空队列、补充或委派记录。
 
 2026-10-17 的 Clef 专用适配器实验（[#220](https://github.com/CxHsin/nailong-bot/issues/220)）在真实样本中仍出现语义和目标错误，随后按用户要求移除专用代码、配置入口和验收程序。保留[历史结果](../research/clef-joint-routing-evaluation-2026-10-17.md)，当前继续使用通用模型别名和有序原文动作契约。Cloudflare 通用模型通过已有 OpenAI 兼容协议评测，不扩展聊天模型协议，配置见[操作说明](../personal-agent-operations.md)。

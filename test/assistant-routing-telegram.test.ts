@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { Bot } from "grammy";
 import { Response as ApiResponse } from "node-fetch";
 import { connectTelegram } from "../src/assistant/telegram.js";
-import { assistantFixture, type Wire } from "./fixtures/assistant.js";
+import { assistantFixture, seedPendingAssistantWork, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 const conversationId = "telegram:private:42";
@@ -36,10 +36,10 @@ async function telegramRouterFixture(split = false) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: JSON.stringify({ actions }) }, finish_reason: "stop" }] }));
     } else { main.push(wire); sendChatCompletion(response, `confirmed answer ${main.length}`); }
-  }, async () => ({ intent: { model: "router" }, modelConfiguration: { defaultModel: "local", models: [
+  }, async (cwd) => { await seedPendingAssistantWork(cwd, conversationId); return { intent: { model: "router" }, modelConfiguration: { defaultModel: "local", models: [
     { alias: "local", model: "local", api: "openai-completions", apiKey: "test", baseUrl: "" },
     { alias: "router", model: "router", api: "openai-completions", apiKey: "test", baseUrl: "" },
-  ] } }));
+  ] } }; });
   let nextMessage = 1000;
   const sent: Array<{ method: string; messageId: number }> = []; const errors: unknown[] = [];
   const bot = new Bot("test", { botInfo, client: { fetch: async (url) => {

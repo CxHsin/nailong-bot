@@ -117,7 +117,7 @@ test("natural helper supplement is actually submitted while the main durable too
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.app.waitForIdle(); await f.close(); }
 });
 
-test("a delivered helper remains a routable result target and supplements continue from its result", { timeout: 15000 }, async () => {
+test("a delivered helper no longer requires classification and follow-ups retain its result", { timeout: 15000 }, async () => {
   const f = await helperFixture({ pollMs: 10 });
   const delivered = deferred();
   const unsubscribe = f.app.subscribe((output) => {
@@ -129,11 +129,12 @@ test("a delivered helper remains a routable result target and supplements contin
     await bounded(delivered.promise, "helper result was not delivered to the main assistant");
     await f.app.waitForIdle();
     await f.reopen();
+    const routed = f.contexts.length;
     await f.app.receive({ conversationId: "one", inputId: "follow-delivered", text: "补充 coder：基于成果改成 CSV" });
     await f.app.waitForIdle();
-    assert.ok(f.contexts.at(-1)!.works.some((work) => work.helperId && work.summary === "任务 coder"));
+    assert.equal(f.contexts.length, routed);
     assert.equal(f.commands.filter((args) => args[1] === "prompt").length, 0);
-    assert.match(JSON.stringify(f.mainInputs.at(-1)!.messages), /原执行已结束.*基于已有成果/);
+    assert.match(JSON.stringify(f.mainInputs.at(-1)!.messages), /ARTIFACT_LEDGER_RESULT/);
     assert.match(JSON.stringify(f.mainInputs.at(-1)!.messages), /补充 coder：基于成果改成 CSV/);
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.close(); }
 });

@@ -34,6 +34,7 @@
 | 两会话与来源去重 | [fallback](../test/assistant-routing-fallback.test.ts)：外来目标无控制效果，同文不同身份独立接收 |
 | 旧补充迁移、入口退役 | [service recovery](../test/assistant-service-recovery.test.ts)、[routing](../test/assistant-routing.test.ts)、[queue](../test/assistant-queue.test.ts)：消费与提交去重；新 `/steer` 仅提示自然语言 |
 | 配置与上限 | [intent](../test/assistant-intent.test.ts)：独立别名、非流式无工具、无重试、预算及模型窗口校验 |
+| 空闲直通（2026-10-17，#238） | [idle routing](../test/assistant-routing-idle.test.ts)：无历史或仅完成/取消历史时零分类调用，重开和重复输入保持去重；暂停/待确认工作、连续输入仍分类，其他会话不受影响；[helper routing](../test/assistant-routing-helper.test.ts)：未交付 helper 仍分类，已交付成果可直通主 Bot 续问 |
 
 ## 真实分类模型
 

@@ -301,38 +301,49 @@ export async function createAssistant(options: AssistantOptions) {
         let route = service.routingPending(id)[0];
         if (!route) break;
         if (!route.decision) {
-          const visible = await executor.intentContext(id);
           const knownWorks = service.listWorks(id);
-          const reply = route.input.replyToMessageId;
-          const replyTargets = reply ? [...new Set([...state.replyTargets(id,reply),...knownWorks.filter(work => work.inputId === reply && work.input.source === "telegram").map(work => work.id)])] :
-            route.input.replyToInputId ? knownWorks.filter(work => work.inputId === route!.input.replyToInputId).map(work => work.id) : [];
-          // Completed chat belongs to bounded visible history, unless explicitly replied to.
-          // Retained active work and registered helpers survive reset independently of chat.
-          const works: IntentWork[] = knownWorks.filter(work => work.input.kind === "message" &&
-            (work.status !== "completed" || replyTargets.includes(work.id))).map(work => ({
-            id:work.id,summary:visible.excluded.includes(work.inputId) ? "[相关对话已遗忘，工作身份保留]" : work.summary,
-            status:work.status,inputId:work.inputId,batchId:work.batchId,submissionId:work.submissionId,
-          }));
-          for (const helper of helperRecords(id)) {
-            for (const target of helper.targetIds ?? []) {
-              const work = works.find(work => work.id === target);
-              const original = knownWorks.find(work => work.id === target);
-              const fields = {helperId:helper.id,status:helper.delivered ? "helper_result" : "helper",summary:original && visible.excluded.includes(original.inputId) ? "[相关对话已遗忘，工作身份保留]" : helper.summary ?? "[摘要不可用，需核查]"};
-              if (work) Object.assign(work,{...fields,summary:visible.excluded.includes(work.inputId ?? "") ? "[相关对话已遗忘]" : fields.summary});
-              else works.push({id:target,...fields});
+          const hasEarlierWork = knownWorks.some(work => work.input.sequence < route!.input.sequence &&
+            work.status !== "completed" && work.status !== "cancelled");
+          if (!hasEarlierWork && !service.getActiveBatch(id) && !helperRecords(id).some(helper => !helper.delivered)) {
+            route = service.decideRoute(route.eventId, {
+              actions: [{kind:"request",text:route.input.text}], snapshot: {bypass:"no_pending_work"},
+            });
+          } else {
+            const visible = await executor.intentContext(id);
+            const reply = route.input.replyToMessageId;
+            const replyTargets = reply ? [...new Set([...state.replyTargets(id,reply),...knownWorks.filter(work => work.inputId === reply && work.input.source === "telegram").map(work => work.id)])] :
+              route.input.replyToInputId ? knownWorks.filter(work => work.inputId === route!.input.replyToInputId).map(work => work.id) : [];
+            // Completed chat belongs to bounded visible history, unless explicitly replied to.
+            // Retained active work and registered helpers survive reset independently of chat.
+            const works: IntentWork[] = knownWorks.filter(work => work.input.kind === "message" &&
+              (work.status !== "completed" || replyTargets.includes(work.id))).map(work => ({
+              id:work.id,summary:visible.excluded.includes(work.inputId) ? "[相关对话已遗忘，工作身份保留]" : work.summary,
+              status:work.status,inputId:work.inputId,batchId:work.batchId,submissionId:work.submissionId,
+            }));
+            for (const helper of helperRecords(id)) {
+              for (const target of helper.targetIds ?? []) {
+                const work = works.find(work => work.id === target);
+                const original = knownWorks.find(work => work.id === target);
+                const fields = {helperId:helper.id,status:helper.delivered ? "helper_result" : "helper",summary:original && visible.excluded.includes(original.inputId) ? "[相关对话已遗忘，工作身份保留]" : helper.summary ?? "[摘要不可用，需核查]"};
+                if (work) Object.assign(work,{...fields,summary:visible.excluded.includes(work.inputId ?? "") ? "[相关对话已遗忘]" : fields.summary});
+                else works.push({id:target,...fields});
+              }
             }
+            const result = await classifier.classify({input:route.input,works,recent:visible.recent,replyTargets,
+              incomplete:helperRecords(id).some(helper => !helper.delivered && !helper.targetIds?.length)});
+            const reason = result.reason ? `本条输入尚未自动执行补充或取消；路由未判定原因 ${result.reason}。主 Bot 应结合原话处理或澄清。` : undefined;
+            route = service.decideRoute(route.eventId,{...result,reason,actions:result.actions.length ? result.actions : [{kind:"request",text:route.input.text}]});
           }
-          const result = await classifier.classify({input:route.input,works,recent:visible.recent,replyTargets,
-            incomplete:helperRecords(id).some(helper => !helper.delivered && !helper.targetIds?.length)});
-          const reason = result.reason ? `本条输入尚未自动执行补充或取消；路由未判定原因 ${result.reason}。主 Bot 应结合原话处理或澄清。` : undefined;
-          route = service.decideRoute(route.eventId,{...result,reason,actions:result.actions.length ? result.actions : [{kind:"request",text:route.input.text}]});
         }
         for (const action of route.decision!.actions) await applyAction(route,action);
         service.finishRoute(route.eventId);
       }
     });
     routing.set(id,pending);
-    void pending.catch(report).finally(() => routing.delete(id));
+    void pending.then(() => {
+      routing.delete(id);
+      if (!closed && service.routingPending(id).length) routeConversation(id);
+    }, error => { routing.delete(id); report(error); });
   }
 
   async function observe() {

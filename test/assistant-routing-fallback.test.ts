@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ServerResponse } from "node:http";
 import type { IntentOptions } from "../src/assistant/intent.js";
-import { assistantFixture, type Wire } from "./fixtures/assistant.js";
+import { assistantFixture, seedPendingAssistantWork, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 type Snapshot = { current: { conversationId: string; inputId: string; text: string }; works: Array<{ id: string; inputId: string; summary: string; status: string }>; recent: unknown[] };
@@ -14,15 +14,15 @@ function decision(response: ServerResponse, actions: unknown[]) {
 function text(wire: Wire) {
   return wire.messages.map((message) => typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") : "").join("\n");
 }
-async function routingFixture(router: (snapshot: Snapshot, response: ServerResponse) => void | Promise<void>, main: Parameters<typeof assistantFixture>[0], options: IntentOptions = {}) {
+async function routingFixture(router: (snapshot: Snapshot, response: ServerResponse) => void | Promise<void>, main: Parameters<typeof assistantFixture>[0], options: IntentOptions = {}, pendingWork = false) {
   const snapshots: Snapshot[] = [];
   const f = await assistantFixture((wire, response) => {
     if ((wire as Wire & { model: string }).model !== "router") return main(wire, response);
     const snapshot = JSON.parse(String(wire.messages.at(-1)!.content)) as Snapshot; snapshots.push(snapshot); return router(snapshot, response);
-  }, async () => ({ intent: { model: "router", ...options }, modelConfiguration: { defaultModel: "local", models: [
+  }, async (cwd) => { if (pendingWork) await seedPendingAssistantWork(cwd, "one"); return { intent: { model: "router", ...options }, modelConfiguration: { defaultModel: "local", models: [
     { alias: "local", model: "local", api: "openai-completions", apiKey: "test", baseUrl: "" },
     { alias: "router", model: "router", api: "openai-completions", apiKey: "test", baseUrl: "" },
-  ] } }));
+  ] } }; });
   return { ...f, get app() { return f.app; }, snapshots };
 }
 
@@ -81,7 +81,7 @@ test("invalid composite decisions preserve queued work before exposing any cance
 
 test("an overbudget current input reaches the main assistant intact without a truncated classifier call", { timeout: 15000 }, async () => {
   const main: string[] = [];
-  const f = await routingFixture((_snapshot, response) => decision(response, []), (wire, response) => { main.push(text(wire)); sendChatCompletion(response, "full input examined"); }, { inputTokens: 1000 });
+  const f = await routingFixture((_snapshot, response) => decision(response, []), (wire, response) => { main.push(text(wire)); sendChatCompletion(response, "full input examined"); }, { inputTokens: 1000 }, true);
   try {
     const original = "Do not cancel any work: " + "完整限定条件".repeat(900) + " END_NEGATION_DO_NOT_CANCEL";
     await f.app.receive({ conversationId: "one", inputId: "large", text: original }); await f.app.waitForIdle();
@@ -130,7 +130,7 @@ test("forgotten original material and its assistant paraphrase stay out of class
     }
     if (phase === "forget" && wire.messages.at(-1)?.role !== "tool") return sendChatCompletion(response, "", [{ index: 0, id: "forget-origin", type: "function", function: { name: "memory_forget", arguments: JSON.stringify({ id: sourceId, expectedVersion: 0 }) } }]);
     sendChatCompletion(response, "completed");
-  });
+  }, {}, true);
   try {
     await f.app.receive({ conversationId: "one", inputId: "seed", text: "ORIGINAL_SECRET: my breakfast drink is amber flower tea." }); await f.app.waitForIdle(); assert.ok(sourceId);
     phase = "forget";

@@ -6,6 +6,7 @@ import { mkdtemp, readFile, writeFile, appendFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
+import { seedPendingAssistantWork } from "./fixtures/assistant.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -42,6 +43,7 @@ async function kill(process:ChildProcess,exited:Promise<number|null>) {
 for(const scenario of ["raw","decision","sending"] as const) {
   test(`SIGKILL after routing ${scenario} boundary retains identity and avoids repeating confirmed or unknown helper sends`,{timeout:25_000},async()=>{
     const directory=await mkdtemp(join(tmpdir(),`assistant-routing-${scenario}-`));
+    if (scenario === "raw") await seedPendingAssistantWork(directory, "one");
     const boundary=deferred();
     let recovering=false;
     let rawClassifications=0;
