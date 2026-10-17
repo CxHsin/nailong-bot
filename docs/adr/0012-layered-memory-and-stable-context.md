@@ -4,7 +4,7 @@ status: accepted
 
 # 分层记忆与稳定活动上下文分开维护
 
-2026-10-17，用户确认 [ADR-0015](0015-system-context-order-and-self-file.md)的后续设计：基础指令迁入环境配置，SELF 文件维护身份与关系，系统内容按稳定性排序。该方向尚未实现；下文保留当前实现与已有验收，不能据此认为运行代码或数据已经迁移。
+2026-10-17，[ADR-0015](0015-system-context-order-and-self-file.md)已将基础指令迁入环境配置，SELF 文件维护身份与关系，系统内容按稳定性排序。下文保留 2026-10-16 的实现与验收；SELF 权威来源及系统顺序以后续 ADR 和[当前操作说明](../personal-agent-operations.md)为准，生产服务是否切换另行核对。
 
 设计结论：[Issue #207](https://github.com/CxHsin/nailong-bot/issues/207)。正式规格：[Issue #208](https://github.com/CxHsin/nailong-bot/issues/208)，见[本地规格归档](../research/context-management-spec-2026-10-16.md)。
 

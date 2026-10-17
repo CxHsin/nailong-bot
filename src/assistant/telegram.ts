@@ -7,6 +7,7 @@ import { registerTelegramInput } from "../telegram/telegram-input.js";
 import { richReplyPages, textOnlyMarkdown } from "../telegram/rich-reply.js";
 import type { Assistant } from "./runtime.js";
 import { createDraftPreview } from "../telegram/draft-preview.js";
+import { saveTelegramDocument } from "./telegram-documents.js";
 
 export async function connectTelegram(options: {
   app: Assistant;
@@ -14,6 +15,7 @@ export async function connectTelegram(options: {
   ownerId: number;
   dataDir: string;
   download: (id: string) => Promise<ImageContent>;
+  downloadDocument?: (id: string) => Promise<Buffer>;
   reportFailure: (error: unknown) => void;
 }) {
   const { app, bot, ownerId, reportFailure } = options;
@@ -108,17 +110,19 @@ export async function connectTelegram(options: {
     ownerId,
     botUsername: bot.botInfo.username,
     download: options.download,
+    document: options.downloadDocument ? async (id, name, messageId) => saveTelegramDocument(options.dataDir, messageId, name, await options.downloadDocument!(id)) : undefined,
     reportFailure,
     async handle(update, started) {
       await app.receive({
         conversationId,
         inputId: String(update.messageId),
         source: "telegram",
-        text: update.text ?? "请分析这张图片。",
+        text: update.text ?? (update.runtimeMaterials ? "请查看这个附件。" : "请分析这张图片。"),
         userText: update.text ?? "",
         replyToMessageId: update.replyToMessageId === undefined ? undefined : String(update.replyToMessageId),
         replyToMessage: update.replyToMessage,
         images: update.images,
+        runtimeMaterials: update.runtimeMaterials,
       });
       started();
     },

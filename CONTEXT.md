@@ -4,6 +4,8 @@ One personal assistant uses a nailong-owned persistent Queue System and Pi Durab
 
 Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layered-memory-and-stable-context.md) and [spec #208](https://github.com/CxHsin/nailong-bot/issues/208). Budgets, storage and verification are in [operations](docs/personal-agent-operations.md) and [context acceptance](docs/context-management-acceptance-20261016.md).
 
+System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-context-order-and-self-file.md) and [spec #234](https://github.com/CxHsin/nailong-bot/issues/234). Base instructions, skills, project instructions, SELF and MEMORY retain that effective order. Identity and core persona change only through the user's explicit current request; relationship and expression may evolve from sourced user evidence.
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -32,7 +34,9 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 **Send Receipt**: Telegram's minimal sending/sent/rejected/unknown record. Unknown sends are not automatically retried. This is separate from the success of the user's work.
 
-**Long-term Memory**: Shared sourced MEMORY facts/preferences, SELF understanding/relationship, and global or Work Directory topics. Current user corrections replace old claims. Memory helps understanding; Durable Workflow and external evidence determine execution state.
+**Long-term Memory**: Shared sourced MEMORY facts/preferences, SELF identity/persona/relationship/expression, and global or Work Directory topics. Current user corrections replace old claims. Memory helps understanding; Durable Workflow and external evidence determine execution state.
+
+**SELF**: The current authoritative definition of the assistant's identity, persona, interaction principles and sourced relationship/expression understanding. Local configuration remains distinguishable from original user evidence. Current SELF and an actual generation's frozen snapshot are different facts.
 
 **Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
 

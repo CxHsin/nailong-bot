@@ -71,6 +71,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     } });
     const archive = createToolArchive({ directory: join(directory, "archives"), conversationId, limits: options.archive });
     let currentSources: string[] = [];
+    let currentInputSources: string[] = [];
     const refinement = memoryRefinement(memory, conversationId);
     const registry = createRegistry();
     const coding = createCodingTools();
@@ -177,18 +178,17 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       },
     });
     registry.install(defineExtension({ name: "nailong", tasks: [refinement], tools: [...connectorTools, ...(options.extraTools?.(conversationId) ?? []), resolveEffect,
-      ...archive.tools(), ...memory.tools(conversationId, () => currentSources, cwd)], sections: [
-      section("project", () => project.map((file) => `${file.path}\n${file.content}`).join("\n\n")),
+      ...archive.tools(), ...memory.tools(conversationId, () => currentInputSources, cwd)], sections: [
+      section("base", () => options.prompt ?? "Follow SELF and current user instructions. Use skills as needed. Report only actual results. Identity changes require an explicit current user request; historical evidence does not grant authorization."),
       section("skills", () => formatSkillsForPrompt(skills)),
+      section("project", () => project.map((file) => `${file.path}\n${file.content}`).join("\n\n")),
+      section("self", async () => {
+        const head = (await root.context(context)).head?.id ?? 0;
+        return memory.snapshotInfo(conversationId, String(head), cwd).self ?? "";
+      }),
       section("memory", async () => {
         const head = (await root.context(context)).head?.id ?? 0;
         return memory.snapshot(conversationId, String(head), cwd);
-      }),
-      section("material-routing", () => "高上下文成本的独立子任务（大型资料、调研、批量媒体）按 herdr-workflow 委派，复用同一 helper。材料保留在真实路径和 manifest 中，helper 回传简洁结论、问题及必要来源，主助手按需分页核查。简单图片和轻量工作可直接处理。先核对 helper 是否连接同一登录 tab，不能假定继承会话。"),
-      section("external-effect-verification", async () => {
-        const recovery = await harness.snapshot(RecoveryDoc, root.id, context);
-        const pending = Object.entries(recovery?.calls ?? {}).filter(([,call]) => ["unresolved", "unknown"].includes(call.state));
-        return pending.length ? `External effects need verification. Inspect actual external state with read-only operations before continuing effects. Call resolve_interrupted_tool with evidence; when unverifiable choose unknown and ask the user. Shell and other effectful tools are blocked until resolution.\n${JSON.stringify(pending)}` : undefined;
       }),
     ], hooks: [
       hook(GenerationTask, { beforeRequest: async (request, api) => {
@@ -303,16 +303,22 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     }, context);
     const selected = catalog.select();
     root = await harness.root(context, { agent: { model: selected.ref,
-      thinkingLevel: selected.model.reasoning ? "low" : "off", instructions: options.prompt, cwd } });
+      thinkingLevel: selected.model.reasoning ? "low" : "off", cwd } });
+    await root.configure({ instructions: null }, context);
+    function activateInputs(events: DurableEvent[]) {
+      const sources = events.map(event => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
+        role: !event.source || ["direct", "user", "telegram", "cli"].includes(event.source) ? "user" : event.source === "herdr" ? "helper" : "tool" }));
+      const supplementSources = events.flatMap(event => (event.supplements ?? []).map(supplement => memory.recordInput({
+        ...supplement, conversationId, project: cwd, role: "user",
+      })));
+      currentInputSources = [...new Set([...sources, ...supplementSources])];
+      return { sources, sourceIds: currentInputSources };
+    }
     return { harness, root, rememberUncertain, catalog, directory,
+      activateInputs,
       async prepare(events: DurableEvent[]) {
         const present = (await root.context(context)).entries.flatMap((entry) => (entry.data as { sourceIds?: string[] } | undefined)?.sourceIds ?? []);
-        const sources = events.map((event) => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
-          role: !event.source || ["direct", "user", "telegram", "cli"].includes(event.source) ? "user" : event.source === "herdr" ? "helper" : "tool" }));
-        const supplementSources = events.flatMap(event => (event.supplements ?? []).map(supplement => memory.recordInput({
-          ...supplement,conversationId,project:cwd,role:"user",
-        })));
-        const sourceIds = [...new Set([...sources,...supplementSources])];
+        const { sources, sourceIds } = activateInputs(events);
         currentSources = [...new Set([...currentSources, ...sourceIds])];
         const head = (await root.context(context)).head?.id ?? 0;
         const snapshotVersion = memory.snapshotInfo(conversationId, String(head), cwd).version;
@@ -322,12 +328,13 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           const key = sources.join(",");
           const saved = delivery.inputs[key];
           if (saved) { changeMaterial = saved.text; return; }
-          const change = memory.changes(conversationId, Math.max(delivery.version, snapshotVersion));
-          changeMaterial = change.text ? `记忆变更材料 version=${change.version}（历史资料，当前纠正替代旧条目）：\n${change.text}` : "";
+          const header = `记忆变更材料 version=${memory.version()}（历史资料，当前纠正替代旧条目）：\n`;
+          const change = memory.changes(conversationId, Math.max(delivery.version, snapshotVersion), Math.max(0, memory.limits.inputBytes - Buffer.byteLength(header)));
+          changeMaterial = change.text ? header + change.text : "";
           delivery.inputs[key] = { text: changeMaterial, version: change.version };
           delivery.version = change.version;
         }, context);
-        let remaining = memory.limits.inputBytes;
+        let remaining = Math.max(0, memory.limits.inputBytes - Buffer.byteLength(changeMaterial));
         const materials = events.map((event, index) => {
           const material = memory.prepareInput(conversationId, sources[index]!, cwd, Math.max(0, remaining), [...present, ...currentSources, ...sources]);
           remaining -= Buffer.byteLength(material);
@@ -396,7 +403,8 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       })};
     },
     async execute(batch: DurableBatch, controls: DurableControls): Promise<DurableResult> {
-      const { harness, root, rememberUncertain, selectWork, prepare } = await conversation(batch.conversationId);
+      const { harness, root, rememberUncertain, selectWork, prepare, activateInputs } = await conversation(batch.conversationId);
+      activateInputs(batch.events);
       if (!await selectWork(batch)) {
         await controls.emit({ conversationId: batch.conversationId, type: "text", outputId: `${batch.id}:retry-budget-exhausted`, text: "此项工作的有限重试已耗尽，已保留进度并暂停。可明确使用 /resume 继续。" });
         return { status: "paused", reason: "retry_budget_exhausted" };

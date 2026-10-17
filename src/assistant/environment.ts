@@ -37,6 +37,8 @@ const contextSchema = Type.Object({
 export async function assistantEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ) {
+  const prompt = env.AGENT_SYSTEM_PROMPT;
+  if (!prompt?.trim()) throw new Error("AGENT_SYSTEM_PROMPT 必须提供非空基础指令（支持多行文本）");
   const dataDir = resolve(
     env.ASSISTANT_DATA_DIR?.trim() || "data/pi-durable-v1",
   );
@@ -59,10 +61,7 @@ export async function assistantEnvironment(
       cwd,
       modelConfiguration: modelEnvironment(env),
       intent: intentEnvironment(env),
-      prompt: await readFile(
-        resolve(env.AGENT_PROMPT_FILE?.trim() || "system-prompt.md"),
-        "utf8",
-      ),
+      prompt,
       skillPaths: [
         resolve(".agents/skills"),
         ...(capabilities.skillSources?.map((source) => source.path) ?? []),

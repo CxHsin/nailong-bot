@@ -4,7 +4,7 @@
 
 ## Telegram 如何接入
 
-沿用现有 BotFather token。填写 `.env` 的 `AGENT_TELEGRAM_BOT_TOKEN` 和 `AGENT_TELEGRAM_USER_ID`（也接受 `TELEGRAM_*`），配置主模型后运行 `npm start`。服务通过 grammY long polling 接收该主人的私聊，文字和图片进入同一个主会话。当前不支持群聊或多 bot。CLI 使用 `npm run chat` 或 `npm run send -- "内容"`，可加 `--conversation-id telegram:private:<owner id>` 指定会话。
+沿用现有 BotFather token。填写 `.env` 的 `AGENT_TELEGRAM_BOT_TOKEN` 和 `AGENT_TELEGRAM_USER_ID`（也接受 `TELEGRAM_*`），配置主模型及必填 `AGENT_SYSTEM_PROMPT` 后运行 `npm start`。服务通过 grammY long polling 接收该主人的私聊，文字、图片和 document 附件进入同一个主会话。当前不支持群聊或多 bot。CLI 使用 `npm run chat` 或 `npm run send -- "内容"`，可加 `--conversation-id telegram:private:<owner id>` 指定会话。
 
 只启动一个实例。若之前配置 webhook，须自行确认 polling 的使用方式；新版启动不会自动删除 webhook。先停止旧入口，再运行新版，避免两个进程消费同一 bot 的更新。旧 token 不必重新申请，旧数据也不会自动清除。
 
@@ -14,7 +14,9 @@
 
 `ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`。显式配置可覆盖，但须使用独立执行空间；启动检查拒绝把旧 Session 目录当作新空间。配置、模型端点与凭据接入继续沿用，不导入旧历史、摘要、工具轨迹、Akasha 或 Task。[ADR-0014](adr/0014-retire-legacy-code-and-data.md)结束旧实现和旧离线工具的支持，遗留数据由明确的一次性维护清理；普通启动不自动删除资料。
 
-新空间分别保存完整输入与固定批次、主执行记录、会话控制与帮手材料，以及通道发送回执。已有外部 herdr 委派须保留并核对真实身份，不能因新会话没有历史就重新派发。工作目录由 `ASSISTANT_WORK_DIR` 指定，默认启动目录，重开会话沿用原目录；`AGENT_PROMPT_FILE` 默认 `system-prompt.md`，`AGENT_SHELL_PATH` 可指定 shell。工作目录与执行数据空间各自独立。
+新空间分别保存完整输入与固定批次、主执行记录、会话控制与帮手材料，以及通道发送回执。已有外部 herdr 委派须保留并核对真实身份，不能因新会话没有历史就重新派发。工作目录由 `ASSISTANT_WORK_DIR` 指定，默认启动目录，重开会话沿用原目录；`AGENT_SHELL_PATH` 可指定 shell。工作目录与执行数据空间各自独立。
+
+`AGENT_SYSTEM_PROMPT` 是实际基础指令文本，不能填文件路径；只校验非空，中文、引号和真实换行原样交给模型。按 [.env.example](../.env.example) 用引号包住多行值。旧 `AGENT_PROMPT_FILE` 和默认 prompt 文件入口已退役，升级须把操作规则迁入环境配置，把人设迁入 SELF。修改基础指令后重启服务，已有会话会采用新规则并保留历史、队列及工作进度；不需要 reset。
 
 旧 Pi helper 身份导入及其配置已退役。现役空间中已登记的 helper 继续按原身份接回，启动无需旧会话目录；不能因旧目录不存在而重新派发外部工作。
 
@@ -68,9 +70,11 @@ cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围�
 
 ## 上下文与长期记忆
 
-每个压缩代固定实际 system 记忆快照，重启复用原内容。新记忆和纠正通过有身份的追加材料即时交给主模型，压缩或 reset 才归并到新快照。真实项目指令或工具配置改变时重新加载。当前编码顺序为 project、skills、memory、material-routing、恢复提示（需要时）、SDK instructions；工具定义顺序固定，由 provider 编码器处理协议。
+系统有效顺序为基础指令、skills 目录、项目指令、SELF 快照、MEMORY 快照，工具定义仍由 provider 编码器处理。恢复状态等动态材料追加到后续输入。每个压缩代保存实际 SELF/MEMORY 正文、版本及来源；普通更新通过有身份的增量即时送达同轮工具续步和其他会话下一输入，压缩或 reset 才归并。未变更的重启复用原快照及已投递增量；人工 SELF 修改在重启时更新基线，保留对话和执行进度。
 
-`assistant-memory.sqlite` 保存来源、版本、纠正关系、遗忘规则、已完成的检索与快照。`memory/MEMORY.md`、`SELF.md`、`topics/` 是程序维护的可读档案，直接编辑 Markdown 不会导入记忆。MEMORY 保存用户事实及偏好，SELF 保存有用户原话依据的理解和关系，全局及项目 topic 保存经历。项目身份是实际工作目录；自然项目名放在 topic 中。
+`memory/SELF.md` 是身份、人设、相处原则、关系理解和表达习惯的权威当前正文，可直接编辑，启动不会由旧数据库正文覆盖。条目注释保存来源、版本及治理信息，正文可单独修改；新人工段落标为本地配置，不伪造用户引语。助手和后台提炼共用写入边界，后台只提炼关系/表达，身份和基础人设仅按当前明确要求修改。服务不逐轮扫描文件；运行期间人工修改后须先重启，避免覆盖冲突。
+
+`assistant-memory.sqlite` 保存来源、版本、纠正关系、遗忘规则、检索及实际快照；MEMORY 与 topics 继续以数据库为准，Markdown 是可读导出。新空间初始化既定奶龙 SELF；现役旧生成 SELF 一次迁移有效条目及依据，保留人工修改并排除撤回条目，不读取退役 namespace。已初始化后丢失 SELF 会阻止启动，须先恢复文件；写入失败不会确认成功，文件 rename 后元数据中断须重启按实际文件核对，不能由旧数据库还原覆盖。
 
 每条真实用户输入分别准备主题和 Akasha 原文召回，合批共享总预算；工具续步和 reopen 复用已记录结果，包括零命中。当前召回是本地词项/中文双字匹配，跨主题改述可能需要显式 `memory_search`；已知来源用 `memory_read` 分页。旧 Host/Akasha 未导入，工具全文保留在工具归档。
 
@@ -84,6 +88,8 @@ cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围�
 
 媒体保存在同级 `media/`，manifest 保留来源、类型和顺序。简单图片保持视觉输入；批量或大媒体在送入主模型前转为 manifest 与 helper 指引。高成本独立资料或媒体工作复用 herdr-workflow 和原 helper 身份，回传简洁结论及必要路径，主助手按需核验。浏览任务先确认 helper 能连接对应登录 tab。
 
+Telegram document 附件保存在 `<dataDir>/media/telegram/<消息 ID>-<内容摘要>/`。单文件下载限制 20 MiB，元数据、响应长度与实际流均检查；下载限时 30 秒。PDF 提取最多 200 页、2 MiB 正文，模型先获得最多 12000 字节预览及原 PDF/完整文本路径；其余类型仅给真实保存路径。说明文字仍是用户原话，文件正文是资料。超限、下载失败或 PDF 无文字/损坏会明确回复；提取失败保留原 PDF，不做 OCR，不执行附件。
+
 可选 `ASSISTANT_CONTEXT_CONFIG_FILE` 指向 JSON 文件，路径相对启动目录。可部分设置 archive、memory、media、compaction，其余使用默认值：
 
 | 配置 | 默认值 | 目的/上限 |
@@ -92,7 +98,7 @@ cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围�
 | archive.readBytes / maxReadBytes | 8192 / 32768 | 每页字节；硬上限 32768 |
 | archive.readLines / maxReadLines | 100 / 500 | 每页行数；硬上限 500 |
 | archive.searchLimit / maxSearchLimit / searchBytes | 10 / 50 / 8192 | 候选硬上限 50，响应预算最高 16384 字节 |
-| memory.residentBytes / topicBytes / akashaBytes | 6000 / 3000 / 4000 | 分开约束并按来源/事实去重 |
+| memory.residentBytes / topicBytes / akashaBytes | 6000 / 3000 / 4000 | SELF/MEMORY 合计常驻上限；SELF 至多占一半，其余给 MEMORY；主题/原文另计 |
 | memory.inputBytes / searchResults / readBytes | 8000 / 8 / 6000 | 每批自动材料总预算、显式搜索数、原文每页 |
 | media.batchImages / maxInlineBytes | 3 / 524288 | 达到图片数或超过字节阈值时转 manifest |
 | compaction | Pi Durable 1.2.0 默认策略 | 可覆盖 enabled、reserveTokens、keepRecentTokens、backgroundTokens |

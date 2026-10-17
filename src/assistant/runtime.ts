@@ -131,7 +131,7 @@ export async function createAssistant(options: AssistantOptions) {
         deliveries.length ? `已执行的用户控制进度（内部事实，不重复转交；sent 只证明发送，unknown 先核查）：${JSON.stringify(deliveries)}` : ""].filter(Boolean).join("\n");
     },
     onPreview: (preview: ReplyPreview) => { for (const listener of previews) listener(preview); },
-  });
+  }).catch(error => { state.close(); throw error; });
 
   async function submitSteer(record: SteerRecord) {
     const submission = await executor.steer(record.input.conversationId, { ...record.input, requestId: record.key });

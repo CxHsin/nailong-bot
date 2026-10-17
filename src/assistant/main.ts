@@ -1,6 +1,6 @@
 import { Bot } from "grammy";
 import { telegramEnvironment } from "../channel/telegram/index.js";
-import { downloadTelegramPhoto } from "../telegram/telegram-input.js";
+import { downloadTelegramPhoto, downloadTelegramDocument } from "../telegram/telegram-input.js";
 import { assistantEnvironment } from "./environment.js";
 import { connectTelegram } from "./telegram.js";
 
@@ -25,6 +25,7 @@ export async function startTelegram() {
       ownerId: telegram.ownerId,
       dataDir: runtime.dataDir,
       download: (id) => downloadTelegramPhoto(bot, telegram.token, id),
+      downloadDocument: (id) => downloadTelegramDocument(bot, telegram.token, id),
       reportFailure,
     });
     await bot.api.setMyCommands(

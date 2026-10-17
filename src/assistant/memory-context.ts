@@ -15,15 +15,26 @@ export async function sanitizeMemoryContext(messages: readonly Message[], memory
   const replacement = summary?.affected ? await options.rebuildSummary?.(summary) : undefined;
   if (summary?.affected && replacement === undefined) throw new Error("Affected compaction summary requires reconstruction from surviving originals and confirmed effects");
   return messages.map((message) => {
-    if (message.role === "system" && message.sections?.memory) return { ...message,
-      sections: { ...message.sections, memory: `<memory>\n${memory.snapshot(conversationId, generation, project)}\n</memory>` } };
+    if (message.role === "system" && (message.sections?.memory || message.sections?.self)) {
+      const snapshot = memory.snapshotInfo(conversationId, generation, project);
+      return { ...message, sections: { ...message.sections,
+        ...(message.sections.memory ? { memory: `<memory>\n${snapshot.text}\n</memory>` } : {}),
+        ...(message.sections.self ? { self: `<self>\n${snapshot.self ?? ""}\n</self>` } : {}) } };
+    }
     if (message.role === "toolResult" && message.toolName.startsWith("memory_") && containsExcluded(JSON.stringify(message.content))) {
       return { ...message, content: [{ type: "text" as const, text: "此历史记忆结果因用户遗忘已失效。使用当前记忆工具获取仍有效的材料。" }] };
     }
     if (message.role === "assistant") {
+      const cleaned = message.content.map(part => {
+        if (part.type !== "toolCall" || !part.name.startsWith("memory_")) return part;
+        const args = part.arguments as { sourceId?: string; quote?: string };
+        return containsExcluded(JSON.stringify(args)) || (args.quote && excluded.some(source => source.text.includes(args.quote!)))
+          ? { ...part, arguments: { retired: "Historical memory arguments removed after correction/forgetting" } } : part;
+      });
       const text = message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
       if (text && excluded.some((source) => source.text === text)) return { ...message,
-        content: message.content.map((part) => part.type === "text" ? { ...part, text: "此助手历史派生内容因用户遗忘或纠正已失效。" } : part) };
+        content: cleaned.map((part) => part.type === "text" ? { ...part, text: "此助手历史派生内容因用户遗忘或纠正已失效。" } : part) };
+      return { ...message, content: cleaned };
     }
     if (message.role !== "user") return message;
     const content = typeof message.content === "string" ? [{ type: "text" as const, text: message.content }] : message.content;

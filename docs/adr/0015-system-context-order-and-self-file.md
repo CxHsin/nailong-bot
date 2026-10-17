@@ -14,4 +14,8 @@ SELF 沿用同一压缩代固定快照、普通变化立即追加、压缩或 re
 
 正式规格为 [Issue #234](https://github.com/CxHsin/nailong-bot/issues/234)，见[本地规格归档](../research/system-context-self-spec-2026-10-17.md)。
 
-本项是已确认、尚未实现的设计，局部调整 [ADR-0012](0012-layered-memory-and-stable-context.md)中基础人设、SELF 权威来源与系统布局的方向。其余长期记忆、工具归档、来源治理和 Durable 边界保留。现行实现及既有验收仍适用于原基准；本轮只记录设计，不表示环境、数据或运行代码已经迁移。
+实现按 [#234](https://github.com/CxHsin/nailong-bot/issues/234)接入现役 Assistant Service：环境入口校验 `AGENT_SYSTEM_PROMPT`，公开 section API 按 base、skills、project、self、memory 排列；已有 root 通过 configure 清除旧 instructions。`SELF.md` 保存当前正文及条目依据，SQLite 保存来源、版本、排除、快照和变更；运行期间外部编辑在写入边界报冲突，服务重启才重新加载。文件 rename 后元数据中断时停止后续自动使用，重开按实际文件核对，避免旧数据库覆盖。
+
+普通写入保留冻结快照并投递增量；纠正或遗忘剔除受影响片段，不顺带归并无关新增内容。SELF/MEMORY 合计受常驻预算限制。现役旧生成档案迁移有效条目，人工修改优先，缺失文件只在首次初始化使用有效旧条目和既定奶龙默认值；初始化后的文件缺失须恢复后再启动。
+
+本项局部调整 [ADR-0012](0012-layered-memory-and-stable-context.md)中基础人设、SELF 权威来源与系统布局的方向，其余记忆、归档和 Durable 边界保留。[本次验收](../system-self-acceptance-20261017.md)记录协议编码、生命周期、持久化故障及真实模型证据；实现提交不代表生产服务已重启。

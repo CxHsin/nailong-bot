@@ -6,13 +6,13 @@
 
 后续正式规格为 [Issue #234](https://github.com/CxHsin/nailong-bot/issues/234)，另有[本地规格归档](system-context-self-spec-2026-10-17.md)。其中细化配置入口、SELF 权威性与迁移、快照生效、纠正遗忘及经用户确认的测试入口；规格不表示已实现。
 
-## 问题与当前实现
+## 问题与当时实现
 
 当前系统 section 为 project、skills、memory、material-routing、需要时出现的 external-effect-verification，最后是 SDK 追加的 instructions。基础指令位于记忆快照和条件性状态之后，不利于在这些材料更新后继续复用较稳定的前缀。仅保证同代顺序确定，并不等于按变化频率组织内容。
 
-[环境入口](../../src/assistant/environment.ts)读取 `AGENT_PROMPT_FILE`，默认 `system-prompt.md`；[执行器](../../src/assistant/durable-executor.ts)将其传入 root agent 的 instructions。SDK 对已存在 root 直接返回，不重新应用初始化配置；当前 reset 也不更新 instructions。因此修改文件后，已有会话重启或 reset 仍沿用旧值。
+当时的[环境入口](https://github.com/CxHsin/nailong-bot/blob/302532c32d30e47860f376bd051efa236b2191d4/src/assistant/environment.ts)读取 `AGENT_PROMPT_FILE`，默认 `system-prompt.md`；[执行器](https://github.com/CxHsin/nailong-bot/blob/302532c32d30e47860f376bd051efa236b2191d4/src/assistant/durable-executor.ts)将其传入 root agent 的 instructions。SDK 对已存在 root 直接返回，不重新应用初始化配置；当时 reset 也不更新 instructions。因此修改文件后，已有会话重启或 reset 仍沿用旧值。
 
-当前 [SELF.md 由记忆数据库生成](../../src/assistant/memory.ts)，直接编辑不会导入，基础人设仍在 `system-prompt.md`。本轮决定调整这一职责划分。现役行为与历史验收仍以 [ADR-0012](../adr/0012-layered-memory-and-stable-context.md)及其验收记录为准，不能由本设计推导实现已改变。
+当时 [SELF.md 由记忆数据库生成](https://github.com/CxHsin/nailong-bot/blob/302532c32d30e47860f376bd051efa236b2191d4/src/assistant/memory.ts)，直接编辑不会导入，基础人设仍在 `system-prompt.md`。本轮决定调整这一职责划分；后续实现状态见 [ADR-0015](../adr/0015-system-context-order-and-self-file.md)及其验收，本文保留讨论基准。
 
 ## 已确认的内容归属与顺序
 

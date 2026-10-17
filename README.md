@@ -23,7 +23,7 @@ Telegram 仅接收配置主人的私聊，支持文字、图片、Markdown 富�
 
 ## 数据与执行
 
-`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`，`ASSISTANT_WORK_DIR` 默认启动目录，`AGENT_PROMPT_FILE` 默认 `system-prompt.md`。会话重开沿用原工作目录。同一数据目录同时只允许一个进程；跨 CLI/Telegram 续聊须先停止前一进程。
+`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`，`ASSISTANT_WORK_DIR` 默认启动目录；必填 `AGENT_SYSTEM_PROMPT` 直接提供基础指令，支持 `.env` 中带引号的多行文本（见 [.env.example](.env.example)）。身份、人设和相处方式由 `<dataDir>/memory/SELF.md` 维护，人工编辑在服务重启时生效。旧 `AGENT_PROMPT_FILE` 不再读取。会话重开沿用原工作目录。同一数据目录同时只允许一个进程；跨 CLI/Telegram 续聊须先停止前一进程。
 
 使用独立执行数据空间，不导入旧会话历史、摘要、工具轨迹、Task 或 Akasha。旧实现、离线工具及 helper 导入按 [ADR-0014](docs/adr/0014-retire-legacy-code-and-data.md)退役，遗留数据由一次性维护清理，启动不自动删除资料。现役 helper 按已登记的真实身份接回。接收确认前保存完整输入与材料，意外重启续接已保存的批次和执行进度；明确暂停的工作需 `/resume` 继续。`/reset` 清理主上下文，保留排队输入、进度与委派，不等于取消工作。
 
