@@ -28,7 +28,7 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
     TINYFISH_API_KEY: "",
     AGENT_CAPABILITIES_FILE: "",
   };
-  const run = (text: string) =>
+  const run = (text: string, json = true) =>
     promisify(execFile)(
       process.execPath,
       [
@@ -39,7 +39,7 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
         text,
         "--conversation-id",
         "cli-test",
-        "--ndjson",
+        ...(json ? ["--ndjson"] : []),
       ],
       { env, timeout: 20_000, windowsHide: true },
     );
@@ -54,6 +54,11 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
     const cache = await run("/kvcache");
     assert.match(cache.stdout, /胃囊报表/);
     assert.match(cache.stdout, /数据缺失/);
+    const cacheOutput = JSON.parse(cache.stdout.trim()) as { textFormat: string; text: string };
+    assert.equal(cacheOutput.textFormat, "plain");
+    assert.match(cacheOutput.text, /1\. ⚪ 命中率：不可用\n数据缺失\nHit：不可用\nMiss：不可用\n合计输入：不可用\n\n2\./);
+    const plainCache = await run("/kvcache", false);
+    assert.equal(plainCache.stdout, `${cacheOutput.text}\n`);
   } finally {
     await f.close();
   }

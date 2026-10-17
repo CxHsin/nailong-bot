@@ -50,11 +50,13 @@ export async function cacheReport(dataDir: string, conversationId: string, batch
       settled.some(metric => metric.status === "error") ? "含失败请求" : "",
       settled.some(metric => metric.status === "aborted") ? "含取消请求" : "",
       running && pending ? "待结算" : "", missing ? "数据缺失" : ""].filter(Boolean);
-    const taste = rate === undefined || pending || missing ? "" : rate > 90 ? "入口即化，嗷呜，一口就想起来啦！" :
+    const unavailable = rate === undefined || pending > 0 || missing > 0;
+    const icon = unavailable ? "⚪" : rate > 90 ? "🟢" : rate > 70 ? "🟡" : rate > 40 ? "🟠" : "🔴";
+    const taste = unavailable ? "" : rate > 90 ? "入口即化，嗷呜，一口就想起来啦！" :
       rate > 70 ? "完美反刍，熟悉的味道又回来啦！" : rate > 40 ? "半生不熟，这口还得嚼一嚼！" : "咯牙警告，这次新食材有点多！";
-    return `${index + 1}.${notes.length ? ` ${notes.join(" · ")}` : ""}\n` +
-      `命中率：${rate === undefined ? "不可用" : `${rate.toFixed(1)}%`}${missing && valid.length ? "（仅已知用量）" : ""}\n` +
-      `Hit：${valid.length ? hit : "不可用"} · Miss：${valid.length ? miss : "不可用"} · 合计输入：${valid.length ? total : "不可用"}` +
+    return `${index + 1}. ${icon} 命中率：${rate === undefined ? "不可用" : `${rate.toFixed(1)}%`}${missing && valid.length ? "（仅已知用量）" : ""}\n` +
+      (notes.length ? `${notes.join(" · ")}\n` : "") +
+      `Hit：${valid.length ? hit : "不可用"}\nMiss：${valid.length ? miss : "不可用"}\n合计输入：${valid.length ? total : "不可用"}` +
       (taste ? `\n${taste}` : "");
   });
   return ["🦖 【奶龙赛博反刍胃囊报表】", ...rows,

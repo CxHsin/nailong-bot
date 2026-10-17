@@ -168,6 +168,27 @@ test("Telegram /kvcache normalizes bot addressing, authenticates and returns cac
   } finally { await f.close(); }
 });
 
+test("Telegram cache report sends literal multiline paragraphs while ordinary answers keep Markdown", async () => {
+  const f = await telegramFixture((_wire, response) => {
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "**hello**" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 630766, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 566272 } } })}\n\ndata: [DONE]\n\n`);
+  });
+  try {
+    await f.bot.handleUpdate(update(1)); await f.flush();
+    const command = update(2);
+    await f.bot.handleUpdate({ ...command, message: { ...command.message, text: "/kvcache" } });
+    await f.flush();
+    const messages = f.sent.filter(call => call.method === "sendRichMessage").map(call => JSON.parse(String(call.body)).rich_message);
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].markdown, "**hello**");
+    assert.equal(messages[1].markdown, undefined);
+    assert.deepEqual(messages[1].blocks, [{ type: "paragraph", text:
+      "🦖 【奶龙赛博反刍胃囊报表】\n\n1. 🟡 命中率：89.8%\nHit：566272\nMiss：64494\n合计输入：630766\n完美反刍，熟悉的味道又回来啦！" }]);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test("Telegram photo reaches native Pi and a requested file reaches sendDocument", async () => {
   const f = await telegramFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {

@@ -72,6 +72,7 @@ export async function connectTelegram(options: {
       return;
     }
     for (const page of richReplyPages(output.text)) {
+      const textFormat = output.textFormat === "plain" ? "plain" : page.textFormat;
       try {
         await send("text", async () => {
           const plain = {
@@ -80,7 +81,7 @@ export async function connectTelegram(options: {
           try {
             return await bot.api.sendRichMessage(
               ownerId,
-              page.textFormat === "plain"
+              textFormat === "plain"
                 ? plain
                 : { markdown: textOnlyMarkdown(page.text) },
             );
@@ -90,7 +91,7 @@ export async function connectTelegram(options: {
               description?: string;
             };
             if (
-              page.textFormat === "plain" ||
+              textFormat === "plain" ||
               failure.error_code !== 400 ||
               !/pars|format|rich|block|entit/i.test(failure.description ?? "")
             )

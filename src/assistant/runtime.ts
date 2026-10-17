@@ -17,7 +17,7 @@ import { cacheReport } from "./cache-report.js";
 
 export type AssistantInput = QueueInput;
 export type AssistantOutput = { conversationId: string; outputId?: string } & (
-  { type: "text"; text: string } | { type: "file"; path: string }
+  { type: "text"; text: string; textFormat?: "plain" | "markdown" } | { type: "file"; path: string }
 );
 export type AssistantOptions = {
   cwd?: string;
@@ -408,7 +408,7 @@ export async function createAssistant(options: AssistantOptions) {
         if (!input.images?.length && /^\/kvcache(?:\s|$)/.test(input.text.trim()) &&
           (!input.kind || input.kind === "command")) {
           const receipt = service.receiveQuery(input);
-          if (receipt.accepted) await emit({ conversationId: input.conversationId, outputId: `query:${receipt.eventId}`, type: "text",
+          if (receipt.accepted) await emit({ conversationId: input.conversationId, outputId: `query:${receipt.eventId}`, type: "text", textFormat: "plain",
             text: input.text.trim() === "/kvcache" ? await cacheReport(dataDir, input.conversationId, service.listBatches(input.conversationId)) : "用法：/kvcache（查看最近五轮）" }, []);
           return receipt;
         }

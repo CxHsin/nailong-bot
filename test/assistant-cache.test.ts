@@ -34,9 +34,24 @@ test("cache report groups tool requests, replaces pending, weights tokens and in
     metric("turn", 90, 10, { requestId: "tool-continuation", cacheWrite: 100 }),
   ]);
   assert.match(report, /命中率：75\.8%/);
-  assert.match(report, /Hit：910 · Miss：290 · 合计输入：1200/);
+  assert.match(report, /Hit：910\nMiss：290\n合计输入：1200/);
   assert.match(report, /完美反刍/);
   assert.doesNotMatch(report, /待结算|数据缺失|2\./);
+});
+
+test("cache report separates fields and rounds in plain text, with colors based on the unrounded rate", async () => {
+  const cases: Array<[number, string]> = [
+    [0, "🔴"], [4000, "🔴"], [4001, "🟠"], [7000, "🟠"], [7001, "🟡"],
+    [8900, "🟡"], [9000, "🟡"], [9001, "🟢"], [10000, "🟢"],
+  ];
+  for (const [hit, icon] of cases) {
+    const report = await reportFixture([metric("turn", 10000 - hit, hit)]);
+    assert.equal(report.split("\n")[2], `1. ${icon} 命中率：${(hit / 100).toFixed(1)}%`);
+  }
+  const report = await reportFixture([metric("older", 1, 99), metric("newer", 11, 89)]);
+  assert.equal(report, "🦖 【奶龙赛博反刍胃囊报表】\n\n" +
+    "1. 🟡 命中率：89.0%\nHit：89\nMiss：11\n合计输入：100\n完美反刍，熟悉的味道又回来啦！\n\n" +
+    "2. 🟢 命中率：99.0%\nHit：99\nMiss：1\n合计输入：100\n入口即化，嗷呜，一口就想起来啦！");
 });
 
 test("cache report shows newest five turns, excludes auxiliary and foreign metrics", async () => {
@@ -52,20 +67,23 @@ test("cache report distinguishes pending, interrupted, missing and measured zero
   const pending = metric("live", null, null, { status: "pending" });
   const batch: StoredBatch = { id: "live", requestKey: "live", conversationId: "one", events: [], resumed: false, reconcile: false, status: "running" };
   const live = await reportFixture([pending], [batch]);
+  assert.match(live, /1\. ⚪ 命中率：不可用\n进行中 · 待结算\nHit：不可用/);
   assert.match(live, /进行中 · 待结算/); assert.match(live, /Hit：不可用/); assert.doesNotMatch(live, /数据缺失/);
   const stopped = await reportFixture([pending], [{ ...batch, status: "paused" }]);
+  assert.match(stopped, /1\. ⚪ 命中率：不可用\n已暂停 · 数据缺失/);
   assert.match(stopped, /已暂停 · 数据缺失/); assert.doesNotMatch(stopped, /待结算/);
   const partial = await reportFixture([metric("partial", 1, 9), metric("partial", 100, null, { requestId: "missing" })]);
   assert.match(partial, /90\.0%（仅已知用量）/); assert.match(partial, /数据缺失/);
+  assert.match(partial, /1\. ⚪ 命中率：90\.0%（仅已知用量）\n数据缺失/);
   assert.doesNotMatch(partial, /完美反刍/);
   const zero = await reportFixture([metric("zero", 0, 0)]);
-  assert.match(zero, /命中率：不可用/); assert.match(zero, /Hit：0 · Miss：0 · 合计输入：0/);
+  assert.match(zero, /⚪ 命中率：不可用/); assert.match(zero, /Hit：0\nMiss：0\n合计输入：0/);
   assert.doesNotMatch(zero, /数据缺失/);
 });
 
 test("old metrics are labeled per request and incomplete JSON is disclosed", async () => {
   const report = await reportFixture([metric("old", 5, 10, { requestId: undefined, batchId: undefined, purpose: undefined })], [], '{"requestId":');
-  assert.match(report, /历史请求（未记录轮次\/用途）/); assert.match(report, /Hit：10 · Miss：5/);
+  assert.match(report, /1\. 🟠 命中率：66\.7%\n历史请求（未记录轮次\/用途）\nHit：10\nMiss：5/);
   assert.match(report, /部分请求记录无法读取/);
 });
 
@@ -96,18 +114,19 @@ test("/kvcache queries live model/tool work immediately without generating, queu
     await f.app.receive({ conversationId: "one", inputId: "work", text: "do work" }); await ready;
     const receipt = await f.app.receive(input);
     const initial = f.outputs.at(-1)!;
+    assert.equal(initial.type === "text" && initial.textFormat, "plain");
     assert.equal(receipt.accepted, true); assert.match(initial.type === "text" ? initial.text : "", /进行中 · 待结算/);
     assert.equal((await f.app.receive(input)).duplicate, true); assert.equal(f.outputs.length, 1); assert.equal(calls, 1);
     release(); await toolReady;
     await f.app.receive({ ...input, inputId: "query-tool" });
     const text = f.outputs.at(-1)!; assert.equal(text.type, "text");
-    if (text.type === "text") { assert.match(text.text, /Hit：900 · Miss：100 · 合计输入：1000/); assert.doesNotMatch(text.text, /待结算/); }
+    if (text.type === "text") { assert.match(text.text, /Hit：900\nMiss：100\n合计输入：1000/); assert.doesNotMatch(text.text, /待结算/); }
     assert.equal(f.app.routingStatus("one").works.length, 1, "queries do not create work");
     toolRelease(); await f.app.waitForIdle();
     await f.app.receive({ ...input, inputId: "query-done" });
     const done = f.outputs.at(-1)!; assert.equal(done.type, "text");
     if (done.type === "text") {
-      assert.match(done.text, /命中率：82\.7%/); assert.match(done.text, /Hit：910 · Miss：190 · 合计输入：1100/);
+      assert.match(done.text, /命中率：82\.7%/); assert.match(done.text, /Hit：910\nMiss：190\n合计输入：1100/);
       assert.doesNotMatch(done.text, /进行中|待结算|数据缺失|\n2\./);
     }
     assert.equal(calls, 2);
@@ -130,8 +149,8 @@ test("OpenAI compatible cache writes, top-level cache hits and absent input are 
       const output = f.outputs.at(-1)!; assert.equal(output.type, "text");
       if (output.type !== "text") continue;
       const row = output.text.split("\n\n")[1]!;
-      if (index === 0) assert.match(row, /Hit：600 · Miss：400 · 合计输入：1000/);
-      else if (index === 1) assert.match(row, /Hit：250 · Miss：250 · 合计输入：500/);
+      if (index === 0) assert.match(row, /Hit：600\nMiss：400\n合计输入：1000/);
+      else if (index === 1) assert.match(row, /Hit：250\nMiss：250\n合计输入：500/);
       else { assert.match(row, /数据缺失/); assert.match(row, /Hit：不可用/); }
     }
     assert.equal(calls, usages.length);
@@ -158,7 +177,7 @@ test("Anthropic SSE counts cache creation as Miss and cache reads as Hit", { tim
     await f.app.receive({ conversationId: "one", inputId: "work", text: "hello" }); await f.app.waitForIdle();
     await f.app.receive({ conversationId: "one", inputId: "cache", text: "/kvcache" });
     const output = f.outputs.at(-1)!; assert.equal(output.type, "text");
-    if (output.type === "text") { assert.match(output.text, /命中率：70\.0%/); assert.match(output.text, /Hit：700 · Miss：300 · 合计输入：1000/); }
+    if (output.type === "text") { assert.match(output.text, /命中率：70\.0%/); assert.match(output.text, /Hit：700\nMiss：300\n合计输入：1000/); }
   } finally { await f.close(); }
 });
 
