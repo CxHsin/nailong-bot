@@ -4,6 +4,8 @@ status: accepted
 
 # 分层记忆与稳定活动上下文分开维护
 
+2026-10-17，用户确认 [ADR-0015](0015-system-context-order-and-self-file.md)的后续设计：基础指令迁入环境配置，SELF 文件维护身份与关系，系统内容按稳定性排序。该方向尚未实现；下文保留当前实现与已有验收，不能据此认为运行代码或数据已经迁移。
+
 设计结论：[Issue #207](https://github.com/CxHsin/nailong-bot/issues/207)。正式规格：[Issue #208](https://github.com/CxHsin/nailong-bot/issues/208)，见[本地规格归档](../research/context-management-spec-2026-10-16.md)。
 
 2026-10-16，用户在 [上下文管理讨论](../research/context-management-decisions-2026-10-16.md) 中确认：长期记忆采用常驻 Markdown 档案、主题自动浮现和 Akasha 原文召回，保留主动搜索。允许有用户原话依据的稳定画像与关系理解，当前表达优先。该方向扩展 [ADR-0011](0011-durable-main-agent-and-conversation-queue.md) 留待后续的上下文与记忆范围。
