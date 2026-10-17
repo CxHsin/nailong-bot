@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, type ServerResponse } from "node:http";
+import { PersistentAssistantQueue } from "../../src/assistant/queue.js";
 import {
   createAssistant,
   type AssistantOptions,
@@ -12,6 +13,16 @@ export type Wire = {
   messages: Array<{ role: string; content: unknown; tool_call_id?: string }>;
   tools: Array<{ function: { name: string } }>;
 };
+// Classifier-specific scenarios need unfinished work; idle conversations bypass it.
+export async function seedPendingAssistantWork(directory: string, conversationId: string) {
+  const dataDir = join(directory, "fresh");
+  await mkdir(dataDir, { recursive: true });
+  const queue = new PersistentAssistantQueue(join(dataDir, "queue.sqlite"));
+  try {
+    queue.receive({ conversationId, inputId: "pending-context", text: "unfinished background report" });
+    queue.settle(queue.claim(conversationId)!.id, "paused");
+  } finally { queue.close(); }
+}
 export async function assistantFixture(
   provider: (wire: Wire, response: ServerResponse) => void | Promise<void>,
   configure?: (cwd: string) => Promise<Partial<AssistantOptions>>,

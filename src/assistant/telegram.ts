@@ -7,6 +7,7 @@ import { registerTelegramInput } from "../telegram/telegram-input.js";
 import { richReplyPages, textOnlyMarkdown } from "../telegram/rich-reply.js";
 import type { Assistant } from "./runtime.js";
 import { createDraftPreview } from "../telegram/draft-preview.js";
+import { saveTelegramDocument } from "./telegram-documents.js";
 
 export async function connectTelegram(options: {
   app: Assistant;
@@ -14,6 +15,7 @@ export async function connectTelegram(options: {
   ownerId: number;
   dataDir: string;
   download: (id: string) => Promise<ImageContent>;
+  downloadDocument?: (id: string) => Promise<Buffer>;
   reportFailure: (error: unknown) => void;
 }) {
   const { app, bot, ownerId, reportFailure } = options;
@@ -52,6 +54,7 @@ export async function connectTelegram(options: {
     try {
       const result = await drafts.withoutDrafts(action);
       await record({ id, status: "sent", messageId: result.message_id });
+      if (identity?.outputId) app.recordReply(identity.conversationId,String(result.message_id),identity.outputId);
     } catch (error) {
       const failure = error as { error_code?: number };
       await record({ id, status: failure.error_code ? "rejected" : "unknown" });
@@ -71,6 +74,7 @@ export async function connectTelegram(options: {
       return;
     }
     for (const page of richReplyPages(output.text)) {
+      const textFormat = output.textFormat === "plain" ? "plain" : page.textFormat;
       try {
         await send("text", async () => {
           const plain = {
@@ -79,7 +83,7 @@ export async function connectTelegram(options: {
           try {
             return await bot.api.sendRichMessage(
               ownerId,
-              page.textFormat === "plain"
+              textFormat === "plain"
                 ? plain
                 : { markdown: textOnlyMarkdown(page.text) },
             );
@@ -89,14 +93,14 @@ export async function connectTelegram(options: {
               description?: string;
             };
             if (
-              page.textFormat === "plain" ||
+              textFormat === "plain" ||
               failure.error_code !== 400 ||
               !/pars|format|rich|block|entit/i.test(failure.description ?? "")
             )
               throw error;
             return bot.api.sendRichMessage(ownerId, plain);
           }
-        });
+        }, {outputId:output.outputId,conversationId:output.conversationId});
       } catch {
         /* Receipts retain rejection/ambiguity; later pages can still be delivered. */
       }
@@ -106,14 +110,19 @@ export async function connectTelegram(options: {
     ownerId,
     botUsername: bot.botInfo.username,
     download: options.download,
+    document: options.downloadDocument ? async (id, name, messageId) => saveTelegramDocument(options.dataDir, messageId, name, await options.downloadDocument!(id)) : undefined,
     reportFailure,
     async handle(update, started) {
       await app.receive({
         conversationId,
         inputId: String(update.messageId),
         source: "telegram",
-        text: update.text ?? "请分析这张图片。",
+        text: update.text ?? (update.runtimeMaterials ? "请查看这个附件。" : "请分析这张图片。"),
+        userText: update.text ?? "",
+        replyToMessageId: update.replyToMessageId === undefined ? undefined : String(update.replyToMessageId),
+        replyToMessage: update.replyToMessage,
         images: update.images,
+        runtimeMaterials: update.runtimeMaterials,
       });
       started();
     },

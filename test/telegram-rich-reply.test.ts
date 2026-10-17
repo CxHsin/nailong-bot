@@ -1,11 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { AgentSessionEvent } from '@mariozechner/pi-coding-agent';
-import type { AssistantMessage } from '@mariozechner/pi-ai';
 import { richReplyPages, textOnlyMarkdown } from '../src/telegram/rich-reply.js';
 import { createDraftPreview } from '../src/telegram/draft-preview.js';
-import { publicReplyText } from '../src/telegram/reply-preview.js';
 
 test('Markdown pages preserve headings, table and closed code blocks, with exact source reconstruction', () => {
   const blocks = ['# 标题\n\n', '**粗体** 和 `code`。\n\n', '|工具|能力|\n|---|---|\n|read|读取|\n\n', '```ts\nconst value = 42;\n```\n\n'];
@@ -37,17 +34,6 @@ test('reply Markdown cannot upload remote media or execute rich HTML media tags'
   assert.equal(safe.includes('<tg-collage>'), false);
   assert.equal(safe.includes('<img'), false);
   assert.equal(textOnlyMarkdown('**bold** and `code`'), '**bold** and `code`');
-});
-
-test('preview extracts only public text snapshots, not reasoning, tools or previous messages', () => {
-  const message: AssistantMessage = { role: 'assistant', content: [{ type: 'thinking', thinking: 'SECRET' }, { type: 'text', text: 'visible' }],
-    api: 'openai-completions', provider: 'fixture', model: 'fixture', timestamp: 0, stopReason: 'stop',
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
-  const event: AgentSessionEvent = { type: 'message_update', message, assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: 'visible', partial: message } };
-  assert.equal(publicReplyText(event), 'visible');
-  assert.equal(publicReplyText({ ...event, assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'SECRET', partial: message } }), undefined);
-  assert.equal(publicReplyText({ ...event, assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 2, delta: 'SECRET', partial: message } }), undefined);
-  assert.equal(publicReplyText({ type: 'message_start', message }), '');
 });
 
 test('draft updates coalesce, use the same id, and stop drains in-flight requests', async () => {

@@ -1,6 +1,6 @@
 import { Bot } from "grammy";
 import { telegramEnvironment } from "../channel/telegram/index.js";
-import { downloadTelegramPhoto } from "../telegram/telegram-input.js";
+import { downloadTelegramPhoto, downloadTelegramDocument } from "../telegram/telegram-input.js";
 import { assistantEnvironment } from "./environment.js";
 import { connectTelegram } from "./telegram.js";
 
@@ -25,11 +25,13 @@ export async function startTelegram() {
       ownerId: telegram.ownerId,
       dataDir: runtime.dataDir,
       download: (id) => downloadTelegramPhoto(bot, telegram.token, id),
+      downloadDocument: (id) => downloadTelegramDocument(bot, telegram.token, id),
       reportFailure,
     });
     await bot.api.setMyCommands(
       [
         { command: "help", description: "使用方式" },
+        { command: "kvcache", description: "查看最近五轮 prompt cache 用量" },
         { command: "reset", description: "重置会话上下文，保留工作" },
         { command: "model", description: "查看或切换模型" },
         { command: "steer", description: "补充当前工作" },

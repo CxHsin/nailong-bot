@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { PersistentAssistantQueue, inputPriority, type QueueInput, type ProcessingBatch, type BatchStatus } from "./queue.js";
+import { PersistentAssistantQueue, inputPriority, type QueueInput, type PersistedInput, type ProcessingBatch, type BatchStatus, type RoutingAction, type RoutingDecision } from "./queue.js";
 import type { AssistantOutput } from "./runtime.js";
 
 export type { QueueInput, ProcessingBatch } from "./queue.js";
@@ -60,9 +60,9 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       started = true;
       for (const id of queue.conversations()) pump(id);
     },
-    async receive(input: QueueInput) {
+    async receive(input: QueueInput, routingPending = false) {
       if (closed) throw new Error("Assistant is closed");
-      const receipt = queue.receive(input);
+      const receipt = queue.receive(input,routingPending);
       if (!options.startPaused) started = true;
       const running = active.get(input.conversationId);
       if (receipt.accepted && running && inputPriority(input) > running.batch.events[0]!.priority)
@@ -78,10 +78,29 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       return receipt;
     },
     getActiveBatch(conversationId: string) { return active.get(conversationId)?.batch; },
+    receiveQuery(input: QueueInput) {
+      if (closed) throw new Error("Assistant is closed");
+      return queue.receiveQuery(input);
+    },
     getBatch(batchId: string) { return queue.getBatch(batchId); },
     recoverSteerTarget(batchId: string) { queue.recoverSteerTarget(batchId); },
     listBatches(conversationId?: string, statuses?: BatchStatus[]) { return queue.listBatches(conversationId,statuses); },
     listPending(conversationId?: string) { return queue.listPending(conversationId); },
+    listWorks(conversationId?: string) { return queue.listWorks(conversationId); },
+    routingPending(conversationId?: string) { return queue.routingPending(conversationId); },
+    routingRecord(eventId: string) { return queue.routingRecord(eventId); },
+    pendingHelperRoutes() { return queue.pendingHelperRoutes(); },
+    decideRoute(eventId: string, decision: RoutingDecision) { return queue.decideRoute(eventId,decision); },
+    updateAction(eventId: string, action: RoutingAction) { return queue.updateAction(eventId,action); },
+    finishRoute(eventId: string) {
+      const route=queue.routingPending().find((candidate)=>candidate.eventId===eventId);
+      queue.finishRoute(eventId);
+      if(route) pump(route.input.conversationId);
+    },
+    enqueueRoutedRequest(eventId: string, actionId: string) { return queue.enqueueRoutedRequest(eventId,actionId); },
+    requeueAction(eventId: string, actionId: string, reason: string) { const work = queue.requeueAction(eventId,actionId,reason); pump(work.conversationId); return work; },
+    supplementWork(targetId: string, input: PersistedInput, actionId: string) { return queue.supplementWork(targetId,input,actionId); },
+    cancelWork(targetId: string, helper = false) { return queue.cancelWork(targetId,helper); },
     requestPreempt(conversationId: string) { active.get(conversationId)?.controller.abort("control"); },
     subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
       listeners.add(listener); return () => { listeners.delete(listener); };

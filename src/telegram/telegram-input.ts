@@ -3,6 +3,23 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import type { Update } from "../application/app-types.js";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+export async function downloadTelegramDocument(bot: Bot, token: string, fileId: string, fetchFile: typeof fetch = fetch): Promise<Buffer> {
+  const file = await bot.api.getFile(fileId);
+  if ((file.file_size ?? 0) > MAX_DOCUMENT_BYTES) throw new Error("附件超过 20 MiB 下载限制");
+  if (!file.file_path) throw new Error("附件下载失败");
+  const response = await fetchFile(`https://api.telegram.org/file/bot${token}/${file.file_path}`, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok || !response.body) throw new Error("附件下载失败");
+  if (Number(response.headers.get("content-length")) > MAX_DOCUMENT_BYTES) throw new Error("附件超过 20 MiB 下载限制");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.byteLength;
+    if (size > MAX_DOCUMENT_BYTES) { await response.body.cancel().catch(() => {}); throw new Error("附件超过 20 MiB 下载限制"); }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
 export async function downloadTelegramPhoto(bot: Bot, token: string, fileId: string, fetchFile: typeof fetch = fetch): Promise<ImageContent> {
   const file = await bot.api.getFile(fileId);
   if (!file.file_path || (file.file_size ?? 0) > MAX_IMAGE_BYTES) throw new Error("图片超过下载限制");
@@ -28,12 +45,13 @@ export function registerTelegramInput(bot: Bot, options: {
   ownerId: number;
   botUsername?: string;
   download: (fileId: string) => Promise<ImageContent>;
+  document?: (fileId: string, name: string, messageId: number) => Promise<string>;
   handle: (input: Update, onStarted: () => void) => Promise<void>;
   reportFailure: (error?: unknown) => void;
 }) {
   const active = new Set<Promise<void>>();
   let acceptance = Promise.resolve();
-  bot.on(["message:text", "message:photo"], async (ctx) => {
+  bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
     if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private") return;
     let text = ctx.message.text ?? ctx.message.caption;
     if (text && options.botUsername) {
@@ -54,6 +72,18 @@ export function registerTelegramInput(bot: Bot, options: {
     acceptance = new Promise<void>((resolve) => { releaseAcceptance = resolve; });
     try {
       let images: ImageContent[] | undefined;
+      let runtimeMaterials: string[] | undefined;
+      if (ctx.message.document) {
+        try {
+          if ((ctx.message.document.file_size ?? 0) > MAX_DOCUMENT_BYTES) throw new Error("附件超过 20 MiB 下载限制");
+          if (!options.document) throw new Error("附件接收尚未配置");
+          runtimeMaterials = [await options.document(ctx.message.document.file_id, ctx.message.document.file_name ?? "attachment", ctx.message.message_id)];
+        } catch (error) {
+          const detail = error instanceof Error && /^(附件超过|PDF 正文提取失败)/.test(error.message) ? error.message : "附件读取失败";
+          await ctx.reply(`${detail}；这条消息尚未开始处理，请检查文件后重新发送。`);
+          return;
+        }
+      }
       if (ctx.message.photo) {
         try { images = [await options.download(ctx.message.photo.at(-1)!.file_id)]; }
         catch {
@@ -65,7 +95,12 @@ export function registerTelegramInput(bot: Bot, options: {
       let hasStarted = false;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const completed = options.handle({ userId: ctx.from.id, chatType: ctx.chat.type,
-        text, images, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id },
+        text, images, runtimeMaterials, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id,
+        ...(ctx.message.reply_to_message ? { replyToMessage: {
+          role: ctx.message.reply_to_message.from?.id === ctx.me.id ? "assistant" as const : "user" as const,
+          text: ctx.message.reply_to_message.text ?? ctx.message.reply_to_message.caption,
+          hasImages: Boolean(ctx.message.reply_to_message.photo?.length),
+        } } : {}) },
         () => { hasStarted = true; markStarted(); });
       active.add(completed);
       void completed.then(() => { active.delete(completed); }, (error) => {

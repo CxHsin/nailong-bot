@@ -1,6 +1,6 @@
 # 能力配置
 
-当前主助手使用 nailong 持久队列与 Pi Durable 1.2.0，见 [ADR-0011](adr/0011-durable-main-agent-and-conversation-queue.md) 与 [操作说明](personal-agent-operations.md)。模型/工具步骤由 Durable 执行器保存，普通输入按队列调度，仅显式 `/steer` 补充当前工作。执行继承本机账户权限，工作目录不是沙箱；用户授权和目标仓库规则继续约束范围。
+当前主助手使用 nailong 持久队列与 Pi Durable 1.2.0，见 [ADR-0011](adr/0011-durable-main-agent-and-conversation-queue.md) 与 [操作说明](personal-agent-operations.md)。模型/工具步骤由 Durable 执行器保存；输入按 [ADR-0013](adr/0013-contextual-input-routing.md)识别独立请求、自然语言补充和取消。执行继承本机账户权限，工作目录不是沙箱；用户授权和目标仓库规则继续约束范围。
 
 ## Skills、工具与连接器
 
@@ -18,4 +18,4 @@
 
 ## 边界
 
-主路径无需填写权限 roots/expiry 或成果结算表单。发布、外发、重要删除与合并依对应授权处理。新版恢复已接收工作和已确认步骤，不接入 Akasha、cron/邮件/Slack 连接器或旧会话历史。离线诊断和历史报告不参与在线模型上下文；当前验收范围见 [切换记录](durable-assistant-acceptance-20261015.md)。
+主路径无需填写权限 roots/expiry 或成果结算表单。发布、外发、重要删除与合并依对应授权处理。新版恢复已接收工作和已确认步骤；共享长期记忆、Akasha 原文召回和工具原件遵循 [ADR-0012](adr/0012-layered-memory-and-stable-context.md)。cron/邮件/Slack 连接器和旧会话导入仍在范围外。旧离线工具已按 [ADR-0014](adr/0014-retire-legacy-code-and-data.md)退役；历史报告仅保留原基准的证据，当前验收范围见 [切换记录](durable-assistant-acceptance-20261015.md)与[上下文验收](context-management-acceptance-20261016.md)。

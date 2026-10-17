@@ -1,16 +1,4 @@
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { RuntimeLog } from "../runtime/runtime-types.js";
-import type { RunProgress } from "../runtime/progress.js";
 
-export type Update = { userId: number; chatType: string; text?: string; images?: ImageContent[]; messageId: number; replyToMessageId?: number };
-export type Message = { role: "user" | "assistant"; text: string; images?: ImageContent[] };
-export type Request = { modelAlias?: string; contextBudgetBoost?: boolean; id: string; log: RuntimeLog; conversationId?: string; botPrompt?: string; botPromptVersion?: string;
-  channel?: string;
-  inputId?: string;
-  loadedSkillPaths?: string[];
-  onProgress?: (progress: RunProgress) => void;
-  signal?: AbortSignal;
-  onModelInput?: () => Promise<void> };
-export class DeliveryRejected extends Error {
-  constructor(message: string, readonly retryAfterMs?: number) { super(message); }
-}
+export type ReplyMessage = { role: "user" | "assistant"; text?: string; hasImages: boolean };
+export type Update = { userId: number; chatType: string; text?: string; images?: ImageContent[]; runtimeMaterials?: string[]; messageId: number; replyToMessageId?: number; replyToMessage?: ReplyMessage };

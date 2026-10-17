@@ -2,7 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { createHash } from "node:crypto";
 import { createAssistant } from "../src/assistant/runtime.js";
 import { join } from "node:path";
 import { Type } from "typebox";
@@ -11,22 +10,24 @@ import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => {resolve=done;}); return {promise,resolve}; }
 
-test("failed helper import releases the service lock so corrected data can start in the same process", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "nailong-import-failure-"));
-  const legacyDataDir = join(directory, "legacy");
-  const helperDir = join(legacyDataDir, "sessions", createHash("sha256").update("one").digest("hex"));
-  await mkdir(helperDir, { recursive: true });
-  await writeFile(join(legacyDataDir, "conversations.json"), JSON.stringify({ version: 1, conversations: [{ id: "one", cwd: directory }] }));
-  await writeFile(join(helperDir, "helpers.json"), "{broken json");
-  const options = { cwd: directory, dataDir: join(directory, "fresh"), legacyDataDir,
+test("failed queue startup releases the service lock so corrected data can start in the same process", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-startup-failure-"));
+  const dataDir = join(directory, "fresh");
+  await mkdir(dataDir);
+  const queueFile = join(dataDir, "queue.sqlite");
+  await mkdir(queueFile);
+  const options = { cwd: directory, dataDir,
     modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions" as const, model: "local", apiKey: "test", baseUrl: "http://127.0.0.1:1" }] } };
   let app: Awaited<ReturnType<typeof createAssistant>> | undefined;
   try {
-    await assert.rejects(createAssistant(options), SyntaxError);
-    await writeFile(join(helperDir, "helpers.json"), JSON.stringify({ version: 1, helpers: [] }));
+    await assert.rejects(createAssistant(options), /unable to open database file/);
+    await rm(queueFile, { recursive: true });
     app = await createAssistant(options);
+    const replies: string[] = [];
+    app.subscribe((output) => { if (output.type === "text") replies.push(output.text); });
     await app.receive({ conversationId: "one", inputId: "help", text: "/help" });
     await app.waitForIdle();
+    assert.match(replies.join("\n"), /\/reset/);
   } finally { await app?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -63,8 +64,8 @@ async function helperFixture(options:{crossRead?:boolean}={}) {
   const reading=deferred();const releaseRead=deferred();const inputs:string[]=[];
   const f=await assistantFixture((wire,response)=>{
     const last=JSON.stringify(wire.messages.at(-1));inputs.push(JSON.stringify(wire.messages));
-    if(last.includes("watch coder"))sendChatCompletion(response,"",[{index:0,id:"watch",type:"function",function:{name:"herdr_watch",arguments:JSON.stringify({session:"fixture",agent:"coder",paneId:"w1:p1",workspaceId:"w1",cwd:directory,promptPath:join(directory,"prompt.txt")})}}]);
-    else if(last.includes("herdr_result")){results++;sendChatCompletion(response,"checked helper result");}
+    if(last.includes("herdr_result")){results++;sendChatCompletion(response,"checked helper result");}
+    else if(last.includes("watch coder"))sendChatCompletion(response,"",[{index:0,id:"watch",type:"function",function:{name:"herdr_watch",arguments:JSON.stringify({session:"fixture",agent:"coder",paneId:"w1:p1",workspaceId:"w1",cwd:directory,promptPath:join(directory,"prompt.txt")})}}]);
     else sendChatCompletion(response,"ordinary reply");
   },async(cwd)=>{directory=cwd;await writeFile(join(cwd,"prompt.txt"),"inspect result.txt");return {pollMs:10,herdr:{async run(_session,args){
     if(args[1]==="read"){reads++;reading.resolve();if(options.crossRead)await releaseRead.promise;return "helper artifact, inspect result.txt";}

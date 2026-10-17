@@ -2,6 +2,10 @@
 
 One personal assistant uses a nailong-owned persistent Queue System and Pi Durable 1.2.0 through Telegram or CLI. Current design: [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md), [spec #201](https://github.com/CxHsin/nailong-bot/issues/201); migration verification is recorded in [current acceptance](docs/durable-assistant-acceptance-20261015.md). [ADR-0010](docs/adr/0010-native-pi-assistant.md) and older Host terminology retain historical evidence.
 
+Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layered-memory-and-stable-context.md) and [spec #208](https://github.com/CxHsin/nailong-bot/issues/208). Budgets, storage and verification are in [operations](docs/personal-agent-operations.md) and [context acceptance](docs/context-management-acceptance-20261016.md).
+
+System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-context-order-and-self-file.md) and [spec #234](https://github.com/CxHsin/nailong-bot/issues/234). Base instructions, skills, project instructions, SELF and MEMORY retain that effective order. Identity and core persona change only through the user's explicit current request; relationship and expression may evolve from sourced user evidence.
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -20,7 +24,7 @@ One personal assistant uses a nailong-owned persistent Queue System and Pi Durab
 
 **Helper Observation**: Saved session, agent, workspace, pane, cwd and prompt identity for an already dispatched helper. Returns are internal materials, saved before delivery to the correct main agent after queued direct input. Restart queries real identity and state; it never blindly launches work again.
 
-**Steering**: Explicit user supplementation of current main-agent work; see Explicit Steering below. Supplements for an external helper are separately routed by the skill.
+**Steering**: The Durable mechanism that delivers an identified Work Supplement at a supported input boundary. The former user command is retired.
 
 **Stop**: Explicit request handled against the actual external helper identity and process state. Unknown termination is reported honestly; existing effects remain.
 
@@ -30,11 +34,25 @@ One personal assistant uses a nailong-owned persistent Queue System and Pi Durab
 
 **Send Receipt**: Telegram's minimal sending/sent/rejected/unknown record. Unknown sends are not automatically retried. This is separate from the success of the user's work.
 
-**Historical Host / Task / Attempt / Akasha / Plan**: Retired online concepts retained in older documentation and offline diagnostics. The new data namespace neither loads nor migrates those records. Proactive responsibilities and timers are deferred.
+**Long-term Memory**: Shared sourced MEMORY facts/preferences, SELF identity/persona/relationship/expression, and global or Work Directory topics. Current user corrections replace old claims. Memory helps understanding; Durable Workflow and external evidence determine execution state.
+
+**SELF**: The current authoritative definition of the assistant's identity, persona, interaction principles and sourced relationship/expression understanding. Local configuration remains distinguishable from original user evidence. Current SELF and an actual generation's frozen snapshot are different facts.
+
+**Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
+
+**Memory Snapshot**: Actual resident memory material saved for one context generation. Ordinary changes append immediately; compaction or reset starts a new snapshot. Forgetting invalidates affected snapshots, recalled material and derived summaries immediately.
+
+**Tool Archive**: Persistent original tool output with a stable reference, bounded view and searchable provenance. Known references can be paged directly; missing references can be discovered without replaying the tool. It shares the Conversation data lifetime.
+
+**Default Forgetting**: Retracts derived memories and excludes the corresponding original sources and their derivatives from automatic recall and learning. Unrelated work progress remains available. Original records remain; physical deletion is a separate request.
+
+**Historical Host / Task / Attempt / Akasha / Plan**: Retired systems recorded in historical documentation and versioned source. Their implementations, offline tools and old helper import are retired under [ADR-0014](docs/adr/0014-retire-legacy-code-and-data.md). Production memory uses its own namespace and never imports their records. Proactive responsibilities and timers are deferred.
 
 ## Queue and workflow
 
-These terms follow the [confirmed specification](https://github.com/CxHsin/nailong-bot/issues/201) and [ADR-0011](docs/adr/0011-durable-main-agent-and-conversation-queue.md). Equal-priority direct inputs wait in arrival order; ordinary input does not implicitly steer current work. Implementation verification belongs in the acceptance record, not in these definitions.
+These terms follow [spec #201](https://github.com/CxHsin/nailong-bot/issues/201), [spec #215](https://github.com/CxHsin/nailong-bot/issues/215) and [ADR-0013](docs/adr/0013-contextual-input-routing.md). Independent direct requests wait in arrival order; Work Supplements and cancellation refer to identified work. Implementation verification belongs in the acceptance record, not in these definitions.
+
+Input routing follows contextual Work Supplements and retirement of the dedicated user command. Current implementation and live verification status are recorded in [routing acceptance](docs/contextual-input-routing-acceptance-20261016.md).
 
 **Input Event**: External input for the Personal Agent, such as a direct user message or a future scheduled, mail or thread notification. A delegated helper's return is internal execution material, not a message authored by the user.
 
@@ -44,10 +62,18 @@ These terms follow the [confirmed specification](https://github.com/CxHsin/nailo
 
 **Input Batch**: An ordered group of already queued ordinary Input Events selected when a Conversation is idle or its current Processing Turn ends. Each event retains its identity and message boundary; grouping does not imply a shared goal. Selection adds no timed wait and stops at commands or a change of source or priority.
 
-**Explicit Steering**: A user-authored `/steer` command that supplements current work at the next supported input boundary. Multiple accepted supplements may be read together in order, retaining their identities. Ordinary input remains queued for a later Processing Turn; steering is separate from stopping or priority preemption, and does not immediately stop running tools.
+**Work Target**: A stable reference to one independent user objective, preserving its original input and FIFO position. An Input Event can express several targets or actions; an Input Batch is their execution container.
+
+**Routing Action**: One ordered request, supplement, cancellation or clarification from an original Input Event, with a stable identity and confirmed delivery progress. A model chooses meaning and a supplied target; execution facts determine whether the action applies.
 
 **Event Priority**: The ordering that permits higher-priority input to interrupt lower-priority processing. Direct user inputs have equal priority to each other and wait in arrival order; they outrank background input.
 
 **Durable Workflow**: Saved execution progress and confirmed model/tool results that allow interrupted work to continue without repeating completed operations solely because execution restarted. It is separate from conversation history and helper-local context.
 
 **Paused Work**: A retained Processing Turn awaiting explicit user continuation or verification of an unknown effect. Restart preserves this state; `/resume` explicitly requests continuation within the same Conversation.
+
+## Input intent
+
+**Input Intent**: The user's meaning in an Input Event, interpreted with the relevant ongoing work and conversation context. It includes whether the message supplements existing work, requests separate work, or cancels identified work.
+
+**Work Supplement**: A user's addition or correction to ongoing work, including work delegated to a helper. Its relationship to that work follows from context rather than a dedicated command.

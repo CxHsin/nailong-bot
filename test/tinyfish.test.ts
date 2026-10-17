@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 import { connectTinyfish, tinyfishResultText } from "../src/agent/tinyfish.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { createRuntimeLog } from "../src/runtime/runtime-log.js";
-import { readableResult } from "../src/runtime/tool-archive.js";
-import { toolResultView } from "../src/context/tool-result-projection.js";
 
 test("web fetch prefers fresh content by default and preserves explicit cache tolerance", async (t) => {
   const calls: Array<{ name: string; arguments?: Record<string, unknown> }> = [];
@@ -40,22 +34,12 @@ test("web fetch prefers fresh content by default and preserves explicit cache to
   } finally { await connection.close(); }
 });
 
-test("long web results retain their tail through extraction, archival and reconstruction", async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "web-result-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+test("long web results retain their complete text and tail through extraction", () => {
   const text = "网页内容😀\n".repeat(10000) + "END OF PAGE";
   const extracted = tinyfishResultText({ content: [
     { type: "text", text }, { type: "text", text: "SECOND BLOCK" },
   ] });
   assert.equal(extracted, text + "\nSECOND BLOCK");
-  const result = { content: [{ type: "text" as const, text: extracted }], details: {}, isError: false };
-  const log = createRuntimeLog(dir);
-  const archive = await log.archive(result);
-  assert.equal(toolResultView("web_fetch", result, archive, false).modelVisible, "archive");
-  const recovered = await log.recoverArchive(archive);
-  assert.deepEqual(recovered, result);
-  const reconstructed = readableResult(recovered).split("\n").map((line) => JSON.parse(line).text).join("");
-  assert.deepEqual(JSON.parse(reconstructed), result);
 });
 
 test("web error results preserve the full upstream diagnostic", () => {

@@ -1,1 +1,4 @@
 .githooks/* text eol=lf
+.archify/** linguist-generated=true
+.archify/**/*.html text eol=lf
+.archify/**/*.json text eol=lf
