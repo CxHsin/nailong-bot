@@ -12,4 +12,6 @@ SELF 沿用同一压缩代固定快照、普通变化立即追加、压缩或 re
 
 ## 实施状态
 
+正式规格为 [Issue #234](https://github.com/CxHsin/nailong-bot/issues/234)，见[本地规格归档](../research/system-context-self-spec-2026-10-17.md)。
+
 本项是已确认、尚未实现的设计，局部调整 [ADR-0012](0012-layered-memory-and-stable-context.md)中基础人设、SELF 权威来源与系统布局的方向。其余长期记忆、工具归档、来源治理和 Durable 边界保留。现行实现及既有验收仍适用于原基准；本轮只记录设计，不表示环境、数据或运行代码已经迁移。

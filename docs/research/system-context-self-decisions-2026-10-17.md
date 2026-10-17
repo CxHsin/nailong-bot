@@ -1,8 +1,10 @@
 # 系统内容排序与 SELF 文件讨论
 
-日期：2026-10-17。状态：设计方向已逐项确认；尚未形成完整实现规格，未修改运行代码或部署服务。核查基准为 development 的 `780f2ea`，Pi Durable 版本为 1.2.0。
+日期：2026-10-17。状态：设计方向已逐项确认，正式规格已整理；未修改运行代码或部署服务。核查基准为 development 的 `780f2ea`，Pi Durable 版本为 1.2.0。
 
 已发布[结论 Issue #233](https://github.com/CxHsin/nailong-bot/issues/233)。架构决策见 [ADR-0015](../adr/0015-system-context-order-and-self-file.md)。
+
+后续正式规格为 [Issue #234](https://github.com/CxHsin/nailong-bot/issues/234)，另有[本地规格归档](system-context-self-spec-2026-10-17.md)。其中细化配置入口、SELF 权威性与迁移、快照生效、纠正遗忘及经用户确认的测试入口；规格不表示已实现。
 
 ## 问题与当前实现
 
