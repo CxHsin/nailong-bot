@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { MAX_DOCUMENT_BYTES } from "../telegram/telegram-input.js";
 
 /** Telegram bytes are data: only PDFs are parsed, and their text stays untrusted material. */
@@ -17,7 +18,9 @@ export async function saveTelegramDocument(dataDir: string, messageId: number, n
   if (!/\.pdf$/i.test(name) && !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) return saved;
   try {
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true });
+    // Resolve from the installed package for both src/dist; PDF.js reads a filesystem path ending in '/'.
+    const cMapUrl = fileURLToPath(new URL("./cmaps/", import.meta.resolve("pdfjs-dist/package.json"))).replaceAll("\\", "/");
+    const loading = getDocument({ data: new Uint8Array(bytes), useSystemFonts: true, cMapUrl, cMapPacked: true });
     try {
       const pdf = await loading.promise;
       const pages: string[] = [];
