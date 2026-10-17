@@ -78,6 +78,10 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       return receipt;
     },
     getActiveBatch(conversationId: string) { return active.get(conversationId)?.batch; },
+    receiveQuery(input: QueueInput) {
+      if (closed) throw new Error("Assistant is closed");
+      return queue.receiveQuery(input);
+    },
     getBatch(batchId: string) { return queue.getBatch(batchId); },
     recoverSteerTarget(batchId: string) { queue.recoverSteerTarget(batchId); },
     listBatches(conversationId?: string, statuses?: BatchStatus[]) { return queue.listBatches(conversationId,statuses); },

@@ -51,6 +51,9 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
     assert.match(first.stdout, /lotus reply/);
     const second = await run("what name");
     assert.match(second.stdout, /lotus reply/);
+    const cache = await run("/kvcache");
+    assert.match(cache.stdout, /胃囊报表/);
+    assert.match(cache.stdout, /数据缺失/);
   } finally {
     await f.close();
   }

@@ -147,6 +147,27 @@ test("Telegram authenticates and deduplicates input and returns rich output from
   }
 });
 
+test("Telegram /kvcache normalizes bot addressing, authenticates and returns cache reports without a model", async () => {
+  let requests = 0;
+  const f = await telegramFixture((_wire, response) => { requests++; sendChatCompletion(response, "unexpected"); });
+  const command = (id: number, text: string, actor = 42) => {
+    const item = update(id, actor);
+    return { ...item, message: { ...item.message, text } };
+  };
+  try {
+    await f.bot.handleUpdate(command(1, "/kvcache", 43));
+    await f.bot.handleUpdate(command(2, "/kvcache@other_bot"));
+    await f.bot.handleUpdate(command(3, "/kvcache@test_bot"));
+    await f.bot.handleUpdate(command(3, "/kvcache@test_bot"));
+    await f.flush();
+    assert.equal(requests, 0);
+    const reports = f.sent.filter(call => call.method === "sendRichMessage");
+    assert.equal(reports.length, 1);
+    assert.match(String(reports[0]!.body), /胃囊报表/);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test("Telegram photo reaches native Pi and a requested file reaches sendDocument", async () => {
   const f = await telegramFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {

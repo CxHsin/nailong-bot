@@ -13,6 +13,7 @@ import { createDurableExecutor } from "./durable-executor.js";
 import type { DurableExecutorOptions } from "./durable-executor.js";
 import { AssistantState, requireFreshNamespace, type SteerRecord } from "./state.js";
 import type { ReplyPreview } from "../telegram/draft-preview.js";
+import { cacheReport } from "./cache-report.js";
 
 export type AssistantInput = QueueInput;
 export type AssistantOutput = { conversationId: string; outputId?: string } & (
@@ -160,7 +161,7 @@ export async function createAssistant(options: AssistantOptions) {
     if (first.kind === "command") {
       if (command === "/help") {
         await control.emit({ conversationId: batch.conversationId, type: "text",
-          text: "直接用自然语言交办、补充或取消工作；独立请求按 FIFO 排队。/reset 重置上下文并保留工作；/resume [批次ID] 继续暂停工作；/model 查看或切换主模型。" });
+          text: "直接用自然语言交办、补充或取消工作；独立请求按 FIFO 排队。/reset 重置上下文并保留工作；/resume [批次ID] 继续暂停工作；/model 查看或切换主模型；/kvcache 即时查看最近五轮 prompt cache 用量。" });
         return { status: "completed" as const };
       }
       if (command === "/reset") {
@@ -404,6 +405,13 @@ export async function createAssistant(options: AssistantOptions) {
       const accepted = acceptance.then(async () => {
         if (closed) throw new Error("助手服务已关闭");
         workDir(input.conversationId);
+        if (!input.images?.length && /^\/kvcache(?:\s|$)/.test(input.text.trim()) &&
+          (!input.kind || input.kind === "command")) {
+          const receipt = service.receiveQuery(input);
+          if (receipt.accepted) await emit({ conversationId: input.conversationId, outputId: `query:${receipt.eventId}`, type: "text",
+            text: input.text.trim() === "/kvcache" ? await cacheReport(dataDir, input.conversationId, service.listBatches(input.conversationId)) : "用法：/kvcache（查看最近五轮）" }, []);
+          return receipt;
+        }
         const direct = !input.source || ["telegram","cli","user","direct"].includes(input.source);
         const classify = direct && (input.kind ?? (input.text.trimStart().startsWith("/") ? "command" : "message")) === "message";
         const receipt = await service.receive({...input,receivedAt:input.receivedAt ?? Date.now()},classify);

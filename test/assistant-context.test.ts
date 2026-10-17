@@ -4,6 +4,7 @@ import { assistantFixture, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RequestMetric } from "../src/assistant/durable-models.js";
 
 test("assistant reports actual provider request sizes and preserves the encoded prefix across reopen", { timeout: 15000 }, async () => {
   const requests: Wire[] = [];
@@ -83,7 +84,9 @@ test("native capacity compaction preserves recent input and resumes after reopen
 
 test("native compaction refines its covered original user evidence into memory", { timeout: 30000 }, async () => {
   let refinements = 0;
+  let summaries = 0;
   const requests: Wire[] = [];
+  const metrics: RequestMetric[] = [];
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);
     if (text.includes("nailong-memory-refinement")) {
@@ -92,12 +95,14 @@ test("native compaction refines its covered original user evidence into memory",
       const sourceId = text.match(/source:[a-f0-9]{64}/)?.[0];
       sendChatCompletion(response, JSON.stringify([{ action: "add", kind: "MEMORY", content: "用户偏好荷花", quote: "我喜欢荷花", sourceId }]));
     } else if (text.includes("context summarization assistant")) {
+      summaries++;
       sendChatCompletion(response, "## Goal\nContinue garden.\n## Progress\n### Done\n- started\n### In Progress\n- watering\n## Next Steps\n1. Continue");
     } else if (wire.messages.at(-1)?.role === "user" && text.includes("记住共享偏好GLOBAL_ONLY_EVIDENCE")) {
       sendChatCompletion(response, "", [{ index: 0, id: "global-evidence", type: "function", function: { name: "memory_write",
         arguments: JSON.stringify({ action: "add", kind: "MEMORY", content: "GLOBAL_ONLY_EVIDENCE", quote: "GLOBAL_ONLY_EVIDENCE", expectedVersion: 0 }) } }]);
     } else { requests.push(wire); sendChatCompletion(response, "recorded garden conversation"); }
   }, async () => ({
+    onRequestMetrics: metric => { metrics.push(metric); },
     modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions", model: "local", apiKey: "test", baseUrl: "", contextWindow: 7000, maxTokens: 1024 }] },
     compaction: { reserveTokens: 1500, keepRecentTokens: 600, backgroundTokens: 0 },
   }));
@@ -114,6 +119,9 @@ test("native compaction refines its covered original user evidence into memory",
     await f.app.receive({ conversationId: "one", inputId: "flowers", text: "我喜欢什么花？" });
     await f.app.waitForIdle();
     assert.match(JSON.stringify(requests.at(-1)), /用户偏好荷花/);
+    assert.equal(metrics.filter(metric => metric.purpose === "auxiliary").length, summaries + refinements);
+    assert.equal(metrics.filter(metric => metric.purpose === "execution").length, requests.length + 1);
+    assert.ok(metrics.every(metric => metric.batchId && metric.requestId));
   } finally { await f.close(); }
 });
 

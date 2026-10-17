@@ -63,8 +63,10 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     const cwd = resolve(options.workDir?.(conversationId) ?? options.cwd ?? process.cwd());
     const directory = join(rootDirectory, createHash("sha256").update(conversationId).digest("hex"));
     await mkdir(directory, { recursive: true });
-    const catalog = durableModels(options.modelConfiguration, { conversationId, record(metric) {
-      try { appendFileSync(join(directory, "requests.jsonl"), JSON.stringify(metric) + "\n"); options.onRequestMetrics?.(metric); }
+    let activeBatch: string | undefined;
+    const catalog = durableModels(options.modelConfiguration, { conversationId, batchId: () => activeBatch, record(metric) {
+      try { appendFileSync(join(directory, "requests.jsonl"), JSON.stringify(metric) + "\n");
+        if (metric.status !== "pending") options.onRequestMetrics?.(metric); }
       catch (error) { options.reportFailure?.(error); }
     } });
     const archive = createToolArchive({ directory: join(directory, "archives"), conversationId, limits: options.archive });
@@ -356,6 +358,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         return { input, sourceIds };
       },
       async selectWork(batch: DurableBatch) {
+        activeBatch = batch.id;
         activeWork = `${batch.id}:${batch.retryEpoch ?? 0}`;
         activeRequest = batch.requestKey;
         const work = (await harness.snapshot(RetryBudgetDoc, root.id, context))?.work[activeWork];

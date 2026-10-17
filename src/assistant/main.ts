@@ -30,6 +30,7 @@ export async function startTelegram() {
     await bot.api.setMyCommands(
       [
         { command: "help", description: "使用方式" },
+        { command: "kvcache", description: "查看最近五轮 prompt cache 用量" },
         { command: "reset", description: "重置会话上下文，保留工作" },
         { command: "model", description: "查看或切换模型" },
         { command: "steer", description: "补充当前工作" },

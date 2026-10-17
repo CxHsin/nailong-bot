@@ -3,13 +3,22 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
 import { configuredModel, type ModelConfiguration } from "../agent/model-config.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 
 /** Preserve endpoint identities and compatibility flags while moving execution to Durable's pi-ai. */
 export type RequestMetric = { conversationId: string; model: string; provider: string; api: string;
   at: string; requestBytes: number; durationMs: number; input: number | null; output: number | null;
-  cacheRead: number | null; cacheWrite: number | null; status: string };
-export function durableModels(configuration: ModelConfiguration, observe?: { conversationId: string; record: (metric: RequestMetric) => void }) {
+  cacheRead: number | null; cacheWrite: number | null; status: string;
+  requestId?: string; batchId?: string; purpose?: "execution" | "auxiliary" };
+export function durableModels(configuration: ModelConfiguration, observe?: {
+  conversationId: string; batchId?: () => string | undefined; record: (metric: RequestMetric) => void;
+}) {
   const models = createModels();
+  // Durable streams main generations; completeSimple is used for summaries and memory extraction.
+  const purpose = new AsyncLocalStorage<"auxiliary">();
+  const complete = models.completeSimple.bind(models);
+  models.completeSimple = (...args) => purpose.run("auxiliary", () => complete(...args));
   const available = configuration.models.map((config) => {
     const model = configuredModel(config) as unknown as Model<Api>;
     const api = config.api === "anthropic-messages" ? anthropicMessagesApi() :
@@ -22,8 +31,15 @@ export function durableModels(configuration: ModelConfiguration, observe?: { con
       const stream = provider.streamSimple.bind(provider);
       provider.streamSimple = (selected, transcript, options) => {
         const started = Date.now();
+        const identity = { requestId: randomUUID(), batchId: observe.batchId?.(),
+          purpose: purpose.getStore() ?? "execution" as const };
+        const pending: RequestMetric = { ...identity, conversationId: observe.conversationId,
+          model: selected.id, provider: selected.provider, api: selected.api, at: new Date(started).toISOString(),
+          requestBytes: 0, durationMs: 0, input: null, output: null, cacheRead: null, cacheWrite: null, status: "pending" };
+        observe.record(pending);
         let requestBytes = 0;
         let usageAvailable = false;
+        let inputAvailable = false;
         let cacheReadAvailable = false;
         let cacheWriteAvailable = false;
         // Inspect the real provider encoding without replacing it or storing credentials/content.
@@ -51,9 +67,11 @@ export function durableModels(configuration: ModelConfiguration, observe?: { con
                         const usage = data.usage ?? data.message?.usage ?? data.response?.usage;
                         if (usage) {
                           usageAvailable = true;
-                          cacheReadAvailable ||= usage.cache_read_input_tokens !== undefined || usage.prompt_cache_hit_tokens !== undefined ||
-                            usage.prompt_tokens_details?.cached_tokens !== undefined || usage.input_tokens_details?.cached_tokens !== undefined;
-                          cacheWriteAvailable ||= usage.cache_creation_input_tokens !== undefined || usage.prompt_cache_miss_tokens !== undefined;
+                          inputAvailable ||= usage.input_tokens != null || usage.prompt_tokens != null;
+                          cacheReadAvailable ||= usage.cache_read_input_tokens != null || usage.prompt_cache_hit_tokens != null ||
+                            usage.cached_tokens != null || usage.prompt_tokens_details?.cached_tokens != null || usage.input_tokens_details?.cached_tokens != null;
+                          cacheWriteAvailable ||= usage.cache_creation_input_tokens != null || usage.prompt_cache_miss_tokens != null ||
+                            usage.prompt_tokens_details?.cache_write_tokens != null;
                         }
                       } catch { /* SSE non-JSON terminator. */ }
                     }
@@ -68,10 +86,10 @@ export function durableModels(configuration: ModelConfiguration, observe?: { con
             return response;
           },
         });
-        void events.result().then((message) => observe.record({ conversationId: observe.conversationId,
+        void events.result().then((message) => observe.record({ ...identity, conversationId: observe.conversationId,
           model: selected.id, provider: selected.provider, api: selected.api, at: new Date(started).toISOString(),
           requestBytes, durationMs: Date.now() - started, status: message.stopReason,
-          input: usageAvailable ? message.usage.input : null, output: usageAvailable ? message.usage.output : null,
+          input: inputAvailable ? message.usage.input : null, output: usageAvailable ? message.usage.output : null,
           cacheRead: cacheReadAvailable ? message.usage.cacheRead : null, cacheWrite: cacheWriteAvailable ? message.usage.cacheWrite : null,
         }));
         return events;

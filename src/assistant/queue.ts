@@ -106,7 +106,7 @@ export class PersistentAssistantQueue {
         SELECT i.id,i.id,i.conversation,i.sequence,0,i.priority,i.source,i.kind,i.payload,
           CASE WHEN i.batch_id IS NULL THEN 'queued' WHEN b.status='preempted' THEN 'running' ELSE COALESCE(b.status,'queued') END,
           i.batch_id,b.submission FROM inputs i LEFT JOIN batches b ON b.id=i.batch_id
-          WHERE NOT EXISTS(SELECT 1 FROM routing r WHERE r.event_id=i.id);`);
+          WHERE i.kind!='query' AND NOT EXISTS(SELECT 1 FROM routing r WHERE r.event_id=i.id);`);
   }
   private transaction<T>(work: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -114,8 +114,9 @@ export class PersistentAssistantQueue {
     catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
   receive(input: QueueInput, routingPending = false) { return this.store(input, "inputs", routingPending); }
+  receiveQuery(input: QueueInput) { return this.store(input, "inputs", false, true); }
   receiveInternal(input: QueueInput) { return this.store({ ...input, source: input.source ?? "herdr", kind: "internal", priority: input.priority ?? 0 }, "internal_results"); }
-  private store(input: QueueInput, table: "inputs" | "internal_results", routingPending = false) {
+  private store(input: QueueInput, table: "inputs" | "internal_results", routingPending = false, query = false) {
     const source = input.source ?? (input.conversationId.startsWith("telegram:") ? "telegram" : "cli");
     const priority = inputPriority(input);
     if (!Number.isFinite(priority)) throw new Error("Input priority must be finite");
@@ -126,8 +127,9 @@ export class PersistentAssistantQueue {
       if (existing) return { accepted: false, duplicate: true, eventId: existing.id };
       const eventId = randomUUID();
       this.db.prepare(`INSERT INTO ${table}(id,conversation,source,input_id,priority,kind,payload) VALUES(?,?,?,?,?,?,?)`)
-        .run(eventId, input.conversationId, source, input.inputId, priority, kind, JSON.stringify({ ...input, receivedAt: input.receivedAt ?? Date.now(), source, priority, kind }));
-      if (table === "inputs") {
+        // Query receipts must also stay out of the startup work backfill.
+        .run(eventId, input.conversationId, source, input.inputId, priority, query ? "query" : kind, JSON.stringify({ ...input, receivedAt: input.receivedAt ?? Date.now(), source, priority, kind }));
+      if (table === "inputs" && !query) {
         if (routingPending) this.db.prepare("INSERT INTO routing(event_id,state) VALUES(?,'pending')").run(eventId);
         else this.addWork(this.getInput(eventId)!, eventId, 0);
         // Persist the interruption decision with receipt, before the cooperative abort can run.
