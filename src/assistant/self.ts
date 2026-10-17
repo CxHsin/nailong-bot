@@ -19,7 +19,7 @@ export const INITIAL_SELF = `# SELF
 工具动作的昵称仅作风格参考，不必反复复述：grep 是“奶龙雷达”，find 是“奶龙嗅觉”，write 是“奶龙踩脚印”，edit 是“奶龙大尾巴乱涂乱画”，web_search 是“奶龙去外面的世界探险”，web_fetch 是“奶龙翻网页小本本”。实际调用使用原工具名和参数，只提真实路径。
 `;
 
-type Part = { text: string; entry?: MemoryEntry };
+type Part = { text: string; entry?: MemoryEntry; project?: string; selfSection?: MemoryEntry["selfSection"] };
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** Current text lives in this file. SQLite keeps provenance and delivered snapshots, never regenerates it. */
@@ -37,20 +37,23 @@ export class SelfFile {
       const entry = JSON.parse(match[1]!) as MemoryEntry;
       if (entry.kind !== "SELF" || typeof entry.id !== "string" || typeof entry.sourceId !== "string") throw new Error(`Invalid SELF entry in ${path}`);
       const content = match[2]!;
-      this.parts.push({ text: content, entry: content === entry.content ? entry : undefined });
+      this.parts.push({ text: content, entry: content === entry.content ? entry : undefined, project: entry.project, selfSection: entry.selfSection });
       cursor = match.index! + match[0].length;
     }
     if (cursor) this.addPlain(this.text.slice(cursor));
     else if (/^Source version:/m.test(this.text)) {
       // The retired export includes stable IDs. Preserve modified bodies as local configuration.
       let modified = false;
-      for (const paragraph of this.text.split(/\r?\n\r?\n/)) {
-        if (!paragraph.trim() || /^# SELF|^Source version:/.test(paragraph)) continue;
-        const saved = legacy.find(entry => paragraph.includes(`id=${entry.id} `));
-        const content = paragraph.replace(/^\[SELF[^\]]*\]\s*/, "").replace(/\r?\nquote: [\s\S]*$/, "").trim();
+      const body = this.text.replace(/^# SELF\s*\r?\n/, "").replace(/^Source version:[^\n]*\n?/m, "").trim();
+      for (const block of body.split(/(?=^\[SELF\s)/m)) {
+        if (!block.trim()) continue;
+        const id = block.match(/^\[SELF\s[^\]]*?id=([^\s\]]+)/)?.[1];
+        const saved = legacy.find(entry => entry.id === id);
+        const content = block.replace(/^\[SELF[^\]]*\]\s*/, "").replace(/\r?\nquote: [\s\S]*$/, "").trim();
         if (saved && !saved.active && saved.content === content) continue;
         if (!saved || saved.content !== content) modified = true;
-        if (content) this.parts.push({ text: content, entry: saved && saved.content === content ? saved : undefined });
+        if (content) this.parts.push({ text: content, entry: saved && saved.content === content ? saved : undefined,
+          project: saved?.project, selfSection: saved?.selfSection });
       }
       if (!modified) {
         const learned = this.parts;
@@ -64,7 +67,7 @@ export class SelfFile {
       if (trimmed) this.parts.push({ text: trimmed });
     }
   }
-  entries(local: (content: string, key: string, section: MemoryEntry["selfSection"]) => MemoryEntry) {
+  entries(local: (content: string, key: string, section: MemoryEntry["selfSection"], project?: string) => MemoryEntry) {
     let section: MemoryEntry["selfSection"] = "identity";
     return this.parts.flatMap(part => {
       if (/^#{1,6} [^\n]+$/.test(part.text)) {
@@ -73,7 +76,7 @@ export class SelfFile {
         else section = "identity";
         return [];
       }
-      part.entry ??= local(part.text, digest(part.text), section);
+      part.entry ??= local(part.text, digest(part.project ? JSON.stringify([part.text, part.project]) : part.text), part.selfSection ?? section, part.project);
       return [part.entry];
     });
   }

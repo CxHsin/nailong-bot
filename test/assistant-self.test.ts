@@ -133,7 +133,7 @@ test("SELF file write failure and an external edit do not confirm or overwrite a
   } finally { await f.close(); }
 });
 
-for (const scenario of ["generated", "manual", "missing"] as const) test(`SELF migrates current ${scenario} data once and excludes retired entries`, async () => {
+for (const scenario of ["generated", "multiline", "edited_legacy", "edited_managed", "manual", "missing"] as const) test(`SELF migrates current ${scenario} data once and excludes retired entries`, async () => {
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => { requests.push(wire); sendChatCompletion(response, "ack"); }, async directory => {
     const data = join(directory, "fresh"); await mkdir(join(data, "memory"), { recursive: true });
@@ -142,13 +142,14 @@ for (const scenario of ["generated", "manual", "missing"] as const) test(`SELF m
       db.exec("CREATE TABLE memory_sources(id TEXT PRIMARY KEY,payload TEXT NOT NULL); CREATE TABLE memory_entries(id TEXT PRIMARY KEY,payload TEXT NOT NULL)");
       for (const [id, active] of [["legacy", true], ["retired", false]] as const) {
         const source = { id: `source:${id}`, conversationId: "old", inputId: id, text: id, role: "user", at: "2026-10-16", source: "cli" };
-        const entry = { id, active, sourceId: source.id, action: "add", kind: "SELF", content: `SELF_${id}`, quote: id, version: 0, at: source.at };
+        const entry = { id, active, sourceId: source.id, action: "add", kind: "SELF", content: `SELF_${id}${scenario === "multiline" && active ? "\n\nSECOND_PARAGRAPH" : ""}`,
+          ...(["multiline", "edited_legacy", "edited_managed"].includes(scenario) ? { project: directory } : {}), quote: id, version: 0, at: source.at };
         db.prepare("INSERT INTO memory_sources VALUES(?,?)").run(source.id, JSON.stringify(source));
         db.prepare("INSERT INTO memory_entries VALUES(?,?)").run(id, JSON.stringify(entry));
       }
     } finally { db.close(); }
     if (scenario !== "missing") await writeFile(join(data, "memory", "SELF.md"), scenario === "manual" ? "# SELF\n\nMANUAL_MIGRATION\n" :
-      "# SELF\n\nSource version: 0\n\n[SELF id=legacy version=0 source=source:legacy role=user at=2026-10-16] SELF_legacy\nquote: legacy\n\n[SELF id=retired version=0 source=source:retired role=user at=2026-10-16] SELF_retired\nquote: retired\n");
+      `# SELF\n\nSource version: 0\n\n[SELF id=legacy version=0 source=source:legacy role=user at=2026-10-16] SELF_legacy${scenario === "multiline" ? "\n\nSECOND_PARAGRAPH" : scenario === "edited_legacy" ? "_MANUAL_CHANGE" : ""}\nquote: legacy\n\n[SELF id=retired version=0 source=source:retired role=user at=2026-10-16] SELF_retired\nquote: retired\n`);
     return {};
   });
   try {
@@ -157,9 +158,30 @@ for (const scenario of ["generated", "manual", "missing"] as const) test(`SELF m
     assert.match(body, scenario === "manual" ? /MANUAL_MIGRATION/ : /SELF_legacy/);
     assert.doesNotMatch(body, /SELF_retired/);
     if (scenario === "manual") assert.doesNotMatch(body, /SELF_legacy/);
+    const selfPath = join(f.options.dataDir, "memory", "SELF.md");
+    if (scenario === "edited_managed") {
+      await f.app.close();
+      const file = await readFile(selfPath, "utf8");
+      await writeFile(selfPath, file.replace(/\nSELF_legacy\n/, "\nSELF_legacy_MANUAL_CHANGE\n"));
+      await f.reopen();
+      await f.app.receive({ conversationId: "one", inputId: "edited", text: "continue" }); await f.app.waitForIdle();
+      assert.match(JSON.stringify(requests.at(-1)), /SELF_legacy_MANUAL_CHANGE/);
+    }
     const before = await readFile(join(f.options.dataDir, "memory", "SELF.md"), "utf8");
+    if (scenario === "multiline") {
+      assert.match(before, /"id":"legacy"/);
+      assert.match(before, /"sourceId":"source:legacy"/);
+      assert.match(before, /"project":/);
+      assert.match(body, /SECOND_PARAGRAPH/);
+    }
     await f.reopen();
     assert.equal(await readFile(join(f.options.dataDir, "memory", "SELF.md"), "utf8"), before);
+    if (["multiline", "edited_legacy", "edited_managed"].includes(scenario)) {
+      const otherProject = join(f.directory, "other-project"); await mkdir(otherProject);
+      f.options.cwd = otherProject; await f.reopen();
+      await f.app.receive({ conversationId: "other", inputId: "scope", text: "hello" }); await f.app.waitForIdle();
+      assert.doesNotMatch(JSON.stringify(requests.at(-1)), /SELF_legacy|SECOND_PARAGRAPH/);
+    }
   } finally { await f.close(); }
 });
 

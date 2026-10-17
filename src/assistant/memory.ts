@@ -110,11 +110,11 @@ export class AssistantMemory {
     if (initialized && !existsSync(selfPath)) throw new Error(`SELF file is missing: ${selfPath}; restore it before starting`);
     this.selfFile = new SelfFile(selfPath, initialized ? "" : INITIAL_SELF + "\n" + legacy.map(entry =>
       `<!-- self-entry ${JSON.stringify(entry)} -->\n${entry.content}\n<!-- /self-entry -->`).join("\n\n"), storedSelf);
-    this.selfEntries = this.selfFile.entries((content, key, selfSection) => {
+    this.selfEntries = this.selfFile.entries((content, key, selfSection, project) => {
       const sourceId = `source:${createHash("sha256").update(`self-config:${key}`).digest("hex")}`;
-      const source: MemorySource = { id: sourceId, conversationId: "local:self", inputId: key, text: content, source: "self-config", role: "config", at: new Date().toISOString() };
+      const source: MemorySource = { id: sourceId, conversationId: "local:self", inputId: key, text: content, source: "self-config", role: "config", at: new Date().toISOString(), ...(project ? { project } : {}) };
       this.db.prepare("INSERT OR IGNORE INTO memory_sources VALUES(?,?)").run(sourceId, JSON.stringify(source));
-      return { id: `self:${key}`, sourceId, quote: "", content, kind: "SELF", action: "add", selfSection, active: true, version: this.version(), at: source.at };
+      return { id: `self:${key}`, sourceId, quote: "", content, kind: "SELF", action: "add", selfSection, active: true, version: this.version(), at: source.at, ...(project ? { project } : {}) };
     }).filter(entry => {
       if (!this.source(entry.sourceId)) throw new Error(`SELF entry ${entry.id} has no provenance; correct the file before starting`);
       return entry.active && !excluded.has(entry.sourceId);
