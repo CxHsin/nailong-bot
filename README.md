@@ -1,4 +1,6 @@
-<h1 align="center">Nailong bot</h1>
+<h1 align="center">
+  <img src=".github/assets/nailong-icon.jpg" alt="Nailong bot 图标" width="72" height="72" valign="middle" /> Nailong bot
+</h1>
 
 <p align="center">运行在 Windows 本机的个人助手，通过 Telegram 或终端交办工作，保存执行进度与长期记忆。</p>
 
