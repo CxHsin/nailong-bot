@@ -7,13 +7,13 @@
   "quality": "showcase",
   "specification": {
     "path": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\candidate.json",
-    "sha256": "2c02fb552e8f9cdc1ef459c5a48c2aa4e182448a167553d3f81813074e2f9718",
-    "bytes": 16481
+    "sha256": "45025981aba8737fd88f56046d74b804ba4aa9f7d507bab111bc19638384959a",
+    "bytes": 18940
   },
   "artifact": {
     "path": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\nailong-runtime.html",
-    "sha256": "f38f9dbca9f038e87e58637fd51bada7f81eb13f23394b5a37ef111d787f59e0",
-    "bytes": 790977
+    "sha256": "f9d278fb4a2876a0f894b52b70856c3dd3ceb2f1e55d8d1cae7281f819746c50",
+    "bytes": 794376
   },
   "gates": {
     "validate": "pass",
@@ -28,239 +28,179 @@
     "truncated": false
   },
   "evidence": {
-    "receipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261012\\nailong-runtime.finalize.json",
-    "summaryReceipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261012\\nailong-runtime.finalize-summary.json",
-    "browserCheckReceipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261012\\nailong-runtime.browser-check.json"
+    "receipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261017\\final\\nailong-runtime.finalize.json",
+    "summaryReceipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261017\\final\\nailong-runtime.finalize-summary.json",
+    "browserCheckReceipt": "D:\\Code\\nailong bot\\.archify\\architecture-nailong-runtime-20261004-210224\\review-20261017\\final\\nailong-runtime.browser-check.json"
   },
   "update": {
-    "status": "current",
+    "status": "update_available",
     "installedVersion": "3.0.1",
-    "availableVersion": "3.0.1",
-    "releaseNotes": null,
-    "checkedAt": "2026-10-12T06:05:08.132Z",
+    "availableVersion": "3.1.0",
+    "releaseNotes": "https://github.com/tt-a1i/archify/releases/tag/v3.1.0",
+    "severity": "normal",
+    "checkedAt": "2026-10-17T04:40:29.601Z",
     "source": "cache",
-    "noticeRequired": false,
-    "noticeText": null
+    "noticeRequired": true,
+    "noticeText": "Archify update: 3.0.1 → 3.1.0. A previous check at 2026-10-17T04:40:29.601Z found a newer release. Release notes: https://github.com/tt-a1i/archify/releases/tag/v3.1.0. The installed Skill has not changed; ask to snooze or ignore this reminder.",
+    "eventKey": "archify@sha256:ffedc53390c9da6e859f41e432c5d2d0615a23cf00a503181f07efbba88a7ce8"
   },
   "visualReview": "not-requested",
-  "durationMs": 3378,
+  "durationMs": 3603,
   "visualReviewRecommendation": {
     "action": "inspect-route-readability",
     "signals": {
-      "resolvedCrossovers": 6,
-      "routesOverSuggestedBends": 4
+      "resolvedCrossovers": 5,
+      "routesOverSuggestedBends": 1
     },
     "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
     "affectedRoutes": {
       "crossings": [
         {
           "left": {
-            "id": "input",
-            "from": "user",
-            "to": "channels",
-            "label": "认证输入",
-            "collectionIndex": 0,
-            "artifactIndex": 1
+            "id": "supplement",
+            "from": "service",
+            "to": "durable",
+            "label": "运行中补充",
+            "collectionIndex": 4,
+            "artifactIndex": 5
           },
           "right": {
-            "id": "historical-memory",
-            "from": "historical",
-            "to": "memory",
-            "label": "历史记忆来源",
-            "collectionIndex": 18,
-            "artifactIndex": 19
+            "id": "reply",
+            "from": "durable",
+            "to": "service",
+            "label": "正文 / send_file",
+            "collectionIndex": 5,
+            "artifactIndex": 6
           },
           "point": [
-            289.2,
-            358
-          ]
-        },
-        {
-          "left": {
-            "id": "delegate",
-            "from": "host",
-            "to": "herdr",
-            "label": "herdr Task",
-            "collectionIndex": 8,
-            "artifactIndex": 9
-          },
-          "right": {
-            "id": "local-acceptance",
-            "from": "pi",
-            "to": "acceptance",
-            "label": "local 执行证据",
-            "collectionIndex": 9,
-            "artifactIndex": 10
-          },
-          "point": [
-            890,
-            514.5
-          ]
-        },
-        {
-          "left": {
-            "id": "delegate",
-            "from": "host",
-            "to": "herdr",
-            "label": "herdr Task",
-            "collectionIndex": 8,
-            "artifactIndex": 9
-          },
-          "right": {
-            "id": "verdict",
-            "from": "acceptance",
-            "to": "host",
-            "label": "独立验收结论",
-            "collectionIndex": 12,
-            "artifactIndex": 13
-          },
-          "point": [
-            722,
-            484.22222222222223
+            471,
+            478
           ],
-          "sharedNode": "host"
+          "sharedNode": "service"
         },
         {
           "left": {
-            "id": "delegate",
-            "from": "host",
-            "to": "herdr",
-            "label": "herdr Task",
-            "collectionIndex": 8,
-            "artifactIndex": 9
+            "id": "supplement",
+            "from": "service",
+            "to": "durable",
+            "label": "运行中补充",
+            "collectionIndex": 4,
+            "artifactIndex": 5
           },
           "right": {
-            "id": "recall",
-            "from": "pi",
-            "to": "memory",
-            "label": "记忆工具",
-            "collectionIndex": 15,
-            "artifactIndex": 16
+            "id": "helper-return",
+            "from": "helpers",
+            "to": "queue",
+            "label": "内部材料低优先入队",
+            "collectionIndex": 11,
+            "artifactIndex": 12
           },
           "point": [
-            916,
-            514.5
+            471,
+            437
           ]
         },
         {
           "left": {
-            "id": "local-acceptance",
-            "from": "pi",
-            "to": "acceptance",
-            "label": "local 执行证据",
-            "collectionIndex": 9,
-            "artifactIndex": 10
+            "id": "reply",
+            "from": "durable",
+            "to": "service",
+            "label": "正文 / send_file",
+            "collectionIndex": 5,
+            "artifactIndex": 6
           },
           "right": {
-            "id": "recall",
-            "from": "pi",
-            "to": "memory",
-            "label": "记忆工具",
-            "collectionIndex": 15,
-            "artifactIndex": 16
+            "id": "helper-return",
+            "from": "helpers",
+            "to": "queue",
+            "label": "内部材料低优先入队",
+            "collectionIndex": 11,
+            "artifactIndex": 12
           },
           "point": [
-            890,
-            546
-          ],
-          "sharedNode": "pi"
+            457,
+            437
+          ]
         },
         {
           "left": {
-            "id": "verdict",
-            "from": "acceptance",
-            "to": "host",
-            "label": "独立验收结论",
-            "collectionIndex": 12,
-            "artifactIndex": 13
+            "id": "state",
+            "from": "service",
+            "to": "state",
+            "label": "保存 / 对账",
+            "collectionIndex": 8,
+            "artifactIndex": 9
           },
           "right": {
-            "id": "recall",
-            "from": "pi",
-            "to": "memory",
-            "label": "记忆工具",
-            "collectionIndex": 15,
-            "artifactIndex": 16
+            "id": "helper-return",
+            "from": "helpers",
+            "to": "queue",
+            "label": "内部材料低优先入队",
+            "collectionIndex": 11,
+            "artifactIndex": 12
           },
           "point": [
-            725,
-            546
+            443,
+            437
+          ]
+        },
+        {
+          "left": {
+            "id": "state",
+            "from": "service",
+            "to": "state",
+            "label": "保存 / 对账",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "right": {
+            "id": "watch",
+            "from": "durable",
+            "to": "helpers",
+            "label": "登记 herdr_watch",
+            "collectionIndex": 13,
+            "artifactIndex": 14
+          },
+          "point": [
+            443,
+            597
           ]
         }
       ],
       "detours": [
         {
           "relationship": {
-            "id": "store",
-            "from": "host",
-            "to": "store",
-            "label": "业务事实",
-            "collectionIndex": 4,
-            "artifactIndex": 5
+            "id": "watch",
+            "from": "durable",
+            "to": "helpers",
+            "label": "登记 herdr_watch",
+            "collectionIndex": 13,
+            "artifactIndex": 14
           },
-          "bends": 3,
-          "stretch": 1
-        },
-        {
-          "relationship": {
-            "id": "freeze",
-            "from": "acceptance",
-            "to": "artifacts",
-            "label": "冻结验收成果",
-            "collectionIndex": 11,
-            "artifactIndex": 12
-          },
-          "bends": 3,
-          "stretch": 1.077,
+          "bends": 4,
+          "stretch": 1.214,
           "directCorridorBlockers": [
             {
-              "id": "herdr",
-              "label": "herdr Executor",
+              "id": "state",
+              "label": "协调状态 / assistant.sqlite",
               "box": [
-                940,
-                570,
-                210,
-                76
+                340,
+                600,
+                220,
+                84
               ]
             }
           ]
-        },
-        {
-          "relationship": {
-            "id": "recall",
-            "from": "pi",
-            "to": "memory",
-            "label": "记忆工具",
-            "collectionIndex": 15,
-            "artifactIndex": 16
-          },
-          "bends": 3,
-          "stretch": 1
-        },
-        {
-          "relationship": {
-            "id": "historical-memory",
-            "from": "historical",
-            "to": "memory",
-            "label": "历史记忆来源",
-            "collectionIndex": 18,
-            "artifactIndex": 19
-          },
-          "bends": 4,
-          "stretch": 1
         }
       ],
       "truncated": false
     },
     "hints": [
-      "user → channels crosses historical → memory: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
-      "host → herdr crosses pi → acceptance: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
-      "host → herdr and acceptance → host cross next to host: move node herdr or acceptance so the two reach host from different sides (for example one level with it, one directly above or below it).",
-      "host → herdr crosses pi → memory: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
-      "pi → acceptance and pi → memory cross next to pi: move node acceptance or memory so the two reach pi from different sides (for example one level with it, one directly above or below it).",
-      "acceptance → host crosses pi → memory: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
-      "host → store needs 3 bends: move node host or store so they share a row or column with matching centers, or sit diagonally with a clear corner.",
-      "pi → memory needs 3 bends: move node pi or memory so they share a row or column with matching centers, or sit diagonally with a clear corner."
+      "service → durable and durable → service cross next to service: move node durable or durable so the two reach service from different sides (for example one level with it, one directly above or below it).",
+      "service → durable crosses helpers → queue: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "durable → service crosses helpers → queue: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "service → state crosses helpers → queue: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "service → state crosses durable → helpers: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor."
     ],
     "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
   }

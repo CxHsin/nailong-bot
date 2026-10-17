@@ -2,78 +2,49 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Nailong Bot · Native Pi Assistant Codemap",
+    "title": "Nailong Bot · 持久助手 Codemap",
     "locale": "zh-CN",
-    "subtitle": "2026-10-14 · development 5b93ef3 · ADR-0010",
     "output": ".archify/architecture-nailong-runtime-20261004-210224/nailong-runtime.html",
     "quality_profile": "showcase",
     "repository": {
       "url": "https://github.com/CxHsin/nailong-bot.git",
       "provider": "github",
       "link_mode": "web",
-      "revision": "5b93ef399a2e92d7a278252f8ff84d1367a185c4"
+      "revision": "302532c32d30e47860f376bd051efa236b2191d4"
     }
   },
   "components": [
     {
-      "id": "user",
-      "type": "external",
-      "label": "用户 / Telegram API",
-      "sublabel": "owner 私聊 · 本机 CLI",
+      "id": "channels",
+      "type": "frontend",
+      "label": "Telegram / CLI",
+      "sublabel": "owner 私聊 · 原文 / 图片 / 回复关联",
       "pos": [
         20,
-        320
+        240
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
-          "path": "src/main.ts",
-          "line": 1,
-          "end_line": 2,
-          "label": "Telegram 正式入口"
+          "path": "src/assistant/telegram.ts",
+          "line": 119,
+          "end_line": 135,
+          "label": "Telegram 输入与回复身份"
         },
         {
           "path": "src/cli/main.ts",
           "line": 9,
-          "end_line": 26,
-          "label": "CLI 会话与输出"
-        }
-      ]
-    },
-    {
-      "id": "channels",
-      "type": "frontend",
-      "label": "Telegram / CLI Channels",
-      "sublabel": "身份校验 · 图片 / 富文本 / 文件",
-      "pos": [
-        320,
-        320
-      ],
-      "size": [
-        220,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/assistant/telegram.ts",
-          "line": 12,
-          "end_line": 42,
-          "label": "连接与草稿预览"
+          "end_line": 23,
+          "label": "CLI 会话和输出"
         },
         {
-          "path": "src/assistant/telegram.ts",
-          "line": 64,
-          "end_line": 113,
-          "label": "富文本 / 文件及输入"
-        },
-        {
-          "path": "src/cli/main.ts",
-          "line": 36,
-          "end_line": 55,
-          "label": "CLI 输入与图片"
+          "path": "src/telegram/telegram-input.ts",
+          "line": 1,
+          "end_line": 45,
+          "label": "通道身份与消息类型"
         }
       ]
     },
@@ -81,287 +52,305 @@
       "id": "service",
       "type": "backend",
       "label": "Assistant Service",
-      "sublabel": "输入去重 · 会话选择 · 串行接入",
+      "sublabel": "接入 · 路由执行 · 输出与恢复协调",
       "pos": [
-        640,
-        320
+        340,
+        240
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
           "path": "src/assistant/runtime.ts",
-          "line": 106,
-          "end_line": 146,
-          "label": "独占目录与会话索引"
+          "line": 41,
+          "end_line": 69,
+          "label": "装配与帮手控制"
         },
         {
           "path": "src/assistant/runtime.ts",
-          "line": 480,
-          "end_line": 554,
-          "label": "去重 / reset / model / steering"
+          "line": 212,
+          "end_line": 293,
+          "label": "按实际状态投递动作"
+        },
+        {
+          "path": "src/assistant/runtime.ts",
+          "line": 403,
+          "end_line": 418,
+          "label": "先保存输入再发起分类"
+        }
+      ]
+    },
+    {
+      "id": "intent",
+      "type": "backend",
+      "label": "上下文意图判断",
+      "sublabel": "独立模型可选 · 失败交回主 Bot",
+      "pos": [
+        340,
+        40
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/runtime.ts",
+          "line": 296,
+          "end_line": 330,
+          "label": "原话 / 近期交流 / 实际工作"
+        },
+        {
+          "path": "src/assistant/intent.ts",
+          "line": 96,
+          "end_line": 156,
+          "label": "预算、分类与原文动作校验"
         },
         {
           "path": "src/assistant/environment.ts",
-          "line": 10,
-          "end_line": 42,
-          "label": "生产装配"
+          "line": 12,
+          "end_line": 24,
+          "label": "分类模型别名配置"
         }
       ]
     },
     {
-      "id": "pi",
+      "id": "queue",
+      "type": "messagebus",
+      "label": "持久队列 / queue.sqlite",
+      "sublabel": "去重 · 目标与动作 · FIFO / 合批",
+      "pos": [
+        660,
+        240
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/queue.ts",
+          "line": 73,
+          "end_line": 137,
+          "label": "输入与路由持久接收"
+        },
+        {
+          "path": "src/assistant/queue.ts",
+          "line": 260,
+          "end_line": 305,
+          "label": "按优先级认领有限快照"
+        },
+        {
+          "path": "src/assistant/queued-service.ts",
+          "line": 27,
+          "end_line": 65,
+          "label": "目录独占与每会话串行执行"
+        }
+      ]
+    },
+    {
+      "id": "durable",
       "type": "backend",
-      "label": "Native Pi Session",
-      "sublabel": "模型循环 · 工具 · steering / 压缩",
+      "label": "Pi Durable 主会话",
+      "sublabel": "批次执行 · 补充 / 中断 · 有限重试",
       "pos": [
-        960,
-        320
+        660,
+        600
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
-          "path": "src/assistant/runtime.ts",
-          "line": 189,
-          "end_line": 218,
-          "label": "资源发现与扩展"
+          "path": "src/assistant/durable-executor.ts",
+          "line": 296,
+          "end_line": 304,
+          "label": "Harness 与 root 装配"
         },
         {
-          "path": "src/assistant/runtime.ts",
-          "line": 235,
-          "end_line": 278,
-          "label": "原生 Session 创建与绑定"
+          "path": "src/assistant/durable-executor.ts",
+          "line": 395,
+          "end_line": 500,
+          "label": "提交、恢复与暂停结果"
         },
         {
-          "path": "src/assistant/runtime.ts",
-          "line": 284,
-          "end_line": 345,
-          "label": "回复与原生重试事件"
-        }
-      ]
-    },
-    {
-      "id": "models",
-      "type": "external",
-      "label": "Model Providers",
-      "sublabel": "配置别名 · /model · 原生重试",
-      "pos": [
-        1280,
-        320
-      ],
-      "size": [
-        220,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/agent/agent-models.ts",
-          "line": 21,
-          "end_line": 42,
-          "label": "模型选择与运行时凭据"
-        },
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 526,
-          "end_line": 543,
-          "label": "会话模型切换"
-        }
-      ]
-    },
-    {
-      "id": "state",
-      "type": "database",
-      "label": "Assistant State",
-      "sublabel": "独占锁 · 指针 · 去重 · 工作目录",
-      "pos": [
-        320,
-        100
-      ],
-      "size": [
-        220,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 109,
-          "end_line": 136,
-          "label": "owner.sqlite / conversations.json"
-        },
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 154,
-          "end_line": 186,
-          "label": "inputs.json / helpers.json"
-        },
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 220,
-          "end_line": 241,
-          "label": "session.json 指针"
-        }
-      ]
-    },
-    {
-      "id": "sessions",
-      "type": "database",
-      "label": "Native Session Files",
-      "sublabel": "sessions/<conversation hash>/ · JSONL",
-      "pos": [
-        960,
-        100
-      ],
-      "size": [
-        220,
-        76
-      ],
-      "sources": [
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 154,
-          "end_line": 160,
-          "label": "会话目录"
-        },
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 220,
-          "end_line": 261,
-          "label": "原生 JSONL 重开"
-        },
-        {
-          "path": "src/assistant/runtime.ts",
-          "line": 74,
-          "end_line": 103,
-          "label": "磁盘 custom-message 回执"
+          "path": "src/assistant/durable-executor.ts",
+          "line": 502,
+          "end_line": 526,
+          "label": "补充 / reset / 模型切换"
         }
       ]
     },
     {
       "id": "tools",
       "type": "external",
-      "label": "Native Tools / MCP / Skills",
-      "sublabel": "read / bash · 资源发现 · TinyFish 可选",
+      "label": "工具 / MCP / Skills",
+      "sublabel": "本机 Shell · 项目指令 · TinyFish 可选",
       "pos": [
-        1280,
-        100
+        980,
+        240
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 70,
+          "end_line": 99,
+          "label": "原生工具、连接器和资源"
+        },
+        {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 177,
+          "end_line": 185,
+          "label": "扩展工具与稳定 sections"
+        },
+        {
           "path": "src/assistant/environment.ts",
-          "line": 17,
-          "end_line": 42,
-          "label": "MCP / Skills / TinyFish 接入"
+          "line": 48,
+          "end_line": 77,
+          "label": "MCP / Skills / TinyFish 装配"
+        }
+      ]
+    },
+    {
+      "id": "models",
+      "type": "external",
+      "label": "模型服务",
+      "sublabel": "主模型别名 · 分类使用独立配置",
+      "pos": [
+        980,
+        600
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/durable-models.ts",
+          "line": 1,
+          "end_line": 90,
+          "label": "Durable 模型适配与指标"
+        },
+        {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 296,
+          "end_line": 304,
+          "label": "主模型、思考及重试设置"
+        },
+        {
+          "path": "src/assistant/intent.ts",
+          "line": 79,
+          "end_line": 104,
+          "label": "分类模型的实际 API 请求"
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "协调状态 / assistant.sqlite",
+      "sublabel": "cwd · helper 身份 · 动作 / 输出对账",
+      "pos": [
+        340,
+        600
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/state.ts",
+          "line": 20,
+          "end_line": 49,
+          "label": "会话与 helper / steer / 输出表"
+        },
+        {
+          "path": "src/assistant/state.ts",
+          "line": 64,
+          "end_line": 93,
+          "label": "控制进度及回复目标关联"
         },
         {
           "path": "src/assistant/runtime.ts",
-          "line": 189,
-          "end_line": 218,
-          "label": "DefaultResourceLoader / send_file"
-        },
-        {
-          "path": ".agents/skills/herdr-workflow/SKILL.md",
-          "line": 1,
-          "end_line": 30,
-          "label": "项目编码委派技能"
+          "line": 369,
+          "end_line": 395,
+          "label": "恢复未消费动作与控制进度"
         }
       ]
     },
     {
       "id": "receipts",
       "type": "database",
-      "label": "Telegram Send Receipts",
-      "sublabel": "sending / sent / rejected / unknown",
+      "label": "Telegram 发送与预览",
+      "sublabel": "草稿 ≠ 最终发送 ≠ 用户目标完成",
       "pos": [
         20,
-        570
+        40
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
           "path": "src/assistant/telegram.ts",
-          "line": 24,
-          "end_line": 30,
-          "label": "telegram-sends.jsonl"
+          "line": 22,
+          "end_line": 68,
+          "label": "sending / sent / rejected / unknown"
         },
         {
           "path": "src/assistant/telegram.ts",
-          "line": 44,
-          "end_line": 62,
-          "label": "发送状态与回执"
-        }
-      ]
-    },
-    {
-      "id": "preview",
-      "type": "frontend",
-      "label": "Reply Preview / Rich Output",
-      "sublabel": "增量草稿 · Markdown 分页 · 文件",
-      "pos": [
-        320,
-        570
-      ],
-      "size": [
-        220,
-        76
-      ],
-      "sources": [
+          "line": 69,
+          "end_line": 118,
+          "label": "文件与富文本发送、格式降级"
+        },
         {
           "path": "src/telegram/draft-preview.ts",
           "line": 1,
           "end_line": 57,
-          "label": "草稿调度与最终发送边界"
-        },
-        {
-          "path": "src/telegram/rich-reply.ts",
-          "line": 1,
-          "end_line": 52,
-          "label": "富文本分页与纯文本降级"
+          "label": "临时正文草稿边界"
         }
       ]
     },
     {
-      "id": "watch",
+      "id": "helpers",
       "type": "backend",
-      "label": "Helper Observation",
-      "sublabel": "已派发身份 · 状态对账 · 回传材料",
+      "label": "帮手观察与控制",
+      "sublabel": "按已保存身份补充 / 中断 / 读回",
       "pos": [
-        640,
-        570
+        20,
+        600
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
-          "path": "src/assistant/herdr.ts",
-          "line": 45,
-          "end_line": 76,
-          "label": "真实身份与状态核对"
-        },
-        {
-          "path": "src/assistant/herdr.ts",
-          "line": 78,
-          "end_line": 130,
-          "label": "herdr_watch 登记"
+          "path": "src/assistant/runtime.ts",
+          "line": 237,
+          "end_line": 258,
+          "label": "helper 动作串行投递"
         },
         {
           "path": "src/assistant/runtime.ts",
-          "line": 369,
-          "end_line": 459,
-          "label": "后台观察与原生回传"
+          "line": 337,
+          "end_line": 366,
+          "label": "状态观察与内部材料入队"
+        },
+        {
+          "path": "src/assistant/helper-control.ts",
+          "line": 97,
+          "end_line": 155,
+          "label": "先核对身份，再记录外部提交"
         }
       ]
     },
@@ -369,27 +358,135 @@
       "id": "herdr",
       "type": "external",
       "label": "herdr / Codex / Claude",
-      "sublabel": "Shell + workflow · 实际文件验收",
+      "sublabel": "Shell 按技能派发 · 实际文件验收",
       "pos": [
-        960,
-        570
+        20,
+        960
       ],
       "size": [
         220,
-        76
+        84
       ],
       "sources": [
         {
           "path": "src/assistant/herdr.ts",
           "line": 11,
-          "end_line": 29,
-          "label": "外部 herdr CLI"
+          "end_line": 28,
+          "label": "外部 CLI"
+        },
+        {
+          "path": "src/assistant/herdr.ts",
+          "line": 61,
+          "end_line": 121,
+          "label": "真实身份核对与 herdr_watch"
         },
         {
           "path": ".agents/skills/herdr-workflow/SKILL.md",
           "line": 1,
           "end_line": 30,
-          "label": "委派与验收流程"
+          "label": "项目委派入口"
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "database",
+      "label": "共享记忆与稳定上下文",
+      "sublabel": "MEMORY / SELF · 主题 · Akasha 召回",
+      "pos": [
+        340,
+        960
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/memory.ts",
+          "line": 64,
+          "end_line": 79,
+          "label": "assistant-memory.sqlite / memory/"
+        },
+        {
+          "path": "src/assistant/memory.ts",
+          "line": 234,
+          "end_line": 286,
+          "label": "持久快照与每输入召回"
+        },
+        {
+          "path": "src/assistant/memory.ts",
+          "line": 288,
+          "end_line": 328,
+          "label": "来源校验、纠正与默认遗忘"
+        }
+      ]
+    },
+    {
+      "id": "executions",
+      "type": "database",
+      "label": "Durable 执行记录",
+      "sublabel": "executions/<hash>/session.sqlite",
+      "pos": [
+        660,
+        960
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 62,
+          "end_line": 70,
+          "label": "每会话目录与请求指标"
+        },
+        {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 296,
+          "end_line": 304,
+          "label": "SQLite 持久 Harness"
+        },
+        {
+          "path": "src/assistant/durable-executor.ts",
+          "line": 443,
+          "end_line": 474,
+          "label": "提交身份与已确认效果恢复"
+        }
+      ]
+    },
+    {
+      "id": "archives",
+      "type": "database",
+      "label": "工具原件与媒体",
+      "sublabel": "有界视图 · 检索 / 分页 · manifest",
+      "pos": [
+        980,
+        960
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "src/assistant/archive.ts",
+          "line": 71,
+          "end_line": 106,
+          "label": "长结果原件与索引写入"
+        },
+        {
+          "path": "src/assistant/archive.ts",
+          "line": 150,
+          "end_line": 191,
+          "label": "按行 / 字节分页原件"
+        },
+        {
+          "path": "src/assistant/media.ts",
+          "line": 59,
+          "end_line": 76,
+          "label": "媒体文件与有序 manifest"
         }
       ]
     }
@@ -397,93 +494,44 @@
   "connections": [
     {
       "id": "input",
-      "from": "user",
-      "to": "channels",
-      "label": "文本 / 图片输入",
-      "variant": "default"
-    },
-    {
-      "id": "accept",
       "from": "channels",
       "to": "service",
-      "label": "conversation / inputId",
+      "label": "输入身份",
       "variant": "default"
     },
     {
-      "id": "prompt",
+      "id": "classify",
       "from": "service",
-      "to": "pi",
-      "label": "prompt / steer",
-      "variant": "default"
+      "to": "intent",
+      "label": "当前 / 近期 / 工作",
+      "variant": "dashed"
     },
     {
-      "id": "model",
-      "from": "pi",
-      "to": "models",
-      "label": "模型请求",
-      "variant": "default"
-    },
-    {
-      "id": "state",
+      "id": "admit",
       "from": "service",
-      "to": "state",
-      "label": "指针 / 去重 / 目录",
-      "variant": "dashed"
+      "to": "queue",
+      "label": "持久接收 / 路由",
+      "variant": "default"
     },
     {
-      "id": "session",
-      "from": "pi",
-      "to": "sessions",
-      "label": "原生上下文与回执",
-      "variant": "dashed"
+      "id": "execute",
+      "from": "queue",
+      "to": "durable",
+      "label": "认领批次 / 中断",
+      "variant": "default"
     },
     {
-      "id": "tools",
-      "from": "pi",
-      "to": "tools",
-      "label": "原生工具与资源",
-      "variant": "dashed"
-    },
-    {
-      "id": "dispatch",
-      "from": "pi",
-      "to": "herdr",
-      "label": "Shell 按技能委派",
-      "variant": "dashed"
-    },
-    {
-      "id": "register",
-      "from": "pi",
-      "to": "watch",
-      "label": "herdr_watch",
-      "variant": "dashed"
-    },
-    {
-      "id": "observe",
-      "from": "watch",
-      "to": "herdr",
-      "label": "get / read 对账",
-      "variant": "dashed"
-    },
-    {
-      "id": "helper-state",
-      "from": "watch",
-      "to": "state",
-      "label": "保存 helpers.json",
-      "variant": "dashed"
-    },
-    {
-      "id": "return",
-      "from": "watch",
-      "to": "pi",
-      "label": "custom-message 材料",
+      "id": "supplement",
+      "from": "service",
+      "to": "durable",
+      "label": "运行中补充",
       "variant": "dashed"
     },
     {
       "id": "reply",
-      "from": "pi",
+      "from": "durable",
       "to": "service",
-      "label": "回复 / 预览 / send_file",
+      "label": "正文 / send_file",
       "variant": "dashed"
     },
     {
@@ -494,57 +542,134 @@
       "variant": "dashed"
     },
     {
-      "id": "preview",
+      "id": "receipts",
       "from": "channels",
-      "to": "preview",
-      "label": "草稿 / 最终富文本",
+      "to": "receipts",
+      "label": "草稿 / 发送回执",
       "variant": "dashed"
     },
     {
-      "id": "receipt",
-      "from": "channels",
-      "to": "receipts",
-      "label": "发送回执",
+      "id": "state",
+      "from": "service",
+      "to": "state",
+      "label": "保存 / 对账",
+      "variant": "dashed"
+    },
+    {
+      "id": "helper-control",
+      "from": "service",
+      "to": "helpers",
+      "label": "关联目标的控制",
+      "variant": "dashed"
+    },
+    {
+      "id": "helper-command",
+      "from": "helpers",
+      "to": "herdr",
+      "label": "核对后提交 / 读回",
+      "variant": "dashed"
+    },
+    {
+      "id": "helper-return",
+      "from": "helpers",
+      "to": "queue",
+      "label": "内部材料低优先入队",
+      "variant": "dashed"
+    },
+    {
+      "id": "dispatch",
+      "from": "durable",
+      "to": "herdr",
+      "label": "Shell 按技能委派",
+      "variant": "dashed"
+    },
+    {
+      "id": "watch",
+      "from": "durable",
+      "to": "helpers",
+      "label": "登记 herdr_watch",
+      "variant": "dashed"
+    },
+    {
+      "id": "tools",
+      "from": "durable",
+      "to": "tools",
+      "label": "工具与资源",
+      "variant": "dashed"
+    },
+    {
+      "id": "model",
+      "from": "durable",
+      "to": "models",
+      "label": "主模型请求",
+      "variant": "dashed"
+    },
+    {
+      "id": "history",
+      "from": "durable",
+      "to": "executions",
+      "label": "执行与上下文",
+      "variant": "dashed"
+    },
+    {
+      "id": "memory",
+      "from": "durable",
+      "to": "memory",
+      "label": "快照 / 召回 / 写入",
+      "variant": "dashed"
+    },
+    {
+      "id": "archive",
+      "from": "durable",
+      "to": "archives",
+      "label": "归档 / manifest",
       "variant": "dashed"
     }
   ],
   "cards": [
     {
       "dot": "cyan",
-      "title": "生产入口与职责",
+      "title": "输入、动作与调度",
       "items": [
-        "Telegram / CLI → Assistant Service → 每个 conversation 的原生 Pi Session；Pi 负责模型循环、工具、资源发现、steering 和压缩。",
-        "服务只保存目录独占、会话指针、输入去重及最小帮手观察记录。输入先持久去重再执行；崩溃可能丢失尚未完成的已接收输入。",
-        "工作目录随会话保存；原生工具继承启动账户权限。用户与项目指令约束动作范围，工作目录本身不是沙箱。"
+        "Telegram / CLI → Assistant Service → 持久队列 → Pi Durable。输入先落盘去重；每会话只执行一个批次。直接输入高于后台材料，同级独立请求按 FIFO，空闲或轮次结束时合并已排队的连续普通输入，不额外等待。",
+        "意图判断结合当前原话及回复关系、近期用户与 Bot 交流、实际工作列表；只选有序原文动作和已提供目标。Assistant Service 复核最新状态后执行 request / supplement / cancel / clarify。",
+        "排队补充并入原目标；运行中补充使用 Durable steering；helper 补充或取消走独立控制通道。未配置、失败或必须看图时保留原输入和附件，附未判定原因交主 Bot。目标含糊时先澄清。"
       ]
     },
     {
       "dot": "violet",
-      "title": "编码委派与后台接回",
+      "title": "执行、重启与外部效果",
       "items": [
-        "主助手通过原生 Shell 和 herdr-workflow 委派编码；herdr_watch 只登记已确认接收的外部帮手，不派发或重启工作。",
-        "后台核对 session / agent / pane / workspace / cwd 与实际状态，读回外部材料后通过 Pi custom-message 接入正确会话。idle / done 触发成果检查，不证明成功。",
-        "回传与用户接入串行；忙碌 Session 使用 followUp，空闲时触发轮次。以磁盘原生回执对账，重启后继续观察，主助手按目标项目要求检查真实文件、diff 与命令结果。"
+        "默认空间 data/pi-durable-v1。queue-owner.sqlite 保护单服务；queue.sqlite 保存输入、目标、动作与批次，assistant.sqlite 保存会话目录、委派身份、补充及输出对账；Durable 的 session.sqlite 保存执行步骤和主会话。",
+        "重启核对已有 submission，复用已确认模型与工具结果；未知外部效果先只读核查，resolve_interrupted_tool 记录证据，不能核实时暂停。模型临时故障默认重试 3 次，耗尽后等待 /resume，不因重启绕过暂停。",
+        "/reset 只重置主上下文，保留输入、进度与委派；取消保存目标身份并尽快请求中断，已有成果保留。/steer 的用户输入处理已退役，补充使用自然语言。工作目录和原生工具继承启动账户权限。"
       ]
     },
     {
       "dot": "emerald",
-      "title": "会话、模型与交付",
+      "title": "记忆、压缩与原件",
       "items": [
-        "data/pi-assistant-v1 使用独占 owner.sqlite、conversations.json 及会话目录中的 session.json / inputs.json / helpers.json；模型交换存于原生 JSONL。",
-        "/model 切换并保存模型别名；限流与临时错误的重试由 Pi 原生机制决定。/reset 取消当前轮次并创建新 Session，保留外部帮手观察记录，不停止外部工作。",
-        "Telegram 先校验 owner 私聊再下载图片。临时草稿与最终发送分开；正文富文本分页，400 格式错误可降级，send_file 交给通道发送原始文件。",
-        "telegram-sends.jsonl 记录发送状态；未知发送不自动重发。send_file 工具回复表示交给接入层处理，不构成用户工作目标的成功证明。"
+        "共享长期记忆保存有来源、版本的 MEMORY / SELF 与全局或工作目录主题；每个真实用户输入保存自己的自动召回，包括无命中。当前 Akasha 用本地词项和中文相邻双字匹配，不复用退休图内核。",
+        "常驻记忆快照持久保存，变更材料追加进入上下文；压缩或 reset 后按新上下文取快照。压缩保留近期原文与工作摘要，后台从原始用户材料提炼记忆，执行事实仍由 Durable 与外部证据决定。",
+        "纠正与遗忘校验来源并排除相关派生材料，受影响摘要重建；默认遗忘保留原件，物理删除另行请求。长工具输出与媒体原件持久保存，主上下文用受限视图和引用，支持检索、分页及 manifest 回读。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "帮手与发送边界",
+      "items": [
+        "主助手通过 Shell 和 herdr-workflow 派发，再用 herdr_watch 登记已接收的真实身份。后台观察只读回材料并低优先入队；idle / done 触发检查实际文件、diff 和验证结果，不证明用户目标完成。",
+        "helper 控制持久记录发送进度，按 session / agent / pane / workspace / cwd 核对身份；sent 不等于采纳，unknown 不盲目重发。Windows 当前进程核查无法排除孤儿任务，因此取消可保持待核实，不能承诺全部停止。",
+        "Telegram 校验 owner 私聊后处理附件，正文富文本分页、格式错误降级，send_file 发原始文件。临时草稿、发送回执和用户目标成功分别核对；未知发送不自动重发。"
       ]
     },
     {
       "dot": "rose",
-      "title": "退役边界与验证证据",
+      "title": "版本与验证范围",
       "items": [
-        "按 ADR-0010 使用全新数据命名空间；旧 Host / Task / Attempt / Akasha / Plan 不在在线路径中读取或迁移。历史文件与离线诊断保留。",
-        "不再展示旧授权、统一验收、冻结成果、记忆学习与计划调度的在线关系；定时主动职责、服务端部署、多 bot 留待后续。",
-        "源码固定到 5b93ef3（2026-10-14 development）。图校验验证展示与来源；运行证据见 docs/pi-assistant-acceptance-20261014.md 和实机补充。",
-        "现有记录包含 93/93 测试及 Telegram / Pi / Codex 实机证据；Claude 成功编码仍待验收，402 不能算代码成果成功。"
+        "源码固定到 302532c（2026-10-17 development）。依据 ADR-0011 / 0012 / 0013 / 0014；本图说明已提交代码，不推导生产进程已加载新版。",
+        "旧 Host / Task / Attempt / Akasha / Plan 实现、离线诊断、迁移入口和旧 helper 导入已退役；本机遗留数据清退见 docs/legacy-retirement-acceptance-20261017.md。现役记忆、归档、队列、委派与发送记录继续保留。",
+        "已有清退验收记录为 142/142 测试、类型检查、构建及文档检查通过；队列、上下文与路由真实链路证据见相应 acceptance 文档。此次图更新只重做来源、产物及浏览器检查，不把旧测试记为本次重跑。"
       ]
     }
   ]
