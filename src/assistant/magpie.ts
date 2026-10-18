@@ -91,6 +91,7 @@ export async function createMagpieControl(options: {
 
   function reload() {
     const previous = JSON.stringify(connection);
+    const previousError = connectionError;
     try {
       const config = readConfig();
       const hasBase = typeof config.baseUrl === "string" && config.baseUrl.length > 0;
@@ -103,29 +104,36 @@ export async function createMagpieControl(options: {
           throw new Error("Magpie 网关地址必须为不含凭据的 HTTP(S) 地址。");
         connection = { baseUrl: url.href.replace(/\/$/, ""), apiKey: config.apiKey as string };
       } else connection = undefined;
+      if (config.model !== undefined && typeof config.model !== "string") throw new Error("Magpie 模型配置必须是字符串。");
       connectionError = undefined;
       // A malformed/intermediate field is not an explicit selection and must not erase the last observation.
       if (config.model === undefined || typeof config.model === "string") {
         const value = config.model ?? null;
         if (!observed || observed.value !== value) {
-          observed = { value };
-          saveMeta(observedKey, observed);
-          if (connection && typeof value === "string" && value.startsWith(MAGPIE_MODEL_PREFIX) && options.primaryConversationId) {
-            const prefs = preferences(options.primaryConversationId);
-            const id = value.slice(MAGPIE_MODEL_PREFIX.length);
-            if (id && prefs.selectedModel !== id) {
-              prefs.selectedModel = id;
-              save(options.primaryConversationId, prefs);
-              notify(options.primaryConversationId);
+          let changedConversation: string | undefined;
+          db.exec("BEGIN IMMEDIATE");
+          try {
+            if (connection && typeof value === "string" && value.startsWith(MAGPIE_MODEL_PREFIX) && options.primaryConversationId) {
+              const prefs = preferences(options.primaryConversationId);
+              const id = value.slice(MAGPIE_MODEL_PREFIX.length);
+              if (id && prefs.selectedModel !== id) {
+                prefs.selectedModel = id;
+                save(options.primaryConversationId, prefs);
+                changedConversation = options.primaryConversationId;
+              }
             }
-          }
+            saveMeta(observedKey, { value });
+            db.exec("COMMIT");
+            observed = { value };
+          } catch (error) { db.exec("ROLLBACK"); throw error; }
+          notify(changedConversation);
         }
       }
     } catch (error) {
       // Keep the last valid state for display, but block requests until this file is valid again.
       connectionError = (error as Error).message;
     }
-    if (previous !== JSON.stringify(connection)) {
+    if (previous !== JSON.stringify(connection) || previousError !== connectionError) {
       ready = false;
       needsRefresh = true;
       notify(options.primaryConversationId);
@@ -185,7 +193,8 @@ export async function createMagpieControl(options: {
       catalog: structuredClone(catalog?.models ?? []),
       catalogStatus: !catalog ? "unavailable" : ready && catalog.endpoint === connection?.baseUrl ? "ready" : "stale",
       catalogError, refreshedAt: catalog?.at, selectedModel: prefs.selectedModel,
-      selectedAvailable: !!model, ...thinking, favorites: [...prefs.favorites], drafts: prefs.drafts };
+      selectedAvailable: !!model && catalog?.endpoint === connection?.baseUrl,
+      ...thinking, favorites: [...prefs.favorites], drafts: prefs.drafts };
   }
 
   await snapshot(options.primaryConversationId ?? "", true);
@@ -198,18 +207,25 @@ export async function createMagpieControl(options: {
     async selectModel(id: string, modelId: string) {
       const state = await snapshot(id);
       if (!state.connected) throw new Error(state.connectionError ?? "Magpie 未连接，请先在 Magpie 连接 Nailong。");
-      if (!state.catalog.some(model => model.id === modelId)) throw new Error("模型已不在当前目录中，请刷新并重新选择。");
+      if (catalog?.endpoint !== connection?.baseUrl || !state.catalog.some(model => model.id === modelId))
+        throw new Error("模型已不在当前目录中，请刷新并重新选择。");
       const prefs = preferences(id);
+      prefs.selectedModel = modelId;
+      let writtenModel: string | undefined;
       if (id === options.primaryConversationId) {
         // No awaited operation between rereading and patching: preserve the newest unrelated fields.
         const current = readConfig();
         current.model = MAGPIE_MODEL_PREFIX + modelId;
         writeFileSync(configPath, JSON.stringify(current, null, 2) + "\n", { mode: 0o600 });
-        observed = { value: current.model };
-        saveMeta(observedKey, observed);
+        writtenModel = current.model as string;
       }
-      prefs.selectedModel = modelId;
-      save(id, prefs);
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        save(id, prefs);
+        if (writtenModel !== undefined) saveMeta(observedKey, { value: writtenModel });
+        db.exec("COMMIT");
+        if (writtenModel !== undefined) observed = { value: writtenModel };
+      } catch (error) { db.exec("ROLLBACK"); throw error; }
       notify(id);
       return snapshot(id);
     },
@@ -243,7 +259,7 @@ export async function createMagpieControl(options: {
       if (!state.connected || !connection) throw new Error(state.connectionError ?? "Magpie 未连接，请先在 Magpie 连接 Nailong。");
       if (!state.selectedModel) throw new Error("尚未选择主模型，请在控制面板选择后继续。");
       const model = state.catalog.find(item => item.id === state.selectedModel);
-      if (!model) throw new Error("已选模型不在当前目录中，请重新选择模型。");
+      if (!model || !state.selectedAvailable) throw new Error("已选模型不在当前目录中，请重新选择模型。");
       return { model: { alias: "magpie", api: "openai-completions", baseUrl: connection.baseUrl,
         apiKey: connection.apiKey, model: model.id, contextWindow: model.contextWindow,
         maxTokens: model.maxOutputTokens, reasoning: model.reasoning,
