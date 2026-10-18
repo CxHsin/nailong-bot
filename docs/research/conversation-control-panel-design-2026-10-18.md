@@ -1,6 +1,6 @@
 # 会话控制面板与 Magpie 模型目录讨论
 
-2026-10-18，通过 `grill-with-docs` 逐轮讨论。本文记录已确认的设计方向与待定问题，尚未形成完整规格，也不表示功能已实现。完整结论确认后按仓库约定发布 GitHub Issue。
+2026-10-18，通过 `grill-with-docs` 逐轮讨论并获用户整体确认。设计结论以 [Issue #242](https://github.com/CxHsin/nailong-bot/issues/242)为准，架构取舍见 [ADR-0016](../adr/0016-magpie-catalog-and-conversation-settings.md)。本文保留讨论范围和事实依据，不表示功能已实现；正式规格及实现任务另行建立。
 
 ## 已确认
 
@@ -49,10 +49,14 @@ Magpie [Agent 插件实现](https://github.com/yetone/magpie/blob/d783df46cbac90
 
 参考 [pi-telegram](https://github.com/llblab/pi-telegram/tree/6b4db8a573416e2cbe60d44f6e38847cb6392348) 的主面板、分页列表、当前项标记和模型/思考相邻入口。它依赖宿主目录；截图本身不能证明任意服务的实时模型发现能力。Nailong 的 Magpie 接入以 Magpie 自己的目录接口为依据。
 
-## 待定
+## 最终确认的切换边界
 
-- 切换模型时继续使用原上下文，较小窗口按既有原生压缩机制处理；仍无法承接时暂停提示，保留进度、不静默丢弃资料或自动 reset。此边界提案待整体确认。
-- 暂停状态下仅切换模型不自动恢复工作，仍等待明确继续；正在运行的工作在后续请求使用新设置。此边界提案待整体确认。
+- 切换模型时继续使用原上下文，较小窗口按既有原生压缩机制处理；仍无法承接时暂停提示，保留进度、不静默丢弃资料或自动 reset。
+- 暂停状态下仅切换模型不自动恢复工作，仍等待明确继续；正在运行的工作在后续请求使用新设置。
+
+## 后续工作
+
+Magpie 等级控件与上游 PR 计划单独记录为 [Issue #243](https://github.com/CxHsin/nailong-bot/issues/243)，不阻塞首版。本轮仅在本仓库发布跟踪 Issue，未向 Magpie 上游发送 Issue 或 PR，也未修改或替换 Magpie。
 
 ## 实现阶段需核实
 

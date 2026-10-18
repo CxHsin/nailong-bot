@@ -6,6 +6,8 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-context-order-and-self-file.md) and [spec #234](https://github.com/CxHsin/nailong-bot/issues/234). Base instructions, skills, project instructions, SELF and MEMORY retain that effective order. Identity and core persona change only through the user's explicit current request; relationship and expression may evolve from sourced user evidence.
 
+The accepted Conversation Control Panel and Magpie Model Catalog design follows [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md) and [conclusion #242](https://github.com/CxHsin/nailong-bot/issues/242). Implementation is pending: the main assistant will use Magpie's catalog, with Conversation-owned choices editable from Telegram and Magpie. Magpie-side thinking controls are deferred under [#243](https://github.com/CxHsin/nailong-bot/issues/243).
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
