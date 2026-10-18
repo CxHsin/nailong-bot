@@ -122,10 +122,7 @@ export async function createAssistant(options: AssistantOptions) {
       settings.set(id, snapshot);
       if (snapshot.connected && snapshot.selectedModel && snapshot.selectedAvailable) {
         const prepared = await magpie.prepareRequest(id);
-        const all = snapshot.catalog.map(model => ({...prepared.model, model:model.id,
-          contextWindow:model.contextWindow,maxTokens:model.maxOutputTokens,reasoning:model.reasoning,
-          images:model.modalities?.includes("image")}));
-        await executor.configureModel(id, prepared, all);
+        await executor.configureModel(id, prepared, prepared.availableModels);
         runnable.add(id);
       } else {
         runnable.delete(id);
@@ -140,7 +137,9 @@ export async function createAssistant(options: AssistantOptions) {
   };
   const useMagpie = options.magpie !== undefined || options.modelConfiguration === undefined;
   if (useMagpie) magpie = await createMagpieControl({dataDir,...options.magpie,onChange(id) {
-    if (executor && !closed) void syncSettings(id).catch(report);
+    if (!executor || closed) return;
+    const affected = id ? [id] : state.conversations().map(item => item.id);
+    for (const conversationId of affected) void syncSettings(conversationId).catch(report);
   }}).catch(error => {state.close(); throw error;});
 
   function extraTools(id: string): ToolRegistration[] {
@@ -170,6 +169,7 @@ export async function createAssistant(options: AssistantOptions) {
   executor = await createDurableExecutor({
     ...options, dataDir, cwd, extraTools, workDir,
     modelConfiguration: magpie ? {defaultModel:"",models:[]} : options.modelConfiguration!,
+    beforeModelRequest: model => magpie?.assertRequestAllowed(model),
     contextMaterials: (id: string) => {
       const records = helperRecords(id).filter((record) => !record.delivered).map(({summary,...identity}) => identity);
       const cancelled = service?.listWorks(id).filter(work => work.status === "cancelled").map(work => work.id) ?? [];
@@ -438,6 +438,8 @@ export async function createAssistant(options: AssistantOptions) {
       selectedModel:config?.models.find(model => model.alias === config.defaultModel)?.model,
       selectedAvailable:true,thinkingAdjusted:false,favorites:[],drafts:true,
     };
+    // A connection/catalog observation is global; finish propagating it before returning to a controller.
+    while (settingLanes.size) await Promise.all(settingLanes.values());
     const actual = await executor.actualSettings(id) ?? (saved.connected && saved.selectedAvailable && saved.selectedModel ?
       {model:saved.selectedModel,thinking:"thinking" in saved ? saved.thinking : undefined} : undefined);
     const works: ControlSnapshot["works"] = service.listWorks(id).filter(work => work.input.kind !== "command").map(work => ({

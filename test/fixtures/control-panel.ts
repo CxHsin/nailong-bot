@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { telegramFixture } from "./telegram.js";
 import { sendChatCompletion } from "./chat-completion.js";
 import type { Wire } from "./assistant.js";
+import type { AssistantOptions } from "../../src/assistant/runtime.js";
 
 export type CatalogEntry = { id: string; display_name?: string; owned_by?: string; reasoning?: boolean; supported_reasoning_levels?: string[]; context_window?: number; max_output_tokens?: number; modalities?: string[] };
 export async function controlPanelFixture(options: {
   models?: CatalogEntry[]; selected?: string; noSelection?: boolean;
   onApi?: (method: string, body: unknown) => void;
+  tools?: AssistantOptions["tools"];
   provider?: (wire: Wire & { model: string; reasoning_effort?: string }, response: ServerResponse) => void | Promise<void>;
 } = {}) {
   let models = options.models ?? [{ id: "provider/A", display_name: "Alpha", reasoning: true, supported_reasoning_levels: ["low", "medium", "high"] },
@@ -35,7 +37,7 @@ export async function controlPanelFixture(options: {
     async directory => {
       configPath = join(directory, "magpie.json");
       await writeFile(configPath, JSON.stringify({ baseUrl, apiKey: "fixture-secret", ...(options.noSelection ? {} : { model: `magpie/${options.selected ?? models[0]?.id}` }), unrelated: "keep" }));
-      return { magpie: { configPath, primaryConversationId: "telegram:private:42", catalogTimeoutMs: 500 } };
+      return { tools: options.tools, magpie: { configPath, primaryConversationId: "telegram:private:42", catalogTimeoutMs: 500 } };
     }, options.onApi);
   return { ...f, get app() { return f.app; }, get bot() { return f.bot; }, get channel() { return f.channel; }, requests, configPath,
     setModels(value: CatalogEntry[]) { models = value; }, setCatalogFailure(value: boolean) { catalogFailure = value; }, get catalogReads() { return catalogReads; },

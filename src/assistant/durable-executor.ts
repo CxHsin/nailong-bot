@@ -50,6 +50,7 @@ export type DurableExecutorOptions = { cwd?: string; dataDir: string; prompt?: s
   media?: MediaOptions;
   compaction?: Partial<CompactionPolicy>;
   onRequestMetrics?: (metric: RequestMetric) => void;
+  beforeModelRequest?: (model: ModelConfig) => void;
   onPreview?: (preview: { conversationId: string; replyId: string; text?: string }) => void;
   reportFailure?: (error: unknown) => void };
 
@@ -65,7 +66,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     const directory = join(rootDirectory, createHash("sha256").update(conversationId).digest("hex"));
     await mkdir(directory, { recursive: true });
     let activeBatch: string | undefined;
-    const catalog = durableModels(options.modelConfiguration, { conversationId, batchId: () => activeBatch, record(metric) {
+    const catalog = durableModels(options.modelConfiguration, { conversationId, batchId: () => activeBatch, beforeRequest: options.beforeModelRequest, record(metric) {
       try { appendFileSync(join(directory, "requests.jsonl"), JSON.stringify(metric) + "\n");
         if (metric.status !== "pending") options.onRequestMetrics?.(metric); }
       catch (error) { options.reportFailure?.(error); }

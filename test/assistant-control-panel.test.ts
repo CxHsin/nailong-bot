@@ -29,6 +29,7 @@ test("Telegram /start opens owner conversation controls without a model request"
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { controlPanelFixture } from "./fixtures/control-panel.js";
+import { Type } from "typebox";
 
 type PanelFixture = Awaited<ReturnType<typeof controlPanelFixture>>;
 type Panel = { text: string; id: number; buttons: Array<{text: string; callback_data: string}> };
@@ -239,4 +240,86 @@ test("Telegram without a model keeps ordinary inputs across channel restart unti
     assert.ok(messages.indexOf("WAIT_FIRST") < messages.indexOf("WAIT_SECOND"));
     assert.match(messages, /WAIT_FIRST/); assert.match(messages, /WAIT_SECOND/);
   } finally { await f.close(); }
+});
+
+test("Magpie disconnect blocks independent Conversation tool continuations at dispatch and retains confirmed effects", async t => {
+  for (const observedByPanel of [true, false]) await t.test(observedByPanel ? "recognized by primary panel" : "recognized at request dispatch", async () => {
+    const entered = gate(), release = gate();
+    let effects = 0;
+    const f = await controlPanelFixture({ tools: [{name:"hold_effect",label:"hold",description:"Hold a real confirmed tool effect",parameters:Type.Object({}),
+      async execute() {effects++;entered.resolve();await release.promise;return {content:[{type:"text",text:"CONFIRMED_INDEPENDENT_EFFECT"}],details:{}};}}],
+      provider: (_wire,response) => f.requests.length === 1 ? sendChatCompletion(response,"",[{index:0,id:"hold-effect",type:"function",function:{name:"hold_effect",arguments:"{}"}}]) : sendChatCompletion(response,"continued result"),
+    });
+    try {
+      await f.app.control("cli:other",{type:"model",model:"provider/A"});
+      await f.app.receive({conversationId:"cli:other",inputId:"work",text:"INDEPENDENT_GOAL"});
+      await entered.promise;
+      const config = JSON.parse(await readFile(f.configPath,"utf8"));
+      await writeFile(f.configPath,JSON.stringify({...config,baseUrl:"",apiKey:""}));
+      if (observedByPanel) {
+        await f.bot.handleUpdate(command(1001,"/start"));
+        assert.match(latestPanel(f).text,/未连接|断开/);
+      }
+      release.resolve();await f.flush();
+      assert.equal(f.requests.length,1,"no HTTP request may follow a disconnected tool boundary");
+      assert.equal(effects,1);
+      const work = (await f.app.controlSnapshot("cli:other")).works.find(work=>work.summary.includes("INDEPENDENT_GOAL"))!;
+      assert.ok(["paused","needs_confirmation"].includes(work.status));
+      await writeFile(f.configPath,JSON.stringify(config));
+      await f.bot.handleUpdate(command(1002,"/start"));
+      await f.flush();assert.equal(f.requests.length,1,"reconnection does not resume paused work");
+      await f.app.control("cli:other",{type:"resume",target:work.id,operationId:`restore-${observedByPanel}`});
+      await f.flush();
+      assert.equal(f.requests.length,2);assert.equal(effects,1);
+      assert.match(JSON.stringify(f.requests[1]!.messages),/CONFIRMED_INDEPENDENT_EFFECT/);
+      assert.match(JSON.stringify(f.requests[1]!.messages),/INDEPENDENT_GOAL/);
+    } finally {release.resolve();await f.close();}
+  });
+});
+
+test("thinking capability adjustment remains visible after catalog refresh and reopen until an explicit preference", async () => {
+  const f = await controlPanelFixture();
+  try {
+    await f.bot.handleUpdate(command(1101,"/thinking high"));
+    f.setModels([{id:"provider/A",reasoning:true,supported_reasoning_levels:["low"]}]);
+    await f.bot.handleUpdate(command(1102,"/model"));
+    await f.bot.handleUpdate(command(1103,"/thinking"));
+    assert.match(latestPanel(f).text,/当前：low/);
+    assert.match(latestPanel(f).text,/能力已更新.*原偏好不再支持/);
+    await f.reopen();
+    await f.bot.handleUpdate(command(1104,"/thinking"));
+    assert.match(latestPanel(f).text,/能力已更新.*原偏好不再支持/);
+    await f.bot.handleUpdate(command(1105,"/thinking low"));
+    assert.doesNotMatch(latestPanel(f).text,/原偏好不再支持/);
+    assert.equal(f.requests.length,0);
+  } finally {await f.close();}
+});
+
+test("primary catalog refresh propagates removals and thinking capabilities to independent active Conversations", async t => {
+  for (const removed of [true,false]) await t.test(removed ? "removed model pauses continuation" : "changed capabilities govern the next prepare", async () => {
+    const entered=gate(),release=gate();let effects=0;
+    const f = await controlPanelFixture({tools:[{name:"catalog_effect",label:"catalog",description:"Hold completed effect across a global catalog change",parameters:Type.Object({}),
+      async execute(){effects++;entered.resolve();await release.promise;return {content:[{type:"text",text:"CATALOG_EFFECT_CONFIRMED"}],details:{}};}}],
+      provider:(_wire,response)=>f.requests.length===1 ? sendChatCompletion(response,"",[{index:0,id:"catalog-effect",type:"function",function:{name:"catalog_effect",arguments:"{}"}}]) : sendChatCompletion(response,"continued with current capabilities")});
+    try {
+      await f.app.control("cli:catalog",{type:"model",model:"provider/A"});
+      await f.app.control("cli:catalog",{type:"thinking",level:"high"});
+      await f.app.receive({conversationId:"cli:catalog",inputId:"catalog-goal",text:"KEEP_CATALOG_GOAL"});await entered.promise;
+      assert.equal(f.requests[0]?.reasoning_effort,"high");
+      f.setModels(removed ? [{id:"provider/B",reasoning:false}] : [{id:"provider/A",reasoning:true,supported_reasoning_levels:["low"]}]);
+      await f.bot.handleUpdate(command(1201,"/model"));
+      release.resolve();await f.flush();
+      assert.equal(effects,1);
+      if (removed) {
+        assert.equal(f.requests.length,1);
+        const snapshot=await f.app.controlSnapshot("cli:catalog");
+        assert.equal(snapshot.selectedModel,"provider/A");assert.equal(snapshot.selectedAvailable,false);
+        assert.ok(snapshot.works.some(work=>work.status==="paused"));
+      } else {
+        assert.equal(f.requests.length,2);
+        assert.equal(f.requests[1]?.reasoning_effort,"low");
+        assert.match(JSON.stringify(f.requests[1]!.messages),/CATALOG_EFFECT_CONFIRMED/);
+      }
+    } finally {release.resolve();await f.close();}
+  });
 });

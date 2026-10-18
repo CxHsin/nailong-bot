@@ -19,8 +19,8 @@ export type MagpieSnapshot = {
   selectedModel?: string; selectedAvailable: boolean; thinking?: string; thinkingAdjusted: boolean;
   favorites: string[]; drafts: boolean;
 };
-export type MagpiePreparedRequest = { model: ModelConfig; thinking?: string; catalogModel: MagpieModel };
-type Preferences = { selectedModel?: string; thinking: Record<string, string>; favorites: string[]; drafts: boolean };
+export type MagpiePreparedRequest = { model: ModelConfig; availableModels: ModelConfig[]; thinking?: string; catalogModel: MagpieModel };
+type Preferences = { selectedModel?: string; thinking: Record<string, string>; thinkingAdjusted?: Record<string, boolean>; favorites: string[]; drafts: boolean };
 type Connection = { baseUrl: string; apiKey: string };
 type JsonObject = Record<string, unknown>;
 const object = (value: unknown): value is JsonObject => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -47,7 +47,7 @@ function decodeCatalog(value: unknown): MagpieModel[] {
 /** One service owns the data directory. Synchronous local patches reread the current JSON immediately before writing. */
 export async function createMagpieControl(options: {
   dataDir: string; configPath?: string; primaryConversationId?: string;
-  onChange?: (conversationId: string) => void; catalogTimeoutMs?: number;
+  onChange?: (conversationId?: string) => void; catalogTimeoutMs?: number;
 }) {
   const configPath = resolve(options.configPath ?? magpieConfigPath());
   mkdirSync(options.dataDir, { recursive: true });
@@ -76,7 +76,8 @@ export async function createMagpieControl(options: {
   let pendingRefresh: Promise<void> | undefined;
   const observedKey = `observed-model:${configPath}`;
   let observed = meta<{ value: unknown }>(observedKey);
-  const notify = (id?: string) => { if (id && !closed) options.onChange?.(id); };
+  // No ID means the connection/catalog changed for every Conversation.
+  const notify = (id?: string) => { if (!closed) options.onChange?.(id); };
 
   function readConfig(): JsonObject {
     try {
@@ -126,7 +127,7 @@ export async function createMagpieControl(options: {
             db.exec("COMMIT");
             observed = { value };
           } catch (error) { db.exec("ROLLBACK"); throw error; }
-          notify(changedConversation);
+          if (changedConversation) notify(changedConversation);
         }
       }
     } catch (error) {
@@ -136,7 +137,7 @@ export async function createMagpieControl(options: {
     if (previous !== JSON.stringify(connection) || previousError !== connectionError) {
       ready = false;
       needsRefresh = true;
-      notify(options.primaryConversationId);
+      notify();
     }
   }
 
@@ -159,7 +160,7 @@ export async function createMagpieControl(options: {
         saveMeta("catalog", catalog);
         catalogError = undefined;
         ready = true;
-        notify(options.primaryConversationId);
+        notify();
       } catch {
         if (!closed) { ready = false; catalogError = "Magpie 模型目录刷新失败，可重试；保留上次成功列表。"; }
       }
@@ -171,7 +172,7 @@ export async function createMagpieControl(options: {
     const supported = model?.reasoning === true ? model.reasoningLevels : undefined;
     if (!supported?.length || !prefs.selectedModel) return { thinking: undefined, thinkingAdjusted: false };
     const previous = prefs.thinking[prefs.selectedModel];
-    if (previous && supported.includes(previous)) return { thinking: previous, thinkingAdjusted: false };
+    if (previous && supported.includes(previous)) return { thinking: previous, thinkingAdjusted: prefs.thinkingAdjusted?.[prefs.selectedModel] ?? false };
     const order = ["off", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
     const lowest = [...supported].sort((a, b) => {
       const rank = (level: string) => order.includes(level) ? order.indexOf(level) : order.length;
@@ -179,6 +180,8 @@ export async function createMagpieControl(options: {
     })[0]!;
     const thinking = supported.includes("medium") ? "medium" : supported.includes("low") ? "low" : lowest;
     prefs.thinking[prefs.selectedModel] = thinking;
+    // Reads must not consume the explanation before a UI renders it. An explicit preference acknowledges it.
+    (prefs.thinkingAdjusted ??= {})[prefs.selectedModel] = previous !== undefined;
     save(id, prefs);
     return { thinking, thinkingAdjusted: previous !== undefined };
   }
@@ -202,8 +205,22 @@ export async function createMagpieControl(options: {
     if (!closed) { reload(); if (needsRefresh) void refresh(); }
   }, 1_000);
   timer.unref();
+  function modelConfig(model: MagpieModel): ModelConfig {
+    return { alias: "magpie", api: "openai-completions", baseUrl: connection!.baseUrl,
+      apiKey: connection!.apiKey, model: model.id, contextWindow: model.contextWindow,
+      maxTokens: model.maxOutputTokens, reasoning: model.reasoning, images: model.modalities?.includes("image") };
+  }
   return {
     snapshot,
+    /** Check immediately before dispatch, including tool continuations and pinned compaction requests. */
+    assertRequestAllowed(model: ModelConfig) {
+      reload();
+      if (!connection || connectionError) throw new Error(connectionError ?? "Magpie 已断开连接；进度保留，请重新连接后明确继续。");
+      if (connection.baseUrl !== model.baseUrl || connection.apiKey !== model.apiKey)
+        throw new Error("Magpie 连接已变更；未向旧连接发送请求，请核对后明确继续。");
+      if (catalog?.endpoint !== connection.baseUrl || !catalog.models.some(item => item.id === model.model))
+        throw new Error("已选模型不在当前目录中；进度保留，请重新选择后明确继续。");
+    },
     async selectModel(id: string, modelId: string) {
       const state = await snapshot(id);
       if (!state.connected) throw new Error(state.connectionError ?? "Magpie 未连接，请先在 Magpie 连接 Nailong。");
@@ -235,6 +252,7 @@ export async function createMagpieControl(options: {
       if (!model || model.reasoning !== true || !model.reasoningLevels?.includes(level)) throw new Error("当前模型未声明支持此思考等级。");
       const prefs = preferences(id);
       prefs.thinking[model.id] = level;
+      if (prefs.thinkingAdjusted) delete prefs.thinkingAdjusted[model.id];
       save(id, prefs); notify(id);
       return snapshot(id);
     },
@@ -260,10 +278,8 @@ export async function createMagpieControl(options: {
       if (!state.selectedModel) throw new Error("尚未选择主模型，请在控制面板选择后继续。");
       const model = state.catalog.find(item => item.id === state.selectedModel);
       if (!model || !state.selectedAvailable) throw new Error("已选模型不在当前目录中，请重新选择模型。");
-      return { model: { alias: "magpie", api: "openai-completions", baseUrl: connection.baseUrl,
-        apiKey: connection.apiKey, model: model.id, contextWindow: model.contextWindow,
-        maxTokens: model.maxOutputTokens, reasoning: model.reasoning,
-        images: model.modalities?.includes("image") }, thinking: state.thinking, catalogModel: structuredClone(model) };
+      return { model: modelConfig(model), availableModels: catalog!.models.map(modelConfig),
+        thinking: state.thinking, catalogModel: structuredClone(model) };
     },
     close() { closed = true; clearInterval(timer); db.close(); },
   };
