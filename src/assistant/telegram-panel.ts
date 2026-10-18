@@ -2,14 +2,15 @@ import { randomBytes } from "node:crypto";
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import type { Assistant, ControlSnapshot, ControlAction } from "./runtime.js";
 
-type Page = "home" | "models" | "thinking" | "works" | "work" | "cache" | "session" | "reset" | "detail";
-type View = { page: Page; offset?: number; favorites?: boolean; model?: string; target?: string };
+type Page = "home" | "models" | "thinking" | "works" | "work" | "cache" | "settings" | "session" | "reset" | "detail";
+type View = { page: Page; offset?: number; favorites?: boolean; details?: boolean; model?: string; target?: string };
 type ButtonAction = { view: View; action?: ControlAction; refresh?: boolean };
 type Button = { label: string; value: ButtonAction };
 const home: View = { page: "home" };
 const PAGE_SIZE = 6;
 const statusNames: Record<string, string> = { idle: "空闲", running: "执行中", waiting_model: "等待选择可用模型", paused: "已暂停", queued: "排队中", pending: "排队中", completed: "本轮已结束（目标成果仍需核对）", cancelled: "已取消后续安排", stopping: "停止中", stopped: "已核实停止", unknown: "待核实", background: "后台 helper", helper: "后台 helper", needs_confirmation: "待核实" };
 const statusName = (value: string) => statusNames[value] ?? value;
+const html = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Native controls use the authenticated Conversation service boundary, never natural-language routing. */
 export function registerTelegramPanel(options: {
@@ -37,26 +38,26 @@ export function registerTelegramPanel(options: {
       s.catalogStatus === "unavailable" ? "模型目录暂不可用，请刷新重试。" : "";
     switch (view.page) {
       case "home":
-        text = `会话控制面板\n${connection}\n状态：${statusName(s.status)} · 等待 ${s.waiting}\n期望模型：${setting(s.selectedModel, s.thinking)}\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}${s.pending ? "\n待生效：下一次准备请求使用最新选择。" : ""}`;
+        text = `🦖 Nailong Bot\n\n/start — 打开控制面板\n/model — 选择模型\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}\n状态：${statusName(s.status)} · 等待 ${s.waiting}`;
+        if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
-        rows.push([{ label: "模型", value: { view: { page: "models" }, refresh: true } }]);
-        if (selected?.reasoning !== false && (selected?.reasoning || selected?.reasoningLevels?.length)) rows.push([button("思考等级", { page: "thinking" })]);
-        rows.push([button("工作列表", { page: "works" }), button("缓存统计", { page: "cache" }, { type: "cache" })],
-          [button("会话操作", { page: "session" })],
-          [button(`草稿预览：${s.drafts ? "开" : "关"}`, home, { type: "draft", enabled: !s.drafts })]);
+        rows.push([{ label: `🤖 模型：${s.selectedModel ?? "未选择"}`, value: { view: { page: "models" }, refresh: true } }]);
+        if (selected?.reasoning !== false && (selected?.reasoning || selected?.reasoningLevels?.length)) rows.push([button(`🧠 思考等级：${s.thinking ?? "能力未提供"}`, { page: "thinking" })]);
+        rows.push([button(`⏳ 工作列表：${s.waiting} 等待`, { page: "works" })], [button("⚙️ 设置", { page: "settings" })]);
         break;
       case "models": {
         const models = s.catalog.filter(model => !view.favorites || s.favorites.includes(model.id));
         const offset = Math.max(0, Math.min(view.offset ?? 0, Math.max(0, Math.ceil(models.length / PAGE_SIZE) - 1) * PAGE_SIZE));
-        text = `模型 · ${view.favorites ? "常用" : "全部"}\n${connection}\n当前：${setting(s.selectedModel, s.thinking)}\n第 ${Math.floor(offset / PAGE_SIZE) + 1}/${Math.max(1, Math.ceil(models.length / PAGE_SIZE))} 页`;
+        text = `🤖 ${view.favorites ? "常用模型" : "选择模型"}\n\n当前：${selected?.displayName ?? s.selectedModel ?? "未选择"}\n${view.details ? "点击模型查看能力与管理收藏。" : "点击即切换 · ✓ 当前模型"}\n第 ${Math.floor(offset / PAGE_SIZE) + 1}/${Math.max(1, Math.ceil(models.length / PAGE_SIZE))} 页 · 共 ${models.length} 个`;
+        if (!s.connected || s.connectionError) text += `\n${connection}`;
         if (!models.length) text += view.favorites ? "\n暂无可用常用模型；到全部列表添加收藏。" : "\n目录为空；请在 Magpie 中启用模型后刷新。";
         for (const model of models.slice(offset, offset + PAGE_SIZE)) {
           const current = model.id === s.selectedModel ? "✓ " : "";
           const next = { ...view, offset };
-          text += `\n${current}${model.displayName}${model.ownedBy ? ` · ${model.ownedBy}` : ""}\n${model.id}`;
-          rows.push([button(`${current}${model.displayName}`.slice(0, 90), next, { type: "model", model: model.id }),
-            button("详情", { page: "detail", model: model.id }),
-            button(s.favorites.includes(model.id) ? "★" : "☆", next, { type: "favorite", model: model.id, enabled: !s.favorites.includes(model.id) })]);
+          const label = `${current}${model.displayName} · ${model.id.includes("/") ? model.id.slice(0, model.id.lastIndexOf("/")) : model.ownedBy ?? model.id}`;
+          rows.push([view.details
+            ? button(label, { ...next, page: "detail", model: model.id })
+            : button(label, next, { type: "model", model: model.id })]);
         }
         const navigation: Button[] = [];
         if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
@@ -64,31 +65,33 @@ export function registerTelegramPanel(options: {
         if (navigation.length) rows.push(navigation);
         rows.push([button(view.favorites ? "全部模型" : "常用模型", { page: "models", favorites: !view.favorites }),
           { label: "刷新目录", value: { view: { ...view, offset: 0 }, refresh: true } }]);
+        rows.push([button(view.details ? "🤖 返回选择" : "ℹ️ 详情与收藏", { ...view, details: !view.details, offset })]);
         break;
       }
       case "detail": {
         const model = s.catalog.find(item => item.id === view.model);
         if (!model) { text = "此模型已不在当前目录中，请刷新并重新选择。"; }
         else {
-          text = `模型详情\n${model.displayName}\nID：${model.id}\n供应商：${model.ownedBy ?? "未知"}\n上下文窗口：${model.contextWindow ?? "未知"}\n最大输出：${model.maxOutputTokens ?? "未知"}\n模态：${model.modalities?.join("、") ?? "未知"}\n推理：${model.reasoning === false ? "不支持" : model.reasoning ? "支持" : "未知"}\n等级：${model.reasoningLevels?.join("、") ?? "能力未提供"}`;
-          rows.push([button("选择此模型", { page: "models" }, { type: "model", model: model.id }),
-            button(s.favorites.includes(model.id) ? "移除常用" : "加入常用", view, { type: "favorite", model: model.id, enabled: !s.favorites.includes(model.id) })]);
+          text = `ℹ️ ${model.displayName}\n\nID：${model.id}\n供应商：${model.ownedBy ?? "未知"}\n\n上下文窗口：${model.contextWindow ?? "未知"}\n最大输出：${model.maxOutputTokens ?? "未知"}\n模态：${model.modalities?.join("、") ?? "未知"}\n推理：${model.reasoning === false ? "不支持" : model.reasoning ? "支持" : "未知"}\n等级：${model.reasoningLevels?.join("、") ?? "能力未提供"}`;
+          rows.push([button("选择此模型", { ...view, page: "models", details: false }, { type: "model", model: model.id })],
+            [button(s.favorites.includes(model.id) ? "★ 移除常用" : "☆ 加入常用", view, { type: "favorite", model: model.id, enabled: !s.favorites.includes(model.id) })]);
         }
-        rows.push([button("返回模型列表", { page: "models" })]);
+        rows.push([button("返回模型列表", { ...view, page: "models" })]);
         break;
       }
       case "thinking":
-        text = `思考等级\n模型：${s.selectedModel ?? "未选择"}\n当前：${s.thinking ?? "未设置"}`;
+        text = `🧠 思考等级\n\n模型：${selected?.displayName ?? s.selectedModel ?? "未选择"}\n当前：${s.thinking ?? "未设置"}`;
         if (!selected) text += "\n请先选择可用模型。";
         else if (selected.reasoning === false) text += "\n此模型不支持推理，无需设置等级。";
         else if (!selected.reasoningLevels?.length) text += "\n目录未提供可调等级，不发送猜测的 effort。";
-        else for (const level of selected.reasoningLevels) rows.push([button(`${s.thinking === level ? "✓ " : ""}${level}`, view, { type: "thinking", level })]);
+        else for (let index = 0; index < selected.reasoningLevels.length; index += 2) rows.push(selected.reasoningLevels.slice(index, index + 2).map(level => button(`${s.thinking === level ? "✓ " : ""}${level}`, view, { type: "thinking", level })));
         if (s.thinkingAdjusted) text += "\n能力已更新，原偏好不再支持，已调整为支持的等级。";
         break;
       case "works": {
         const offset = Math.max(0, view.offset ?? 0);
-        text = `工作列表\n${s.works.length ? "每项对应独立工作目标。" : "暂无工作。"}`;
-        for (const work of s.works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${statusName(work.status)} · ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
+        text = `⏳ 工作列表\n\n${s.works.length ? `共 ${s.works.length} 项 · 点击查看进度与操作\n◽ 本轮结束仅表示处理结束，成果仍需核对。` : "暂无工作。"}`;
+        const workIcons: Record<string, string> = { completed: "◽", cancelled: "🚫", paused: "⏸", running: "▶️", queued: "⌛" };
+        for (const work of s.works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${workIcons[work.status] ?? "•"} ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
         const navigation: Button[] = [];
         if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
         if (offset + PAGE_SIZE < s.works.length) navigation.push(button("下一页", { ...view, offset: offset + PAGE_SIZE }));
@@ -107,6 +110,12 @@ export function registerTelegramPanel(options: {
         break;
       }
       case "cache": text = note ?? "缓存统计暂无数据。"; note = undefined; break;
+      case "settings":
+        text = "⚙️ 设置\n\n查看用量、调整预览或管理会话。";
+        rows.push([button("📊 缓存统计", { page: "cache" }, { type: "cache" })],
+          [button(`✍️ 草稿预览：${s.drafts ? "开" : "关"}`, view, { type: "draft", enabled: !s.drafts })],
+          [button("🗂 会话操作", { page: "session" })]);
+        break;
       case "session":
         text = "会话操作\n换模型保留上下文和工作；暂停工作需明确继续。\n重置仅清除模型上下文，保留队列、工作、helper 和全部设置。";
         rows.push([button("继续暂停工作", view, { type: "resume", operationId: randomBytes(12).toString("hex") })],
@@ -118,19 +127,23 @@ export function registerTelegramPanel(options: {
         break;
     }
     if (failure) text += `\n${failure}`;
-    if (note) text += `\n${note}`;
+    if (note && (view.page === "cache" || view.page === "session" || view.page === "work")) text += `\n${note}`;
+    if (["cache", "session"].includes(view.page)) rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");
     const actions: ButtonAction[] = [];
     const keyboard = new InlineKeyboard();
-    for (const row of rows) {
+    for (const [rowIndex, row] of rows.entries()) {
+      if (rowIndex > 0) keyboard.row();
       for (const item of row) { keyboard.text(item.label, `cp:${token}:${actions.length.toString(36)}`); actions.push(item.value); }
-      keyboard.row();
     }
+    const [title, ...lines] = text.slice(0, 3800).split("\n");
+    const formatted = view.page === "cache" ? text.slice(0, 4000) : `<b>${html(title!)}</b>\n${html(lines.join("\n"))}`;
+    const parseMode = view.page === "cache" ? undefined : "HTML" as const;
     const messageId = ctx.callbackQuery?.message?.message_id;
     const reply = messageId === undefined
-      ? await ctx.reply(text.slice(0, 4000), { reply_markup: keyboard })
-      : await ctx.editMessageText(text.slice(0, 4000), { reply_markup: keyboard });
+      ? await ctx.reply(formatted, { parse_mode: parseMode, reply_markup: keyboard })
+      : await ctx.editMessageText(formatted, { parse_mode: parseMode, reply_markup: keyboard });
     const panelMessageId = messageId ?? (reply as { message_id: number }).message_id;
     // A new view replaces the buttons on this message, so superseded capabilities expire.
     const now = Date.now();
@@ -180,7 +193,7 @@ export function registerTelegramPanel(options: {
       if (name === "reset") view = { page: "reset" };
       if (name === "resume") { view = { page: "works" }; action = { type: "resume", ...(arg ? { batchId: arg } : {}), operationId: `telegram:${messageId}:resume` }; }
       if (name === "kvcache") { view = { page: "cache" }; if (arg) { await ctx.reply("用法：/kvcache（查看最近五轮）"); return; } action = { type: "cache" }; }
-      if (name === "draft") { const s = await app.controlSnapshot(conversationId); action = { type: "draft", enabled: arg === "on" ? true : arg === "off" ? false : !s.drafts }; }
+      if (name === "draft") { view = { page: "settings" }; const s = await app.controlSnapshot(conversationId); action = { type: "draft", enabled: arg === "on" ? true : arg === "off" ? false : !s.drafts }; }
       try {
         const result = action ? await app.control(conversationId, action.type === "cache" ? action : { ...action, operationId: `telegram:${messageId}:${name}` }) : undefined;
         await render(ctx, view, result?.snapshot, result?.text, refresh);

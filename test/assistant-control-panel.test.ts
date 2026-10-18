@@ -22,7 +22,9 @@ test("Telegram /start opens owner conversation controls without a model request"
     assert.ok(panel?.reply_markup, "native inline controls are immediately available");
     assert.match(panel.text!, /模型/);
     const labels = panel.reply_markup.inline_keyboard.flat().map(b => b.text).join(" ");
-    assert.match(labels, /模型/); assert.match(labels, /工作/); assert.match(labels, /缓存/); assert.match(labels, /会话/); assert.match(labels, /草稿/);
+    assert.match(labels, /模型：local/); assert.match(labels, /工作/); assert.match(labels, /设置/);
+    assert.equal(panel.reply_markup.inline_keyboard.length, 3, "non-reasoning models hide the thinking row");
+    assert.ok(panel.reply_markup.inline_keyboard.every(row => row.length === 1));
     assert.equal(requests, 0);
   } finally { await f.close(); }
 });
@@ -45,7 +47,7 @@ test("catalog output limits equal to context windows do not block other models, 
     await f.flush();
     await f.reopen();
     await f.bot.handleUpdate(command(503, "/start"));
-    assert.match(latestPanel(f).text, /provider\/equal-limits/);
+    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /provider\/equal-limits/);
     await f.bot.handleUpdate(command(504, "SECOND_GOAL"));
     await f.flush();
     assert.deepEqual(f.requests.map(request => request.model), ["provider/A", "provider/equal-limits"]);
@@ -69,7 +71,8 @@ function latestPanel(f: {sent: Array<{method: string;body: unknown;messageId: nu
 }
 let updateId = 100;
 async function click(f: PanelFixture, label: string | RegExp, panel = latestPanel(f), actor = 42, chat = 42, messageId = panel.id, group = false) {
-  const button = panel.buttons.find(b => typeof label === "string" ? b.text === label : label.test(b.text));
+  const button = panel.buttons.find(b => typeof label === "string" ? b.text === label : label.test(b.text))
+    ?? panel.buttons.find(b => typeof label === "string" && b.text.includes(label));
   assert.ok(button, `missing button ${String(label)}: ${panel.buttons.map(b => b.text).join(", ")}`);
   await f.bot.handleUpdate({ update_id: ++updateId, callback_query: { id: `cb-${updateId}`, from: { id: actor, is_bot: false, first_name: "owner" },
     chat_instance: "private", data: button.callback_data,
@@ -83,23 +86,26 @@ test("panel buttons navigate and change settings in one Telegram message without
   try {
     await f.bot.handleUpdate(command(2001, "/start"));
     const original = latestPanel(f);
+    await click(f, "设置");
     await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
     assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1, "cache navigation must reuse the original panel");
     await click(f, "返回首页");
     await click(f, "模型");
     await click(f, "下一页"); assert.match(latestPanel(f).text, /第 2\/2 页/);
-    await click(f, "详情"); assert.match(latestPanel(f).text, /provider\/model-6/);
+    await click(f, "详情与收藏"); await click(f, "Model 6"); assert.match(latestPanel(f).text, /provider\/model-6/);
     await click(f, "加入常用");
     await click(f, "选择此模型");
-    await click(f, "常用模型"); assert.match(latestPanel(f).text, /✓ Model 6/);
+    await click(f, "常用模型"); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /✓ Model 6/);
     await click(f, "刷新目录");
     await click(f, "返回首页");
     await click(f, "思考等级"); await click(f, "high"); assert.match(latestPanel(f).text, /当前：high/);
     await click(f, "返回首页");
+    await click(f, "设置");
     await click(f, /草稿预览/); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
+    await click(f, "返回首页");
     await click(f, "工作列表"); assert.match(latestPanel(f).text, /暂无工作/);
     await click(f, "返回首页");
-    await click(f, "会话操作"); await click(f, "重置上下文…"); await click(f, "取消");
+    await click(f, "设置"); await click(f, "会话操作"); await click(f, "重置上下文…"); await click(f, "取消");
     await click(f, "返回首页");
     const updates = f.sent.filter(s => s.method === "editMessageText");
     assert.ok(updates.length >= 20);
@@ -137,13 +143,13 @@ test("native model pagination, detail and favorites preserve opaque catalog IDs 
   const f = await controlPanelFixture({ models });
   try {
     await f.bot.handleUpdate(command(1, "/model"));
-    let panel = latestPanel(f); assert.match(panel.text, /✓ Model 0/);
+    let panel = latestPanel(f); assert.match(panel.buttons.map(b => b.text).join(" "), /✓ Model 0/);
     for (const button of panel.buttons) assert.ok(Buffer.byteLength(button.callback_data, "utf8") <= 64);
     const reads = f.catalogReads;
-    await click(f, "下一页"); panel = latestPanel(f); assert.match(panel.text, /Model 7/); assert.equal(f.catalogReads, reads);
-    await click(f, "详情"); panel = latestPanel(f); assert.match(panel.text, /provider\/route\/team\/model-6/); assert.match(panel.text, /32000/);
+    await click(f, "下一页"); panel = latestPanel(f); assert.match(panel.buttons.map(b => b.text).join(" "), /Model 7/); assert.equal(f.catalogReads, reads);
+    await click(f, "详情与收藏"); await click(f, "Model 6"); panel = latestPanel(f); assert.match(panel.text, /provider\/route\/team\/model-6/); assert.match(panel.text, /32000/);
     await click(f, "加入常用"); await click(f, "返回模型列表"); await click(f, "常用模型");
-    panel = latestPanel(f); assert.match(panel.text, /Model 6/); assert.doesNotMatch(panel.text, /Model 7/);
+    panel = latestPanel(f); assert.match(panel.buttons.map(b => b.text).join(" "), /Model 6/); assert.doesNotMatch(panel.buttons.map(b => b.text).join(" "), /Model 7/);
     await click(f, "Model 6");
     const config = JSON.parse(await readFile(f.configPath, "utf8"));
     assert.equal(config.model, "magpie/provider/route/team/model-6"); assert.equal(config.unrelated, "keep");
@@ -166,12 +172,12 @@ test("busy model controls acknowledge immediately and only the last selected set
     await f.bot.handleUpdate(command(3, "/thinking high"));
     await f.bot.handleUpdate(command(4, "/start"));
     const panel = latestPanel(f);
-    assert.match(panel.text, /期望模型：route\/team\/C · high/);
+    assert.match(panel.text, /待生效：route\/team\/C · high/);
     assert.match(panel.text, /实际请求：provider\/A · medium/); assert.match(panel.text, /待生效/);
     assert.equal(f.requests.length, 1);
     assert.ok(f.sent.some(s => s.method === "answerCallbackQuery"));
-    await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
-    await f.bot.handleUpdate(command(5, "/model")); await click(f, "☆"); await click(f, "常用模型");
+    await click(f, "设置"); await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
+    await f.bot.handleUpdate(command(5, "/model")); await click(f, "详情与收藏"); await click(f, "Alpha"); await click(f, "加入常用"); await click(f, "返回模型列表"); await click(f, "常用模型");
     assert.equal(f.requests.length, 1);
     release.resolve(); await f.flush();
     await f.bot.handleUpdate(command(6, "next C")); await f.flush();
@@ -186,21 +192,21 @@ test("busy model controls acknowledge immediately and only the last selected set
 test("callbacks enforce owner, chat, message and restart scope and repeated draft changes have one effect", async () => {
   const f = await controlPanelFixture();
   try {
-    await f.bot.handleUpdate(command(1, "/start")); const original = latestPanel(f);
+    await f.bot.handleUpdate(command(1, "/start")); await click(f, "设置"); const original = latestPanel(f);
     const before = f.sent.length;
     await click(f, /草稿预览/, original, 43);
     await click(f, /草稿预览/, original, 42, 99);
     await click(f, /草稿预览/, original, 42, 42, original.id + 200);
     await click(f, /草稿预览/, original, 42, 42, original.id, true);
     assert.equal(f.sent.slice(before).filter(s => s.method === "answerCallbackQuery").length, 4);
-    await f.bot.handleUpdate(command(2, "/start")); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：开/);
+    await f.bot.handleUpdate(command(2, "/start")); await click(f, "设置"); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：开/);
     await click(f, /草稿预览/, original);
     assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
     await click(f, /草稿预览/, original);
     await f.reopen();
     await click(f, /草稿预览/, original);
     assert.match(String(f.sent.at(-1)?.body), /过期/);
-    await f.bot.handleUpdate(command(3, "/start")); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
+    await f.bot.handleUpdate(command(3, "/start")); await click(f, "设置"); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
     await f.bot.handleUpdate(command(4, "final reply still delivered")); await f.flush();
     assert.ok(f.sent.some(s => s.method === "sendRichMessage" && /confirmed answer/.test(String(s.body))));
     assert.match(await readFile(join(f.directory, "telegram-sends.jsonl"), "utf8"), /"status":"sent"/);
@@ -232,11 +238,11 @@ test("catalog failure retains snapshot, successful removal invalidates old choic
   try {
     await f.bot.handleUpdate(command(1, "/model")); const old = latestPanel(f);
     f.setCatalogFailure(true); await click(f, "刷新目录");
-    assert.match(latestPanel(f).text, /刷新失败/); assert.match(latestPanel(f).text, /Beta/);
+    assert.match(latestPanel(f).text, /刷新失败/); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /Beta/);
     f.setCatalogFailure(false); f.setModels([{ id: "route/new/D", display_name: "Delta", reasoning: false }]);
-    await click(f, "刷新目录"); assert.match(latestPanel(f).text, /Delta/); assert.doesNotMatch(latestPanel(f).text, /Beta/);
+    await click(f, "刷新目录"); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /Delta/); assert.doesNotMatch(latestPanel(f).buttons.map(b => b.text).join(" "), /Beta/);
     await click(f, "Beta", old); assert.match(String(f.sent.at(-1)?.body), /过期/);
-    assert.match(latestPanel(f).text, /Delta/);
+    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /Delta/);
     assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1);
     assert.equal(f.requests.length, 0);
     await f.bot.handleUpdate(command(2, "/start")); assert.match(latestPanel(f).text, /不可用/);
@@ -261,6 +267,7 @@ test("turning drafts off during a streamed response stops later previews while f
     await writeFile(join(f.directory, "report.txt"), "real report");
     await f.bot.handleUpdate(command(1, "send report.txt")); await firstDraft.promise;
     await f.bot.handleUpdate(command(2, "/draft off"));
+    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
     const previews = f.sent.filter(s => s.method === "sendRichMessageDraft").length; assert.ok(previews > 0);
     proceed.resolve(); await f.flush();
     assert.equal(f.sent.filter(s => s.method === "sendRichMessageDraft").length, previews);
@@ -268,7 +275,7 @@ test("turning drafts off during a streamed response stops later previews while f
     assert.ok(f.sent.some(s => s.method === "sendRichMessage" && /FINAL_TEXT/.test(String(s.body))));
     const receipts = await readFile(join(f.directory, "telegram-sends.jsonl"), "utf8");
     assert.match(receipts, /"kind":"file"/); assert.match(receipts, /"status":"sent"/);
-    await f.reopen(); await f.bot.handleUpdate(command(3, "/start"));
+    await f.reopen(); await f.bot.handleUpdate(command(3, "/start")); await click(f, "设置");
     assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
     assert.deepEqual(f.errors, []);
   } finally { proceed.resolve(); await f.close(); }
@@ -285,7 +292,7 @@ test("work details identify one queued target and cancellation preserves other F
     await f.bot.handleUpdate(command(2, "CANCEL_B")); await f.app.waitForRouting();
     await f.bot.handleUpdate(command(3, "KEEP_C")); await f.app.waitForRouting();
     await f.bot.handleUpdate(command(4, "/work"));
-    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /排队中.*CANCEL_B/);
+    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /⌛ CANCEL_B/);
     await click(f, /CANCEL_B/); const target = latestPanel(f); assert.match(target.text, /目标：/); assert.match(target.text, /CANCEL_B/);
     await click(f, "取消此工作", target); await click(f, "取消此工作", target);
     assert.match(latestPanel(f).text, /已取消/);
@@ -315,7 +322,7 @@ test("replayed shortcut after restart cannot overwrite a newer explicit model ch
 test("Telegram without a model keeps ordinary inputs across channel restart until an explicit catalog selection", async () => {
   const f = await controlPanelFixture({ noSelection: true });
   try {
-    await f.bot.handleUpdate(command(1, "/start")); assert.match(latestPanel(f).text, /未选择/);
+    await f.bot.handleUpdate(command(1, "/start")); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /未选择/);
     await f.bot.handleUpdate(command(2, "WAIT_FIRST")); await f.bot.handleUpdate(command(3, "WAIT_SECOND")); await f.flush();
     assert.equal(f.requests.length, 0);
     await f.reopen(); await f.bot.handleUpdate(command(4, "/start"));
