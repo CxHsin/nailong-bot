@@ -4,27 +4,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Bot } from "grammy";
 import { Response as ApiResponse } from "node-fetch";
-import { connectTelegram } from "../src/assistant/telegram.js";
+import { telegramFixture, botInfo } from "./fixtures/telegram.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
-import { assistantFixture, type Wire } from "./fixtures/assistant.js";
-import type { ServerResponse } from "node:http";
+import { type Wire } from "./fixtures/assistant.js";
 import { downloadTelegramDocument, MAX_DOCUMENT_BYTES } from "../src/telegram/telegram-input.js";
 
-const botInfo = {
-  id: 1,
-  is_bot: true as const,
-  first_name: "test",
-  username: "test_bot",
-  can_join_groups: true,
-  can_read_all_group_messages: false,
-  supports_inline_queries: false,
-  can_connect_to_business: false,
-  has_main_web_app: false,
-  has_topics_enabled: false,
-  allows_users_to_create_topics: false,
-  can_manage_bots: false,
-  supports_join_request_queries: false,
-};
 const update = (id: number, actor = 42, photo = false) => ({
   update_id: id,
   message: {
@@ -66,67 +50,6 @@ test("unknown remote file acceptance blocks a second tool call and pauses for ve
   } finally { await f.close(); }
 });
 
-async function telegramFixture(
-  provider: (wire: Wire, response: ServerResponse) => void,
-  send?: (method: string, body: unknown) => ApiResponse | Promise<ApiResponse>,
-  downloadDocument: (id: string) => Promise<Buffer> = async (_id: string) => Buffer.from("attachment data"),
-) {
-  const f = await assistantFixture(provider);
-  const sent: Array<{ method: string; body: unknown }> = [];
-  const errors: unknown[] = [];
-  const bot = new Bot("test", {
-    botInfo,
-    client: {
-      fetch: async (url, init) => {
-        const method = String(url).split("/").at(-1)!;
-        const body = init?.body;
-        sent.push({ method, body });
-        if (send) return send(method, body);
-        return new ApiResponse(
-          JSON.stringify({
-            ok: true,
-            result: {
-              message_id: 10,
-              date: 0,
-              chat: { id: 42, type: "private" },
-            },
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      },
-    },
-  });
-  const channel = await connectTelegram({
-    app: f.app,
-    bot,
-    ownerId: 42,
-    dataDir: f.directory,
-    download: async () => ({
-      type: "image",
-      mimeType: "image/png",
-      data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aPfoAAAAASUVORK5CYII=",
-    }),
-    downloadDocument,
-    reportFailure: (error) => {
-      errors.push(error);
-    },
-  });
-  return {
-    ...f,
-    bot,
-    sent,
-    errors,
-    channel,
-    async flush() {
-      await channel.finish();
-      await f.app.waitForIdle();
-    },
-    async close() {
-      await channel.close();
-      await f.close();
-    },
-  };
-}
 
 const documentUpdate = (id: number, name: string, actor = 42, caption?: string) => {
   const item = update(id, actor);
@@ -258,14 +181,14 @@ test("Telegram /kvcache normalizes bot addressing, authenticates and returns cac
     await f.bot.handleUpdate(command(3, "/kvcache@test_bot"));
     await f.flush();
     assert.equal(requests, 0);
-    const reports = f.sent.filter(call => call.method === "sendRichMessage");
+    const reports = f.sent.filter(call => call.method === "sendMessage");
     assert.equal(reports.length, 1);
     assert.match(String(reports[0]!.body), /胃囊报表/);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
 
-test("Telegram cache report sends literal multiline paragraphs while ordinary answers keep Markdown", async () => {
+test("Telegram cache report sends literal multiline text while ordinary answers keep Markdown", async () => {
   const f = await telegramFixture((_wire, response) => {
     response.writeHead(200, { "content-type": "text/event-stream" });
     response.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "**hello**" }, finish_reason: "stop" }],
@@ -276,12 +199,14 @@ test("Telegram cache report sends literal multiline paragraphs while ordinary an
     const command = update(2);
     await f.bot.handleUpdate({ ...command, message: { ...command.message, text: "/kvcache" } });
     await f.flush();
-    const messages = f.sent.filter(call => call.method === "sendRichMessage").map(call => JSON.parse(String(call.body)).rich_message);
-    assert.equal(messages.length, 2);
-    assert.equal(messages[0].markdown, "**hello**");
-    assert.equal(messages[1].markdown, undefined);
-    assert.deepEqual(messages[1].blocks, [{ type: "paragraph", text:
-      "🦖 【奶龙赛博反刍胃囊报表】\n\n1. 🟡 命中率：89.8%\nHit：566272\nMiss：64494\n合计输入：630766\n完美反刍，熟悉的味道又回来啦！" }]);
+    const answer = f.sent.filter(call => call.method === "sendRichMessage").map(call => JSON.parse(String(call.body)).rich_message);
+    assert.equal(answer.length, 1);
+    assert.equal(answer[0].markdown, "**hello**");
+    const report = f.sent.filter(call => call.method === "sendMessage").map(call => JSON.parse(String(call.body)));
+    assert.equal(report.length, 1);
+    assert.equal(report[0].parse_mode, undefined);
+    assert.equal(report[0].text,
+      "🦖 【奶龙赛博反刍胃囊报表】\n\n1. 🟡 命中率：89.8%\nHit：566272\nMiss：64494\n合计输入：630766\n完美反刍，熟悉的味道又回来啦！");
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
