@@ -26,6 +26,34 @@ test("Telegram /start opens owner conversation controls without a model request"
     assert.equal(requests, 0);
   } finally { await f.close(); }
 });
+
+test("catalog output limits equal to context windows do not block other models, selection or restart", async () => {
+  const f = await controlPanelFixture();
+  try {
+    f.setModels([
+      { id: "provider/A", reasoning: false, context_window: 128000, max_output_tokens: 16384 },
+      { id: "provider/equal-limits", reasoning: false, context_window: 64000, max_output_tokens: 64000 },
+    ]);
+    const state = await f.app.controlSnapshot("telegram:private:42", { refresh: true });
+    assert.equal(state.selectedModel, "provider/A");
+    assert.equal(state.selectedAvailable, true);
+    await f.bot.handleUpdate(command(501, "FIRST_GOAL"));
+    await f.flush();
+    assert.equal(f.requests[0]?.model, "provider/A");
+
+    await f.bot.handleUpdate(command(502, "/model provider/equal-limits"));
+    await f.flush();
+    await f.reopen();
+    await f.bot.handleUpdate(command(503, "/start"));
+    assert.match(latestPanel(f).text, /provider\/equal-limits/);
+    await f.bot.handleUpdate(command(504, "SECOND_GOAL"));
+    await f.flush();
+    assert.deepEqual(f.requests.map(request => request.model), ["provider/A", "provider/equal-limits"]);
+    assert.match(JSON.stringify(f.requests[1]?.messages), /FIRST_GOAL/);
+    assert.match(JSON.stringify(f.requests[1]?.messages), /SECOND_GOAL/);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { controlPanelFixture } from "./fixtures/control-panel.js";
