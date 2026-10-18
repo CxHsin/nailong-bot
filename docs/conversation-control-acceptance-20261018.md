@@ -11,16 +11,37 @@
 | 无模型接收并持久等待、重启后明确选择继续 FIFO | `assistant-model-control.test.ts`、`assistant-control-panel.test.ts` |
 | 完整多层 ID、分页、详情、常用、刷新失败保留与成功移除 | `assistant-control-panel.test.ts` |
 | 双端明确选择、回写回声、刷新及重启不覆盖、其他 Conversation 独立 | `assistant-magpie-sync.test.ts` |
+| 全局断连在面板观察或实际发送前阻止独立会话续接；重连不自动恢复，明确继续复用工具效果；目录移除与能力变化传播到已有会话 | `assistant-control-panel.test.ts` |
 | 挂住 A 请求，选择 B/C，当前 A 保持、后续实际请求采用 C；工具仅执行一次 | `assistant-model-control.test.ts`、`assistant-control-panel.test.ts` |
 | 有限预算共四次，切换不重置；暂停只换设置不恢复，明确继续且重复去重 | `assistant-model-control.test.ts` |
-| medium/low/最低/未知/非推理及扩展等级，能力变化、reset 和重启恢复 | `assistant-model-control.test.ts` |
+| medium/low/最低/未知/非推理及扩展等级，能力变化、reset 和重启恢复；调整说明跨刷新和重启保留至明确选择等级 | `assistant-model-control.test.ts`、`assistant-control-panel.test.ts` |
 | 较小窗口原生压缩后续接；图片能力不足暂停，保留原图并明确继续 | `assistant-magpie-sync.test.ts`、`assistant-model-control.test.ts` |
 | 真实工作详情、指定目标取消及其他工作 FIFO、回调鉴权与去重 | `assistant-control-panel.test.ts`，已有 helper/routing/recovery 回归 |
 | 忙时模型/缓存/收藏/草稿独立，reset 确认及取消，重启命令去重 | `assistant-control-panel.test.ts` |
 | 真实流式预览关闭后不更新，最终文本、文件及 receipt 正常 | `assistant-control-panel.test.ts` |
 | 正式 CLI 无旧主模型配置、同目录独占、选择后恢复、intent 独立校验 | `assistant-cli.test.ts` |
 
-测试文件位于 [test](../test/)。完整回归、类型、构建与文档检查结果在最终受检状态稳定后记录。历史验收继续适用于其原日期与提交，不用于证明新增能力。
+测试文件位于 [test](../test/)。历史验收继续适用于其原日期与提交，不用于证明新增能力。
+
+## 最终自动化验证
+
+全部源码、夹具和测试写入者停写后，在 `development` 的 `0ba728859404eaac32ffb23b77c390d1e59bd108` 执行最终检查。下列证据对应该源码状态；此后仅补充本验收记录。
+
+- `npm test`：**206/206 通过**，0 失败、取消或跳过，约 71 秒。
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- `npm run docs:check`：通过，107 份受跟踪 Markdown、454 个本地链接。
+- `git diff 4c2aa62...HEAD --check`：通过。
+
+断连缺陷的两个回归场景先在旧实现中观察到第二次 HTTP 请求，修复后均只有第一次请求；等级提示回归先在真实 Bot 页面中观察到说明缺失，修复后跨刷新和重启保留。对应定向组合测试 **7/7 通过**，已包含在最终全仓 206 项中。检查使用 Promise 闸门控制请求和工具边界；没有通过固定等待时间猜测结果。
+
+## Standards
+
+独立规范评审已复核当前说明、ADR 实现状态与验证证据，原目录到模型配置的重复映射已收敛。最终未解决项：**0 项 hard violation、0 项 heuristic smell**。
+
+## Spec
+
+独立规格评审发现的 P1（全局连接及目录未覆盖独立会话）和 P2（等级调整说明被内部读取消耗）已修复并复核通过。未发现范围扩张。最终未解决项：**1 项交付缺口，即下述真实插件与手机验收**；自动化通过不表示 #244 已全部验收。
 
 ## 真实 Magpie 只读证据
 
