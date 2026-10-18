@@ -11,6 +11,68 @@ import { createQueuedAssistant, type ProcessingBatch } from "../src/assistant/qu
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 
+test("user stop persists before abort, survives late completion and restart, and allows independent work", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-user-stop-"));
+  const started = deferred(), finish = deferred();
+  let original = "";
+  let service = await createQueuedAssistant({dataDir:directory, executor:{async execute(batch, context) {
+    original = batch.id; context.recordSubmission("17"); started.resolve();
+    await finish.promise;
+    assert.equal(context.signal.reason, "user_stop");
+    return {status:"completed"};
+  }}});
+  try {
+    await service.receive({conversationId:"one",inputId:"work",text:"keep progress"}); await started.promise;
+    assert.equal(service.stop("other"), false);
+    assert.equal(service.stop("one"), true);
+    assert.equal(service.getBatch(original)?.status, "paused", "decision is durable before abort finishes");
+    finish.resolve(); await service.waitForIdle();
+    assert.equal(service.getBatch(original)?.status, "paused", "late result cannot undo user stop");
+    await service.close();
+    const seen: ProcessingBatch[] = [];
+    service = await createQueuedAssistant({dataDir:directory,executor:{async execute(batch) {seen.push(batch);return {status:"completed"};}}});
+    service.start(); await service.waitForIdle(); assert.equal(seen.length, 0);
+    await service.receive({conversationId:"one",inputId:"next",text:"independent request"}); await service.waitForIdle();
+    assert.deepEqual(seen.map(batch => batch.events[0]!.inputId), ["next"]);
+    await service.resume("one",original); await service.waitForIdle();
+    assert.equal(seen[1]?.id, original); assert.equal(seen[1]?.previousSubmissionId, "17");
+    assert.equal(seen[1]?.reconcile, true);
+  } finally {finish.resolve();await service.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test("resume during user stop waits for the interrupted executor before reopening its batch", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-stop-resume-"));
+  const started = deferred(), finish = deferred(); let calls = 0;
+  const service = await createQueuedAssistant({dataDir:directory,executor:{async execute() {
+    if (++calls === 1) {started.resolve();await finish.promise;}
+    return {status:"completed"};
+  }}});
+  try {
+    await service.receive({conversationId:"one",inputId:"work",text:"work"}); await started.promise;
+    service.stop("one");
+    const resume = service.resume("one");
+    assert.equal(calls,1);
+    finish.resolve();await resume;await service.waitForIdle();
+    assert.equal(calls,2);
+    assert.equal(service.listBatches("one")[0]?.status,"completed");
+  } finally {finish.resolve();await service.close();await rm(directory,{recursive:true,force:true});}
+});
+
+test("user stop keeps unknown external effects in needs_confirmation", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-stop-unknown-"));
+  const started = deferred(), finish = deferred();
+  const service = await createQueuedAssistant({dataDir:directory,executor:{async execute() {
+    started.resolve();await finish.promise;
+    return {status:"needs_confirmation",reason:"unknown_external_effect"};
+  }}});
+  try {
+    await service.receive({conversationId:"one",inputId:"work",text:"work"});await started.promise;
+    service.stop("one");finish.resolve();await service.waitForIdle();
+    assert.equal(service.listBatches("one")[0]?.status,"needs_confirmation");
+    assert.equal(service.listBatches("one")[0]?.reason,"unknown_external_effect");
+  } finally {finish.resolve();await service.close();await rm(directory,{recursive:true,force:true});}
+});
+
 test("one queue data directory has only one live service owner", async () => {
   const directory = await mkdtemp(join(tmpdir(),"nailong-owner-"));
   const options={dataDir:directory,executor:{async execute(){return {status:"completed" as const};}}};

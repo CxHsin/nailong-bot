@@ -11,6 +11,8 @@ const PAGE_SIZE = 6;
 const statusNames: Record<string, string> = { idle: "空闲", running: "执行中", waiting_model: "等待选择可用模型", paused: "已暂停", queued: "排队中", pending: "排队中", completed: "本轮已结束（目标成果仍需核对）", cancelled: "已取消后续安排", stopping: "停止中", stopped: "已核实停止", unknown: "待核实", background: "后台 helper", helper: "后台 helper", needs_confirmation: "待核实" };
 const statusName = (value: string) => statusNames[value] ?? value;
 const html = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const count = (value: number | null | undefined) => value == null ? "未知" :
+  value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value);
 
 /** Native controls use the authenticated Conversation service boundary, never natural-language routing. */
 export function registerTelegramPanel(options: {
@@ -38,7 +40,8 @@ export function registerTelegramPanel(options: {
       s.catalogStatus === "unavailable" ? "模型目录暂不可用，请刷新重试。" : "";
     switch (view.page) {
       case "home":
-        text = `🦖 Nailong Bot\n\n/start — 打开控制面板\n/model — 选择模型\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}\n状态：${statusName(s.status)} · 等待 ${s.waiting}`;
+        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${count(s.usage.input)} ↓${count(s.usage.output)}\nCache: R${count(s.usage.cacheRead)} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
+        if (s.status === "waiting_model") text += "\n等待选择可用模型；已接收输入保留。";
         if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
         rows.push([{ label: `🤖 模型：${s.selectedModel ?? "未选择"}`, value: { view: { page: "models" }, refresh: true } }]);
@@ -127,7 +130,7 @@ export function registerTelegramPanel(options: {
         break;
     }
     if (failure) text += `\n${failure}`;
-    if (note && (view.page === "cache" || view.page === "session" || view.page === "work")) text += `\n${note}`;
+    if (note && ["home", "cache", "session", "work"].includes(view.page)) text += `\n${note}`;
     if (["cache", "session"].includes(view.page)) rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");
@@ -138,7 +141,9 @@ export function registerTelegramPanel(options: {
       for (const item of row) { keyboard.text(item.label, `cp:${token}:${actions.length.toString(36)}`); actions.push(item.value); }
     }
     const [title, ...lines] = text.slice(0, 3800).split("\n");
-    const formatted = view.page === "cache" ? text.slice(0, 4000) : `<b>${html(title!)}</b>\n${html(lines.join("\n"))}`;
+    const content = html(lines.join("\n"));
+    const formatted = view.page === "cache" ? text.slice(0, 4000) : `<b>${html(title!)}</b>\n${view.page === "home"
+      ? content.replace(/^(Status|Tokens|Cache|Context): (.*)$/gm, "<b>$1:</b> <code>$2</code>") : content}`;
     const parseMode = view.page === "cache" ? undefined : "HTML" as const;
     const messageId = ctx.callbackQuery?.message?.message_id;
     const reply = messageId === undefined
@@ -177,7 +182,7 @@ export function registerTelegramPanel(options: {
 
   bot.on("message:text", async (ctx, next) => {
     if (!validOwner(ctx)) return next();
-    const match = /^\/(start|model|thinking|work|kvcache|session|draft|reset|resume)(?:@([\w]+))?(?:\s+([\s\S]*))?$/.exec(ctx.message.text.trim());
+    const match = /^\/(start|model|thinking|work|kvcache|session|draft|reset|resume|stop)(?:@([\w]+))?(?:\s+([\s\S]*))?$/.exec(ctx.message.text.trim());
     if (!match) return next();
     if (match[2] && match[2].toLowerCase() !== bot.botInfo.username.toLowerCase()) return;
     const messageId = ctx.message.message_id;
@@ -192,6 +197,7 @@ export function registerTelegramPanel(options: {
       if (name === "session") view = { page: "session" };
       if (name === "reset") view = { page: "reset" };
       if (name === "resume") { view = { page: "works" }; action = { type: "resume", ...(arg ? { batchId: arg } : {}), operationId: `telegram:${messageId}:resume` }; }
+      if (name === "stop") { if (arg) { await ctx.reply("用法：/stop（暂停当前请求，保留进度）"); return; } action = {type:"stop",operationId:`telegram:${messageId}:stop`}; }
       if (name === "kvcache") { view = { page: "cache" }; if (arg) { await ctx.reply("用法：/kvcache（查看最近五轮）"); return; } action = { type: "cache" }; }
       if (name === "draft") { view = { page: "settings" }; const s = await app.controlSnapshot(conversationId); action = { type: "draft", enabled: arg === "on" ? true : arg === "off" ? false : !s.drafts }; }
       try {

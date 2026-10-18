@@ -39,6 +39,7 @@ export async function startTelegram() {
         { command: "work", description: "查看工作与目标操作" },
         { command: "session", description: "会话操作" },
         { command: "draft", description: "开关草稿预览" },
+        { command: "stop", description: "暂停当前请求，保留进度" },
         { command: "resume", description: "继续暂停工作" },
       ],
       { scope: { type: "chat", chat_id: telegram.ownerId } },

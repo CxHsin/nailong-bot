@@ -19,6 +19,7 @@ import { memoryRefinement } from "./memory-refinement.js";
 import { sanitizeMemoryContext } from "./memory-context.js";
 import { persistMedia, type MediaOptions } from "./media.js";
 import { Type } from "typebox";
+import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 
 const RecoveryDoc = defineDoc({ kind: "nailong.effect-verification", version: 1, scope: "conversation", history: "latest", fork: "current",
   initial: () => ({ calls: {} as Record<string, { tool: string; state: "unresolved" | "confirmed" | "not_applied" | "unknown"; evidence: string }> }) });
@@ -382,6 +383,13 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    async contextUsage(conversationId: string) {
+      const opening = conversations.get(conversationId);
+      if (!opening) return undefined;
+      const {root} = await opening;
+      const view = await root.context(context);
+      return estimateContextTokens(view.messages).tokens;
+    },
     /** Configure the agent for future native prepare phases. Request checkpoints stay immutable. */
     async configureModel(conversationId: string, prepared?: MagpiePreparedRequest, available: ModelConfig[] = []) {
       const {root, catalog} = await conversation(conversationId);
@@ -428,6 +436,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     },
     async execute(batch: DurableBatch, controls: DurableControls): Promise<DurableResult> {
       const { harness, root, rememberUncertain, selectWork, prepare, activateInputs } = await conversation(batch.conversationId);
+      if (controls.signal?.aborted) return {status:"preempted"};
       activateInputs(batch.events);
       if (!await selectWork(batch)) {
         await controls.emit({ conversationId: batch.conversationId, type: "text", outputId: `${batch.id}:retry-budget-exhausted`, text: "此项工作的有限重试已耗尽，已保留进度并暂停。可明确使用 /resume 继续。" });

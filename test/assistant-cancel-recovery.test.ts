@@ -7,8 +7,47 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ProcessingBatch } from "../src/assistant/queue.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
+import { createAssistant } from "../src/assistant/runtime.js";
+import { once } from "node:events";
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>((done)=>{resolve=done;});return {promise,resolve};}
+
+test("SIGKILL between persisted stop and native abort leaves the request paused until explicit resume", {timeout:25000}, async () => {
+  const directory = await mkdtemp(join(tmpdir(),"assistant-stop-window-"));
+  const entered = deferred(); let recovering = false; let requests = 0;
+  const server = createServer(async (request,response) => {
+    for await (const _part of request) { /* drain the real provider request */ }
+    requests++;
+    if (!recovering) entered.resolve(); else sendChatCompletion(response,"RESUMED");
+  });
+  await new Promise<void>(done => server.listen(0,"127.0.0.1",done));
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const options = {cwd:directory,dataDir:join(directory,"fresh"),modelConfiguration:{defaultModel:"local",models:[{
+    alias:"local",model:"local",api:"openai-completions" as const,apiKey:"test",baseUrl:`http://127.0.0.1:${address.port}`}]}};
+  await writeFile(join(directory,"options.json"),JSON.stringify(options));
+  const child = fork(resolve("test/fixtures/assistant-stop-window-child.ts"),[directory],{execArgv:["--import","tsx"],windowsHide:true,silent:true});
+  let app: Awaited<ReturnType<typeof createAssistant>> | undefined;
+  const exited = once(child,"exit");
+  try {
+    await Promise.race([entered.promise,exited.then(() => {throw new Error("child exited before model request");})]);
+    const stopped = once(child,"message");child.send({type:"stop"});await stopped;
+    child.kill("SIGKILL");await exited;
+    server.closeAllConnections();recovering = true;
+    app = await createAssistant(options);app.subscribe(() => {});
+    const snapshot = await app.controlSnapshot("one");
+    await app.waitForIdle();assert.equal(requests,1,"opening native state cannot bypass a saved stop");
+    assert.equal(snapshot.works[0]?.status,"paused");
+    await app.receive({conversationId:"one",inputId:"stop",text:"/stop"});
+    assert.equal(requests,1,"replayed stop cannot enqueue a new command");
+    await app.resume("one");await app.waitForIdle();
+    assert.equal(requests,2);
+    assert.equal((await app.controlSnapshot("one")).works[0]?.status,"completed");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {child.kill("SIGKILL");await exited;}
+    await app?.close();server.closeAllConnections();await new Promise<void>(done => server.close(() => done()));
+    await rm(directory,{recursive:true,force:true});
+  }
+});
 test("SIGKILL after cancelling a running target but before preemption never reconnects its original Durable submission",{timeout:25_000},async()=>{
   const directory=await mkdtemp(join(tmpdir(),"assistant-cancel-window-"));
   const confirmed=deferred();

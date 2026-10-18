@@ -21,12 +21,81 @@ test("Telegram /start opens owner conversation controls without a model request"
     const panel = f.sent.filter(s => s.method === "sendMessage").map(s => body(s.body)).at(-1);
     assert.ok(panel?.reply_markup, "native inline controls are immediately available");
     assert.match(panel.text!, /模型/);
+    assert.match(panel.text!, /Status:<\/b> <code>idle<\/code>/);
+    assert.match(panel.text!, /Tokens:<\/b> <code>↑未知 ↓未知<\/code>/);
     const labels = panel.reply_markup.inline_keyboard.flat().map(b => b.text).join(" ");
     assert.match(labels, /模型：local/); assert.match(labels, /工作/); assert.match(labels, /设置/);
     assert.equal(panel.reply_markup.inline_keyboard.length, 3, "non-reasoning models hide the thinking row");
     assert.ok(panel.reply_markup.inline_keyboard.every(row => row.length === 1));
     assert.equal(requests, 0);
   } finally { await f.close(); }
+});
+
+test("Telegram stop aborts a live request immediately, persists pause and ignores a replay after restart", {timeout:20000}, async () => {
+  const entered = gate(), disconnected = gate();
+  const f = await controlPanelFixture({provider: (_wire, response) => {
+    if (f.requests.length === 1) {
+      response.on("close", disconnected.resolve); entered.resolve();
+    } else sendChatCompletion(response,"RESUMED_RESULT");
+  }});
+  try {
+    await f.bot.handleUpdate(command(2201,"STOP_GOAL")); await entered.promise;
+    await f.bot.handleUpdate(command(2202,"/stop",43));
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).status,"running");
+    await f.bot.handleUpdate(command(2203,"/stop@test_bot"));
+    assert.match(latestPanel(f).text,/已请求暂停|正在停止/);
+    await disconnected.promise; await f.flush();
+    let snapshot = await f.app.controlSnapshot("telegram:private:42");
+    assert.equal(snapshot.status,"paused"); assert.equal(snapshot.works.length,1);
+    assert.equal(snapshot.works[0]?.reason,"user_stop"); assert.equal(f.requests.length,1);
+    await f.reopen(); await f.flush();
+    assert.equal(f.requests.length,1);
+    await f.bot.handleUpdate(command(2203,"/stop@test_bot"));
+    assert.match(latestPanel(f).text,/未重复执行/);
+    await f.bot.handleUpdate(command(2204,"/resume")); await f.flush();
+    assert.equal(f.requests.length,2); assert.match(JSON.stringify(f.requests[1]!.messages),/STOP_GOAL/);
+    snapshot = await f.app.controlSnapshot("telegram:private:42");
+    assert.equal(snapshot.works[0]?.status,"completed");
+    await f.bot.handleUpdate(command(2205,"/stop"));
+    assert.match(latestPanel(f).text,/当前没有正在执行/);
+    assert.deepEqual(f.errors,[]);
+  } finally {await f.close();}
+});
+
+test("home summarizes real settled usage and current context across tools, model switches, restart and reset", async () => {
+  const f = await controlPanelFixture({models:[
+    {id:"provider/A",context_window:1000000,max_output_tokens:16000},
+    {id:"provider/B",context_window:200000,max_output_tokens:16000}],
+    tools:[{name:"read_fact",label:"read",description:"Read fact",parameters:Type.Object({}),async execute() {
+      return {content:[{type:"text",text:"KNOWN_FACT"}],details:{}};
+    }}],
+    provider: (_wire,response) => {
+      const first = f.requests.length === 1;
+      response.writeHead(200,{"content-type":"text/event-stream"});
+      response.end(`data: ${JSON.stringify({choices:[{index:0,delta:{content:first ? "" : "done",...(first ? {tool_calls:[{index:0,id:"fact",type:"function",function:{name:"read_fact",arguments:"{}"}}]} : {})},finish_reason:first ? "tool_calls" : "stop"}],
+        usage:{prompt_tokens:first ? 1000 : 2000,completion_tokens:100,prompt_tokens_details:{cached_tokens:first ? 900 : 1000}}})}\n\ndata: [DONE]\n\n`);
+    }});
+  try {
+    await f.bot.handleUpdate(command(2301,"USE_TOOL")); await f.flush();
+    assert.equal(f.requests.length,2);
+    await f.bot.handleUpdate(command(2302,"/start"));
+    assert.match(latestPanel(f).text,/Tokens:<\/b> <code>↑1\.1k ↓200<\/code>/);
+    assert.match(latestPanel(f).text,/Cache:<\/b> <code>R1\.9k CH50\.0%<\/code>/);
+    assert.match(latestPanel(f).text,/Context:<\/b> <code>~0\.2%\/1\.0M<\/code>/);
+    const snapshot = await f.app.controlSnapshot("telegram:private:42");
+    assert.equal(snapshot.context.tokens,2100,"current context uses last request, not cumulative input");
+    assert.equal((await f.app.controlSnapshot("cli:other")).usage.input,null);
+    await f.reopen(); await f.bot.handleUpdate(command(2303,"/start"));
+    assert.match(latestPanel(f).text,/↑1\.1k ↓200/);
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).context.tokens,2100);
+    await f.bot.handleUpdate(command(2304,"/model provider/B"));
+    await f.bot.handleUpdate(command(2305,"/start"));
+    assert.match(latestPanel(f).text,/Context:<\/b> <code>~1\.1%\/200k<\/code>/);
+    await f.bot.handleUpdate(command(2306,"/reset")); await click(f,"确认重置"); await f.flush();
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).context.tokens,0);
+    assert.equal(f.requests.length,2,"controls never generate model usage");
+    assert.deepEqual(f.errors,[]);
+  } finally {await f.close();}
 });
 
 test("catalog output limits equal to context windows do not block other models, selection or restart", async () => {
