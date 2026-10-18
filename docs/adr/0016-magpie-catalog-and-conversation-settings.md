@@ -13,3 +13,11 @@ status: accepted
 首版 Telegram 支持按模型调整并保存思考等级；Magpie 的通用 Agent 插件目前只提供模型字段，因此 Magpie 端等级控件延期，以[后续 #243](https://github.com/CxHsin/nailong-bot/issues/243)跟踪上游 PR，不以修改或自编译 Magpie 作为首版前提。面板入口、常用列表、故障反馈和保存规则见[已确认讨论记录](../research/conversation-control-panel-design-2026-10-18.md)。本 ADR 记录设计决定，尚不代表实现或接入验收完成。
 
 正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](../research/conversation-control-panel-spec-2026-10-18.md)。规格通过 Assistant Service 与 Telegram 的组合入口验证实际请求、同步、持久状态和工作操作，真实 Magpie 回显另需实际接入证据。
+
+## 实现状态
+
+2026-10-18，实现任务 [#245](https://github.com/CxHsin/nailong-bot/issues/245)、[#248](https://github.com/CxHsin/nailong-bot/issues/248)、[#246](https://github.com/CxHsin/nailong-bot/issues/246)已接入现役 Assistant Service、Queue System、SQLite 和 Pi Durable；正式 Telegram/CLI 入口只从 Magpie 选择主模型，旧逐模型环境项仅保留独立意图分类的用途。`controlSnapshot` / `control` 提供统一查询与操作，原生面板复用这些操作；请求 checkpoint 冻结设置，后续 prepare 读取新选择，已确认工具结果和上下文保持。
+
+仓库内提供 [Agent 插件](../../plugins/nailong-agent/README.md)，共享配置默认在 `~/.config/nailong/magpie.json`，覆盖入口为 `NAILONG_MAGPIE_CONFIG`。偏好与配置观测记录保存在现有 `assistant.sqlite`；首次没有有效模型时保留输入等待选择，暂停工作仍需明确继续。等级只来自目录，扩展 effort 在现有 provider 编码边界保留。
+
+交付与验证由 [#247](https://github.com/CxHsin/nailong-bot/issues/247)跟踪，见[控制面板验收](../conversation-control-acceptance-20261018.md)及[操作说明](../personal-agent-operations.md)。本机 Magpie 0.1.1285 的真实目录只读查询成功；插件安装、真实双端菜单回显和 Telegram 手机操作尚未验收，代码实现与模拟测试不代表生产服务已切换。
