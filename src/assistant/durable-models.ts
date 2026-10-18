@@ -31,6 +31,9 @@ export function durableModels(configuration: ModelConfiguration, observe?: {
     if (observe) {
       const stream = provider.streamSimple.bind(provider);
       provider.streamSimple = (selected, transcript, options) => {
+        if (config.alias === "magpie" && !selected.input.includes("image") && transcript.messages.some(message =>
+          Array.isArray(message.content) && message.content.some(part => part.type === "image")))
+          throw new Error("已选模型明确不支持图片；上下文和图片已保留，请选择支持图片的模型后明确继续。");
         const started = Date.now();
         const identity = { requestId: randomUUID(), batchId: observe.batchId?.(),
           purpose: purpose.getStore() ?? "execution" as const };
@@ -46,6 +49,10 @@ export function durableModels(configuration: ModelConfiguration, observe?: {
         // Inspect the real provider encoding without replacing it or storing credentials/content.
         const events = stream(selected, transcript, { ...options,
           onPayload: async (payload, actual) => {
+            // Magpie's explicit catalog levels can exceed pi-ai's generic effort enum.
+            // Preserve the native request checkpoint's selected value at this protocol boundary.
+            if (config.alias === "magpie" && selected.reasoning && options?.reasoning)
+              (payload as {reasoning_effort?:string}).reasoning_effort = options.reasoning;
             requestBytes = Buffer.byteLength(JSON.stringify(payload));
             return options?.onPayload?.(payload, actual);
           },

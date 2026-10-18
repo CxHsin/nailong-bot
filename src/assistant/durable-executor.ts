@@ -395,10 +395,10 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       const {harness} = await opening;
       const inspection = await harness.inspect(context);
       for (const task of inspection.tasks) {
-        if (task.record.kind !== "pi.generation") continue;
+        if (!["pi.generation","pi.compaction"].includes(task.record.kind)) continue;
         const state = task.record.state as { checkpoint?: { phase: string; model?: {modelId:string}; thinkingLevel?: string } };
         const frozen = state.checkpoint;
-        if (frozen && ["request", "poll"].includes(frozen.phase) && frozen.model)
+        if (frozen && ["request", "poll", "summarize", "retry"].includes(frozen.phase) && frozen.model)
           return {model:frozen.model.modelId, ...(frozen.thinkingLevel && frozen.thinkingLevel !== "off" ? {thinking:frozen.thinkingLevel} : {})};
       }
       return undefined;
@@ -454,7 +454,11 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       }
       stream.start(async (events) => {
         for (const event of events) {
-          if (event.type === "message_start" && event.message.role === "assistant") parts.clear();
+          if (event.type === "message_start" && event.message.role === "assistant") {
+            parts.clear();
+            event.message.content.forEach((part,index) => { if (part.type === "text") parts.set(index,part.text); });
+            preview();
+          }
           if (event.type === "message_update") {
             for (const change of event.changes) {
               if (change.type === "text_start") parts.set(change.contentIndex, change.block.type === "text" ? change.block.text : "");

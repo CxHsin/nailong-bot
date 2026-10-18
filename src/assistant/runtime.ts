@@ -47,10 +47,10 @@ export type ControlSnapshot = MagpieSnapshot & {
   works: Array<{id:string;summary:string;status:string;batchId?:string;helperId?:string;reason?:string}>;
 };
 export type ControlAction =
-  | {type:"model";model:string} | {type:"thinking";level:string}
-  | {type:"favorite";model:string;enabled:boolean} | {type:"draft";enabled:boolean}
+  | {type:"model";model:string;operationId?:string} | {type:"thinking";level:string;operationId?:string}
+  | {type:"favorite";model:string;enabled:boolean;operationId?:string} | {type:"draft";enabled:boolean;operationId?:string}
   | {type:"cache"} | {type:"cancel";target:string;operationId:string}
-  | {type:"resume";target?:string;operationId:string} | {type:"reset";operationId:string};
+  | {type:"resume";target?:string;batchId?:string;operationId:string} | {type:"reset";operationId:string};
 export type ControlResult = {snapshot:ControlSnapshot;text?:string;accepted?:boolean};
 
 /** Persistent admission/scheduling, with Pi Durable responsible for model/tool execution. */
@@ -131,7 +131,7 @@ export async function createAssistant(options: AssistantOptions) {
         runnable.delete(id);
         await executor.configureModel(id);
       }
-      if (service && runnable.has(id)) { routeConversation(id); service.start(); }
+      if (service && !closed && runnable.has(id)) { routeConversation(id); service.start(); }
       return snapshot;
     });
     settingLanes.set(id, pending);
@@ -467,6 +467,10 @@ export async function createAssistant(options: AssistantOptions) {
     let accepted: boolean | undefined;
     if (["model","thinking","favorite","draft"].includes(action.type)) {
       if (!magpie) throw new Error("旧主模型配置已退役，请连接 Magpie 后从模型目录选择。");
+      if ("operationId" in action && action.operationId) {
+        const receipt = service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:action.type});
+        if (!receipt.accepted) return {snapshot:await controlSnapshot(id),accepted:false,text:"此设置操作已接收，当前设置保持。"};
+      }
       if (action.type === "model") await magpie.selectModel(id,action.model);
       if (action.type === "thinking") await magpie.setThinking(id,action.level);
       if (action.type === "favorite") await magpie.setFavorite(id,action.model,action.enabled);
@@ -487,11 +491,12 @@ export async function createAssistant(options: AssistantOptions) {
     } else if (action.type === "resume") {
       const work = action.target ? service.listWorks(id).find(work => work.id === action.target) : undefined;
       if (action.target && !work) throw new Error("此工作不属于当前会话或已不可核实，请刷新工作列表。");
+      if (action.batchId && !service.listBatches(id).some(batch => batch.id === action.batchId)) throw new Error("此批次不属于当前会话或已不可核实。");
       const receipt = service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"继续指定工作"});
       accepted = receipt.accepted;
       if (receipt.accepted && (!work || ["paused","needs_confirmation"].includes(work.status))) {
         if (magpie) await syncSettings(id);
-        await service.resume(id,work?.batchId);
+        await service.resume(id,work?.batchId ?? action.batchId);
       }
       text = "已请求继续仍处于暂停状态的工作；已取消目标不会恢复。";
     } else if (action.type === "reset") {
@@ -568,6 +573,11 @@ export async function createAssistant(options: AssistantOptions) {
         const direct = !input.source || ["telegram","cli","user","direct"].includes(input.source);
         const classify = direct && (input.kind ?? (input.text.trimStart().startsWith("/") ? "command" : "message")) === "message";
         const receipt = await service.receive({...input,receivedAt:input.receivedAt ?? Date.now()},classify);
+        if (receipt.accepted && magpie && !runnable.has(input.conversationId)) {
+          const snapshot = settings.get(input.conversationId);
+          await emit({conversationId:input.conversationId,outputId:`waiting:${receipt.eventId}`,type:"text",text:
+            `${snapshot?.selectedModel ? "当前模型暂不可用" : "尚未选择主模型"}；输入已保存并按 FIFO 等待。请打开 /model 选择 Magpie 模型。${snapshot?.connectionError ?? snapshot?.catalogError ?? ""}`},[]);
+        }
         if (classify && receipt.accepted) routeConversation(input.conversationId);
         service.start();
         return {...receipt,routing:service.routingRecord(receipt.eventId)};
@@ -595,6 +605,7 @@ export async function createAssistant(options: AssistantOptions) {
       clearInterval(timer);
       await observing;
       await acceptance;
+      while (settingLanes.size) await Promise.allSettled(settingLanes.values());
       await Promise.allSettled(routing.values());
       await Promise.allSettled(helperLanes.values());
       try { await service.close(); await Promise.allSettled(sending.values()); } finally { magpie?.close(); state.close(); }
