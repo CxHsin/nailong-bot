@@ -48,6 +48,9 @@ export async function assistantEnvironment(
   if (!Value.Check(contextSchema, contextInput)) throw new Error("ASSISTANT_CONTEXT_CONFIG_FILE 配置无效");
   const contextConfig = contextInput as Pick<Parameters<typeof createAssistant>[0], "archive" | "memory" | "media" | "compaction">;
   const capabilities = await capabilityEnvironment(env);
+  const intent = intentEnvironment(env);
+  const intentModels = intent.model ? modelEnvironment({...env,MODEL_NAMES:intent.model,MODEL_DEFAULT:intent.model}) : {defaultModel:"",models:[]};
+  const telegramOwner = (env.AGENT_TELEGRAM_USER_ID ?? env.TELEGRAM_USER_ID)?.trim();
   const connections: Awaited<ReturnType<typeof connectMcp>>[] = [];
   let web: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
   try {
@@ -59,8 +62,9 @@ export async function assistantEnvironment(
       ...contextConfig,
       dataDir,
       cwd,
-      modelConfiguration: modelEnvironment(env),
-      intent: intentEnvironment(env),
+      modelConfiguration: intentModels,
+      magpie: {configPath:env.NAILONG_MAGPIE_CONFIG?.trim(),primaryConversationId:telegramOwner ? `telegram:private:${telegramOwner}` : undefined},
+      intent,
       prompt,
       skillPaths: [
         resolve(".agents/skills"),

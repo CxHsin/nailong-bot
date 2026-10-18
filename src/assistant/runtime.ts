@@ -14,6 +14,7 @@ import type { DurableExecutorOptions } from "./durable-executor.js";
 import { AssistantState, requireFreshNamespace, type SteerRecord } from "./state.js";
 import type { ReplyPreview } from "../telegram/draft-preview.js";
 import { cacheReport } from "./cache-report.js";
+import { createMagpieControl, type MagpieControl, type MagpieSnapshot } from "./magpie.js";
 
 export type AssistantInput = QueueInput;
 export type AssistantOutput = { conversationId: string; outputId?: string } & (
@@ -23,7 +24,9 @@ export type AssistantOptions = {
   cwd?: string;
   dataDir: string;
   prompt?: string;
-  modelConfiguration: ModelConfiguration;
+  /** Independent intent configuration. Explicit legacy injection remains available to historical protocol fixtures. */
+  modelConfiguration?: ModelConfiguration;
+  magpie?: {configPath?:string;primaryConversationId?:string;catalogTimeoutMs?:number};
   intent?: IntentOptions;
   skillPaths?: string[];
   tools?: ToolDefinition[];
@@ -38,9 +41,21 @@ export type AssistantOptions = {
   onRequestMetrics?: DurableExecutorOptions["onRequestMetrics"];
 };
 
+export type ControlSnapshot = MagpieSnapshot & {
+  conversationId: string; actual?: {model:string;thinking?:string}; pending:boolean;
+  status: "idle" | "running" | "waiting_model" | "paused"; waiting:number;
+  works: Array<{id:string;summary:string;status:string;batchId?:string;helperId?:string;reason?:string}>;
+};
+export type ControlAction =
+  | {type:"model";model:string} | {type:"thinking";level:string}
+  | {type:"favorite";model:string;enabled:boolean} | {type:"draft";enabled:boolean}
+  | {type:"cache"} | {type:"cancel";target:string;operationId:string}
+  | {type:"resume";target?:string;operationId:string} | {type:"reset";operationId:string};
+export type ControlResult = {snapshot:ControlSnapshot;text?:string;accepted?:boolean};
+
 /** Persistent admission/scheduling, with Pi Durable responsible for model/tool execution. */
 export async function createAssistant(options: AssistantOptions) {
-  const classifier = createIntentClassifier(options.modelConfiguration, options.intent);
+  const classifier = createIntentClassifier(options.modelConfiguration ?? {defaultModel:"",models:[]}, options.intent);
   const cwd = resolve(options.cwd ?? process.cwd());
   const dataDir = resolve(options.dataDir);
   await mkdir(dataDir, { recursive: true });
@@ -95,6 +110,38 @@ export async function createAssistant(options: AssistantOptions) {
     return delivery;
   };
   const workDir = (id: string) => state.conversation(id, cwd);
+  const runnable = new Set<string>();
+  const settings = new Map<string, MagpieSnapshot>();
+  const settingLanes = new Map<string, Promise<MagpieSnapshot>>();
+  let magpie: MagpieControl | undefined;
+  let executor!: Awaited<ReturnType<typeof createDurableExecutor>>;
+  const syncSettings = (id: string, refresh = false): Promise<MagpieSnapshot> => {
+    const pending = (settingLanes.get(id) ?? Promise.resolve()).catch(report).then(async () => {
+      if (closed || !magpie) throw new Error("Magpie 控制服务不可用");
+      const snapshot = await magpie.snapshot(id, refresh);
+      settings.set(id, snapshot);
+      if (snapshot.connected && snapshot.selectedModel && snapshot.selectedAvailable) {
+        const prepared = await magpie.prepareRequest(id);
+        const all = snapshot.catalog.map(model => ({...prepared.model, model:model.id,
+          contextWindow:model.contextWindow,maxTokens:model.maxOutputTokens,reasoning:model.reasoning,
+          images:model.modalities?.includes("image") ?? false}));
+        await executor.configureModel(id, prepared, all);
+        runnable.add(id);
+      } else {
+        runnable.delete(id);
+        await executor.configureModel(id);
+      }
+      if (service && runnable.has(id)) { routeConversation(id); service.start(); }
+      return snapshot;
+    });
+    settingLanes.set(id, pending);
+    void pending.then(() => { if (settingLanes.get(id) === pending) settingLanes.delete(id); }, () => { if (settingLanes.get(id) === pending) settingLanes.delete(id); });
+    return pending;
+  };
+  const useMagpie = options.magpie !== undefined || options.modelConfiguration === undefined;
+  if (useMagpie) magpie = await createMagpieControl({dataDir,...options.magpie,onChange(id) {
+    if (executor && !closed) void syncSettings(id).catch(report);
+  }}).catch(error => {state.close(); throw error;});
 
   function extraTools(id: string): ToolRegistration[] {
     return [
@@ -120,8 +167,9 @@ export async function createAssistant(options: AssistantOptions) {
     ];
   }
 
-  const executor = await createDurableExecutor({
+  executor = await createDurableExecutor({
     ...options, dataDir, cwd, extraTools, workDir,
+    modelConfiguration: magpie ? {defaultModel:"",models:[]} : options.modelConfiguration!,
     contextMaterials: (id: string) => {
       const records = helperRecords(id).filter((record) => !record.delivered).map(({summary,...identity}) => identity);
       const cancelled = service?.listWorks(id).filter(work => work.status === "cancelled").map(work => work.id) ?? [];
@@ -130,8 +178,11 @@ export async function createAssistant(options: AssistantOptions) {
         cancelled.length ? `已持久取消的目标 ${JSON.stringify(cancelled)}。停止安排其新步骤，保留已有成果；reset、resume 和 helper 回传均不复活目标。其他目标继续，复用已确认效果。` : "",
         deliveries.length ? `已执行的用户控制进度（内部事实，不重复转交；sent 只证明发送，unknown 先核查）：${JSON.stringify(deliveries)}` : ""].filter(Boolean).join("\n");
     },
-    onPreview: (preview: ReplyPreview) => { for (const listener of previews) listener(preview); },
-  }).catch(error => { state.close(); throw error; });
+    onPreview: (preview: ReplyPreview) => {
+      if (settings.get(preview.conversationId)?.drafts === false) return;
+      for (const listener of previews) listener(preview);
+    },
+  }).catch(error => { magpie?.close(); state.close(); throw error; });
 
   async function submitSteer(record: SteerRecord) {
     const submission = await executor.steer(record.input.conversationId, { ...record.input, requestId: record.key });
@@ -202,11 +253,12 @@ export async function createAssistant(options: AssistantOptions) {
 
   try {
     service = await createQueuedAssistant({ dataDir, startPaused: true, reportFailure: report,
+      canRun: id => !magpie || runnable.has(id),
       executor: { execute, close: () => executor.close() } });
     service.subscribe(emit);
   } catch (error) {
     try { if (service) await service.close(); else await executor.close(); }
-    finally { state.close(); }
+    finally { magpie?.close(); state.close(); }
     throw error;
   }
 
@@ -295,7 +347,7 @@ export async function createAssistant(options: AssistantOptions) {
   }
 
   function routeConversation(id: string) {
-    if (closed || routing.has(id)) return;
+    if (closed || routing.has(id) || (magpie && !runnable.has(id))) return;
     const pending = Promise.resolve().then(async () => {
       while (!closed) {
         let route = service.routingPending(id)[0];
@@ -377,10 +429,86 @@ export async function createAssistant(options: AssistantOptions) {
     observing = observe().catch(report).finally(() => { observing = undefined; });
   }, options.pollMs ?? 2000);
   timer.unref();
+  async function controlSnapshot(id: string, query: {refresh?:boolean} = {}): Promise<ControlSnapshot> {
+    workDir(id);
+    const config = options.modelConfiguration;
+    const saved = magpie ? await syncSettings(id, query.refresh) : {
+      connected:true,catalogStatus:"ready" as const,
+      catalog:(config?.models ?? []).map(model => ({id:model.model,displayName:model.alias,reasoning:model.reasoning})),
+      selectedModel:config?.models.find(model => model.alias === config.defaultModel)?.model,
+      selectedAvailable:true,thinkingAdjusted:false,favorites:[],drafts:true,
+    };
+    const actual = await executor.actualSettings(id) ?? (saved.connected && saved.selectedAvailable && saved.selectedModel ?
+      {model:saved.selectedModel,thinking:"thinking" in saved ? saved.thinking : undefined} : undefined);
+    const works: ControlSnapshot["works"] = service.listWorks(id).filter(work => work.input.kind !== "command").map(work => ({
+      id:work.id,summary:work.summary,status:work.status,batchId:work.batchId,
+      reason:work.batchId ? service.getBatch(work.batchId)?.reason : undefined,
+    }));
+    for (const helper of helperRecords(id).filter(helper => !helper.delivered)) {
+      for (const target of helper.targetIds ?? []) {
+        const work = works.find(item => item.id === target);
+        const record = state.helperControls(id).filter(item => item.target === target && item.kind === "cancel").at(-1);
+        const status = record ? record.state === "stopped" ? "cancelled" : record.state === "unknown" ? "needs_confirmation" : "stopping" : "helper";
+        if (work) Object.assign(work,{helperId:helper.id,status});
+        else works.push({id:target,summary:helper.summary ?? "后台帮手",helperId:helper.id,status});
+      }
+    }
+    const waiting = new Set([...service.listPending(id).map(input => input.eventId),...service.routingPending(id).map(route => route.eventId)]).size;
+    return {...saved,conversationId:id,actual,
+      pending:!!actual && (actual.model !== saved.selectedModel || actual.thinking !== ("thinking" in saved ? saved.thinking : undefined)),
+      status:service.getActiveBatch(id) ? "running" : magpie && !runnable.has(id) ? "waiting_model" :
+        works.some(work => ["paused","needs_confirmation"].includes(work.status)) ? "paused" : "idle",
+      waiting,works};
+  }
+  async function control(id: string, action: ControlAction): Promise<ControlResult> {
+    if (closed) throw new Error("助手服务已关闭");
+    workDir(id);
+    let text: string | undefined;
+    let accepted: boolean | undefined;
+    if (["model","thinking","favorite","draft"].includes(action.type)) {
+      if (!magpie) throw new Error("旧主模型配置已退役，请连接 Magpie 后从模型目录选择。");
+      if (action.type === "model") await magpie.selectModel(id,action.model);
+      if (action.type === "thinking") await magpie.setThinking(id,action.level);
+      if (action.type === "favorite") await magpie.setFavorite(id,action.model,action.enabled);
+      if (action.type === "draft") await magpie.setDraft(id,action.enabled);
+      await syncSettings(id);
+    } else if (action.type === "cache") text = await cacheReport(dataDir,id,service.listBatches(id));
+    else if (action.type === "cancel") {
+      const work = service.listWorks(id).find(work => work.id === action.target);
+      if (!work) throw new Error("此工作不属于当前会话或已不可核实，请刷新工作列表。");
+      const receipt = await service.receive({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"取消指定工作"},true);
+      accepted = receipt.accepted;
+      if (receipt.accepted) {
+        const route = service.decideRoute(receipt.eventId,{actions:[{kind:"cancel",target:work.id,text:"取消指定工作"}]});
+        for (const item of route.decision!.actions) await applyAction(route,item);
+        service.finishRoute(route.eventId);
+      }
+      text = work.status === "queued" ? "已取消对应排队工作。" : "已记录取消请求；实际停止状态以工作详情为准。";
+    } else if (action.type === "resume") {
+      const work = action.target ? service.listWorks(id).find(work => work.id === action.target) : undefined;
+      if (action.target && !work) throw new Error("此工作不属于当前会话或已不可核实，请刷新工作列表。");
+      const receipt = service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"继续指定工作"});
+      accepted = receipt.accepted;
+      if (receipt.accepted && (!work || ["paused","needs_confirmation"].includes(work.status))) {
+        if (magpie) await syncSettings(id);
+        await service.resume(id,work?.batchId);
+      }
+      text = "已请求继续仍处于暂停状态的工作；已取消目标不会恢复。";
+    } else if (action.type === "reset") {
+      const receipt = await service.receive({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"/reset"});
+      accepted = receipt.accepted;
+      service.start();
+      text = receipt.accepted ? "已接收上下文重置，将在当前处理边界执行；工作和设置保留。" : "此重置操作已接收，未重复执行。";
+    }
+    return {snapshot:await controlSnapshot(id),text,accepted};
+  }
   return {
+    controlSnapshot,
+    control,
     subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
       outputs.add(listener);
       const restored = acceptance.then(async () => {
+        if (magpie) for (const {id} of state.conversations()) await syncSettings(id);
         for (const record of state.pendingSteers()) {
           if (!record.targetBatch) {
             await service.receive(record.input);
@@ -416,6 +544,20 @@ export async function createAssistant(options: AssistantOptions) {
       const accepted = acceptance.then(async () => {
         if (closed) throw new Error("助手服务已关闭");
         workDir(input.conversationId);
+        if (magpie) await syncSettings(input.conversationId);
+        if (!input.images?.length && /^\/model(?:\s|$)/.test(input.text.trim()) && (!input.kind || input.kind === "command") && magpie) {
+          const receipt = service.receiveQuery(input);
+          if (receipt.accepted) {
+            let text: string;
+            try {
+              const model = input.text.trim().slice(6).trim();
+              const snapshot = model ? (await control(input.conversationId,{type:"model",model})).snapshot : await controlSnapshot(input.conversationId,{refresh:true});
+              text = `当前模型：${snapshot.selectedModel ?? "尚未选择，请从 Magpie 目录选择"}\n${snapshot.catalog.map(model => `${model.id}${model.id === snapshot.selectedModel ? " ✓" : ""}`).join("\n")}`;
+            } catch (error) { text = `模型选择未生效：${error instanceof Error ? error.message : String(error)} 旧静态别名已退役，请从 Magpie 目录选择完整模型 ID。`; }
+            await emit({conversationId:input.conversationId,outputId:`query:${receipt.eventId}`,type:"text",text},[]);
+          }
+          return receipt;
+        }
         if (!input.images?.length && /^\/kvcache(?:\s|$)/.test(input.text.trim()) &&
           (!input.kind || input.kind === "command")) {
           const receipt = service.receiveQuery(input);
@@ -439,6 +581,7 @@ export async function createAssistant(options: AssistantOptions) {
     async waitForRouting() { await acceptance; while (routing.size) await Promise.all(routing.values()); },
     async waitForIdle() {
       await acceptance;
+      await Promise.allSettled(settingLanes.values());
       while (routing.size) await Promise.all(routing.values());
       while (helperLanes.size) await Promise.all(helperLanes.values());
       await service.waitForIdle();
@@ -454,7 +597,7 @@ export async function createAssistant(options: AssistantOptions) {
       await acceptance;
       await Promise.allSettled(routing.values());
       await Promise.allSettled(helperLanes.values());
-      try { await service.close(); await Promise.allSettled(sending.values()); } finally { state.close(); }
+      try { await service.close(); await Promise.allSettled(sending.values()); } finally { magpie?.close(); state.close(); }
     },
   };
 }

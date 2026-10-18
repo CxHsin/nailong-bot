@@ -19,6 +19,7 @@ export type QueuedAssistantOptions = {
   executor: QueueExecutor;
   startPaused?: boolean;
   reportFailure?: (error: unknown) => void;
+  canRun?: (conversationId: string) => boolean;
 };
 
 export async function createQueuedAssistant(options: QueuedAssistantOptions) {
@@ -35,7 +36,7 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
   let started = false;
   const emit = async (output: AssistantOutput) => { for (const listener of listeners) await listener(output); };
   function pump(conversationId: string) {
-    if (closed || !started || active.has(conversationId)) return;
+    if (closed || !started || active.has(conversationId) || options.canRun?.(conversationId) === false) return;
     const batch = queue.claim(conversationId);
     if (!batch) return;
     const controller = new AbortController();

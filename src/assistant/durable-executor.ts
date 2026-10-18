@@ -10,7 +10,8 @@ import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { formatSkillsForPrompt, loadSkills, loadProjectContextFiles, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { ModelConfiguration } from "../agent/model-config.js";
+import type { ModelConfiguration, ModelConfig } from "../agent/model-config.js";
+import type { MagpiePreparedRequest } from "./magpie.js";
 import { durableModels, type RequestMetric } from "./durable-models.js";
 import { createToolArchive, type ToolArchiveLimits } from "./archive.js";
 import { AssistantMemory, type MemoryLimits } from "./memory.js";
@@ -301,9 +302,9 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         retry: { enabled: true, get maxRetries() { return retryLimit; }, baseDelayMs: 2000 }, toolExecution: "sequential",
         steeringMode: "all", followUpMode: "all", compaction: options.compaction }, env: () => environment, onReport: options.reportFailure,
     }, context);
-    const selected = catalog.select();
-    root = await harness.root(context, { agent: { model: selected.ref,
-      thinkingLevel: selected.model.reasoning ? "low" : "off", cwd } });
+    const selected = options.modelConfiguration.models.length ? catalog.select() : undefined;
+    root = await harness.root(context, { agent: { model: selected?.ref,
+      thinkingLevel: selected?.model.reasoning ? "low" : "off", cwd } });
     await root.configure({ instructions: null }, context);
     function activateInputs(events: DurableEvent[]) {
       const sources = events.map(event => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
@@ -380,6 +381,28 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    /** Configure the agent for future native prepare phases. Request checkpoints stay immutable. */
+    async configureModel(conversationId: string, prepared?: MagpiePreparedRequest, available: ModelConfig[] = []) {
+      const {root, catalog} = await conversation(conversationId);
+      for (const config of available) catalog.register(config);
+      const selected = prepared && catalog.register(prepared.model);
+      await root.configure({ model: selected?.ref ?? null,
+        thinkingLevel: (prepared?.thinking ?? "off") as import("@earendil-works/pi-ai").ModelThinkingLevel }, context);
+    },
+    async actualSettings(conversationId: string) {
+      const opening = conversations.get(conversationId);
+      if (!opening) return undefined;
+      const {harness} = await opening;
+      const inspection = await harness.inspect(context);
+      for (const task of inspection.tasks) {
+        if (task.record.kind !== "pi.generation") continue;
+        const state = task.record.state as { checkpoint?: { phase: string; model?: {modelId:string}; thinkingLevel?: string } };
+        const frozen = state.checkpoint;
+        if (frozen && ["request", "poll"].includes(frozen.phase) && frozen.model)
+          return {model:frozen.model.modelId, ...(frozen.thinkingLevel && frozen.thinkingLevel !== "off" ? {thinking:frozen.thinkingLevel} : {})};
+      }
+      return undefined;
+    },
     async intentContext(conversationId: string) {
       const {root} = await conversation(conversationId);
       const entries = (await root.context(context)).entries;

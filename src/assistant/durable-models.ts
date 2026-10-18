@@ -2,7 +2,7 @@ import { createModels, createProvider, type Api, type Model } from "@earendil-wo
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import { configuredModel, type ModelConfiguration } from "../agent/model-config.js";
+import { configuredModel, type ModelConfiguration, type ModelConfig } from "../agent/model-config.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 
@@ -19,8 +19,9 @@ export function durableModels(configuration: ModelConfiguration, observe?: {
   const purpose = new AsyncLocalStorage<"auxiliary">();
   const complete = models.completeSimple.bind(models);
   models.completeSimple = (...args) => purpose.run("auxiliary", () => complete(...args));
-  const available = configuration.models.map((config) => {
+  function register(config: ModelConfig) {
     const model = configuredModel(config) as unknown as Model<Api>;
+    if (config.alias === "magpie") model.headers = { "User-Agent": "Nailong/0.1" };
     const api = config.api === "anthropic-messages" ? anthropicMessagesApi() :
       config.api === "openai-responses" ? openAIResponsesApi() : openAICompletionsApi();
     const provider = createProvider({ id: model.provider, name: config.alias,
@@ -97,12 +98,12 @@ export function durableModels(configuration: ModelConfiguration, observe?: {
     }
     models.setProvider(provider);
     return { alias: config.alias, model, ref: { provider: model.provider, modelId: model.id } };
-  });
+  }
+  const available = configuration.models.map(register);
   function select(alias = configuration.defaultModel) {
     const selected = available.find((entry) => entry.alias === alias);
     if (!selected) throw new Error(`未配置模型：${alias}`);
     return selected;
   }
-  select();
-  return { models, available, select };
+  return { models, available, select, register };
 }
