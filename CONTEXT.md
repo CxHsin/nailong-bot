@@ -20,6 +20,8 @@ System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-co
 
 **Conversation Control Panel**: A unified Telegram interface for viewing a Conversation's status, choosing the main assistant's model and thinking level, and accessing conversation operations.
 
+**Model Catalog**: The models offered for selection by a connected model service, together with their known capabilities. The Magpie catalog reflects the models the user has enabled there.
+
 **Work Directory**: Default directory for relative paths and project instructions. Reopening a conversation preserves it. It is separate from Session storage and is not a sandbox.
 
 **Delegation**: Work entrusted to an external helper through herdr-workflow. The main assistant checks actual files, diffs and command results before continuing the user's goal. Status and self-report do not prove success.
