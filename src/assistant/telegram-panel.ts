@@ -127,12 +127,16 @@ export function registerTelegramPanel(options: {
       for (const item of row) { keyboard.text(item.label, `cp:${token}:${actions.length.toString(36)}`); actions.push(item.value); }
       keyboard.row();
     }
-    const reply = await ctx.reply(text.slice(0, 4000), { reply_markup: keyboard });
-    // Keep old messages usable for a short period, but each mutation is single-use.
+    const messageId = ctx.callbackQuery?.message?.message_id;
+    const reply = messageId === undefined
+      ? await ctx.reply(text.slice(0, 4000), { reply_markup: keyboard })
+      : await ctx.editMessageText(text.slice(0, 4000), { reply_markup: keyboard });
+    const panelMessageId = messageId ?? (reply as { message_id: number }).message_id;
+    // A new view replaces the buttons on this message, so superseded capabilities expire.
     const now = Date.now();
-    for (const [key, panel] of panels) if (panel.expires < now) panels.delete(key);
+    for (const [key, panel] of panels) if (panel.expires < now || panel.messageId === panelMessageId) panels.delete(key);
     if (panels.size >= 200) panels.delete(panels.keys().next().value!);
-    panels.set(token, { messageId: reply.message_id, expires: now + 30 * 60_000, actions, used: new Set() });
+    panels.set(token, { messageId: panelMessageId, expires: now + 30 * 60_000, actions, used: new Set() });
   }
 
   bot.on("callback_query:data", async ctx => {
@@ -152,7 +156,9 @@ export function registerTelegramPanel(options: {
       const result = entry.action ? await app.control(conversationId, entry.action) : undefined;
       await render(ctx, entry.view, entry.refresh ? undefined : result?.snapshot, result?.text, entry.refresh);
     } catch (error) {
-      await ctx.reply(`操作未完成：${error instanceof Error ? error.message : "请稍后重试"}。请发送 /start 查看当前状态。`);
+      for (const [key, stored] of panels) if (stored.messageId === panel.messageId) panels.delete(key);
+      await ctx.editMessageText(`操作未完成：${error instanceof Error ? error.message : "请稍后重试"}。请发送 /start 查看当前状态。`)
+        .catch(options.reportFailure);
     }
   });
 

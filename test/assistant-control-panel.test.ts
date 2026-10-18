@@ -62,9 +62,9 @@ import { Type } from "typebox";
 type PanelFixture = Awaited<ReturnType<typeof controlPanelFixture>>;
 type Panel = { text: string; id: number; buttons: Array<{text: string; callback_data: string}> };
 function latestPanel(f: {sent: Array<{method: string;body: unknown;messageId: number}>}): Panel {
-  const messages = f.sent.filter(s => s.method === "sendMessage").map(s => body(s.body));
-  const last = messages.at(-1)!;
-  return { text: last?.text ?? "", id: f.sent.filter(s => s.method === "sendMessage").at(-1)!.messageId,
+  const messages = f.sent.filter(s => s.method === "sendMessage" || s.method === "editMessageText");
+  const last = body(messages.at(-1)!.body);
+  return { text: last?.text ?? "", id: messages.at(-1)!.messageId,
     buttons: last?.reply_markup?.inline_keyboard.flat() ?? [] };
 }
 let updateId = 100;
@@ -75,6 +75,62 @@ async function click(f: PanelFixture, label: string | RegExp, panel = latestPane
     chat_instance: "private", data: button.callback_data,
     message: { message_id: messageId, date: 0, chat: group ? { id: chat, type: "group", title: "group" } : { id: chat, type: "private", first_name: "owner" }, from: botInfo, text: panel.text } } });
 }
+
+test("panel buttons navigate and change settings in one Telegram message without generating replies", async () => {
+  const f = await controlPanelFixture({ models: Array.from({ length: 8 }, (_, i) => ({
+    id: `provider/model-${i}`, display_name: `Model ${i}`, reasoning: true, supported_reasoning_levels: ["low", "medium", "high"],
+  })) });
+  try {
+    await f.bot.handleUpdate(command(2001, "/start"));
+    const original = latestPanel(f);
+    await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
+    assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1, "cache navigation must reuse the original panel");
+    await click(f, "返回首页");
+    await click(f, "模型");
+    await click(f, "下一页"); assert.match(latestPanel(f).text, /第 2\/2 页/);
+    await click(f, "详情"); assert.match(latestPanel(f).text, /provider\/model-6/);
+    await click(f, "加入常用");
+    await click(f, "选择此模型");
+    await click(f, "常用模型"); assert.match(latestPanel(f).text, /✓ Model 6/);
+    await click(f, "刷新目录");
+    await click(f, "返回首页");
+    await click(f, "思考等级"); await click(f, "high"); assert.match(latestPanel(f).text, /当前：high/);
+    await click(f, "返回首页");
+    await click(f, /草稿预览/); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /草稿预览：关/);
+    await click(f, "工作列表"); assert.match(latestPanel(f).text, /暂无工作/);
+    await click(f, "返回首页");
+    await click(f, "会话操作"); await click(f, "重置上下文…"); await click(f, "取消");
+    await click(f, "返回首页");
+    const updates = f.sent.filter(s => s.method === "editMessageText");
+    assert.ok(updates.length >= 20);
+    assert.ok(updates.every(s => JSON.parse(String(s.body)).message_id === original.id));
+    assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1);
+    const editedCount = updates.length;
+    await click(f, "模型", original);
+    assert.match(String(f.sent.at(-1)?.body), /过期/);
+    assert.equal(f.sent.filter(s => s.method === "editMessageText").length, editedCount, "buttons replaced on this message cannot navigate an old view");
+    assert.equal(f.requests.length, 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
+test("a failed panel action displays the error in the same message and expires its old buttons", async () => {
+  const f = await controlPanelFixture();
+  try {
+    await f.bot.handleUpdate(command(2101, "/model"));
+    const original = latestPanel(f);
+    const config = JSON.parse(await readFile(f.configPath, "utf8"));
+    await writeFile(f.configPath, JSON.stringify({ ...config, baseUrl: "", apiKey: "" }));
+    await click(f, "Beta", original);
+    assert.equal(latestPanel(f).id, original.id);
+    assert.match(latestPanel(f).text, /操作未完成.*未连接/s);
+    assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1);
+    await click(f, "Beta", original);
+    assert.match(String(f.sent.at(-1)?.body), /过期/);
+    assert.equal(f.requests.length, 0);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
 
 test("native model pagination, detail and favorites preserve opaque catalog IDs and selection", async () => {
   const models = Array.from({length: 8}, (_, i) => ({ id: `provider/route/team/model-${i}`, display_name: `Model ${i}`, owned_by: "provider", context_window: 32000, reasoning: false }));
@@ -179,7 +235,9 @@ test("catalog failure retains snapshot, successful removal invalidates old choic
     assert.match(latestPanel(f).text, /刷新失败/); assert.match(latestPanel(f).text, /Beta/);
     f.setCatalogFailure(false); f.setModels([{ id: "route/new/D", display_name: "Delta", reasoning: false }]);
     await click(f, "刷新目录"); assert.match(latestPanel(f).text, /Delta/); assert.doesNotMatch(latestPanel(f).text, /Beta/);
-    await click(f, "Beta", old); assert.match(latestPanel(f).text, /未完成/);
+    await click(f, "Beta", old); assert.match(String(f.sent.at(-1)?.body), /过期/);
+    assert.match(latestPanel(f).text, /Delta/);
+    assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1);
     assert.equal(f.requests.length, 0);
     await f.bot.handleUpdate(command(2, "/start")); assert.match(latestPanel(f).text, /不可用/);
     await f.bot.handleUpdate(command(3, "/model route/new/D"));

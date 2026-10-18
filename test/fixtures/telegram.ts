@@ -37,7 +37,7 @@ export async function telegramFixture(
       fetch: async (url, init) => {
         const method = String(url).split("/").at(-1)!;
         const body = init?.body;
-        const messageId = ++nextMessageId;
+        const messageId = method === "editMessageText" ? JSON.parse(String(body)).message_id as number : ++nextMessageId;
         sent.push({ method, body, messageId });
         onApi?.(method, body);
         if (send) return send(method, body);

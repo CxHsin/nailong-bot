@@ -61,6 +61,12 @@
 
 该接入修复基于 `ca52613`，修改 `src/agent/model-config.ts` 并新增一项 Telegram 组合回归。重新运行 `npm test` **207/207 通过**（0 失败、取消或跳过，约 70 秒）；`npm run typecheck`、`npm run build`、`npm run docs:check`（107 份 Markdown、454 个本地链接）及差异检查均通过。真实初始化证据和自动化测试分别记录，不把初始化成功视为生产 Bot 或手机验收通过。
 
+用户随后在手机观察到点击按钮不断新增菜单消息。按原参考项目 [pi-telegram 的菜单更新路径](https://github.com/llblab/pi-telegram/blob/6b4db8a573416e2cbe60d44f6e38847cb6392348/lib/menu-model.ts#L390)和[工作菜单回调](https://github.com/llblab/pi-telegram/blob/6b4db8a573416e2cbe60d44f6e38847cb6392348/lib/menu-queue.ts#L795)核对后，修正按钮处理为编辑原消息的文字和键盘。主动输入命令仍发送新面板；同一消息的旧按钮在替换后失效，重复或过期回调只答复提示，操作失败也在原消息展示。使用新代码须重启 Bot 并发送新的 `/start`，旧面板不作为新代码已生效的证据。
+
+新组合回归先观察到点击缓存后消息数由 1 变 2 的失败，再验证连续缓存、模型翻页、详情、收藏、选择、思考、草稿、工作和会话导航只保留一条菜单发送，后续均编辑相同 `message_id`；另验证失败操作原地显示且旧按钮失效。已有回调鉴权、重复取消与 reset、忙时切换、文件和 receipt 回归继续覆盖各自保证。手机端原地更新仍待运行新版后的实际确认。
+
+该面板修复基于 `64824e2`。Telegram 相关回归 **36/36 通过**；全仓 `npm test` **209/209 通过**（0 失败、取消或跳过，约 71 秒）。`npm run typecheck`、`npm run build`、`npm run docs:check`（107 份 Markdown、454 个本地链接）及差异检查均通过。
+
 以下仍需实际 Magpie 与 Telegram 手机配合，保持未验收：
 
 - 在 Agent 页面人工核对 Nailong 的检测、连接状态与共享配置路径；插件安装及配置读取已有上述证据。
