@@ -11,3 +11,5 @@ status: accepted
 会话控制面板的查看和设置不等待整个 Processing Turn。新设置在当前模型请求结束后的后续请求使用，不中止当前请求，不重放已确认结果。换模型保留上下文和工作进度，较小窗口沿用原生压缩；仍无法承接则暂停说明。切换暂停工作的模型不自动恢复工作，明确继续时才使用当前选择续接。此决定保留 [ADR-0011](0011-durable-main-agent-and-conversation-queue.md)、[ADR-0012](0012-layered-memory-and-stable-context.md)、[ADR-0013](0013-contextual-input-routing.md) 与 [ADR-0015](0015-system-context-order-and-self-file.md) 的执行、队列、上下文、记忆和系统指令边界。
 
 首版 Telegram 支持按模型调整并保存思考等级；Magpie 的通用 Agent 插件目前只提供模型字段，因此 Magpie 端等级控件延期，以[后续 #243](https://github.com/CxHsin/nailong-bot/issues/243)跟踪上游 PR，不以修改或自编译 Magpie 作为首版前提。面板入口、常用列表、故障反馈和保存规则见[已确认讨论记录](../research/conversation-control-panel-design-2026-10-18.md)。本 ADR 记录设计决定，尚不代表实现或接入验收完成。
+
+正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](../research/conversation-control-panel-spec-2026-10-18.md)。规格通过 Assistant Service 与 Telegram 的组合入口验证实际请求、同步、持久状态和工作操作，真实 Magpie 回显另需实际接入证据。

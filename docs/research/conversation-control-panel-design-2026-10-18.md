@@ -1,6 +1,6 @@
 # 会话控制面板与 Magpie 模型目录讨论
 
-2026-10-18，通过 `grill-with-docs` 逐轮讨论并获用户整体确认。设计结论以 [Issue #242](https://github.com/CxHsin/nailong-bot/issues/242)为准，架构取舍见 [ADR-0016](../adr/0016-magpie-catalog-and-conversation-settings.md)。本文保留讨论范围和事实依据，不表示功能已实现；正式规格及实现任务另行建立。
+2026-10-18，通过 `grill-with-docs` 逐轮讨论并获用户整体确认。设计结论以 [Issue #242](https://github.com/CxHsin/nailong-bot/issues/242)为准，架构取舍见 [ADR-0016](../adr/0016-magpie-catalog-and-conversation-settings.md)。正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](conversation-control-panel-spec-2026-10-18.md)。本文保留讨论范围和事实依据，不表示功能已实现。
 
 ## 已确认
 
