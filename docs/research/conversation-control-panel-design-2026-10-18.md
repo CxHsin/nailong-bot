@@ -11,9 +11,9 @@
 - 首版增加草稿预览开关，工具活动展示设置暂不纳入已确认范围。
 - 模型选择不再局限于 `.env` 中逐个配置的别名。用户希望菜单能列出当前可选模型，参考截图中的分页、当前项标记和服务名/模型 ID 展示。
 - 用户使用 Magpie 管理供应商。采用 Magpie Agent 插件接入 Nailong Bot，Magpie 管理连接并提供模型目录。
-- 模型与思考等级在 Nailong 的 Telegram 面板内选择；用户随后修订为 Magpie 中也可以设置，替代此前“Magpie 的 Nailong Agent 行只提供连接开关”的决定。Magpie 插件对思考等级设置的支持仍待核实。
+- 模型与思考等级在 Nailong 的 Telegram 面板内选择；用户随后修订为 Magpie 中也可以设置，替代此前“Magpie 的 Nailong Agent 行只提供连接开关”的决定。用户明确要求首版两边均可选择模型并调整思考等级，不接受收窄为仅在 Telegram 调整等级；Magpie 插件能力缺口的接入方式待定。
 - Magpie 的模型修改作用于当前 Telegram 主 Conversation，CLI 等其他 Conversation 保留自己的选择。
-- Magpie 与 Telegram 对该会话的设置以最后一次明确修改为准；目录刷新和程序重启不得覆盖用户最后的选择。两边界面的回显机制待核实。
+- Magpie 与 Telegram 对该会话的设置以最后一次明确修改为准；目录刷新和程序重启不得覆盖用户最后的选择。Telegram 修改后的模型选择须回显到 Magpie，具体机制待核实。
 - 模型与思考等级的变更在当前模型请求结束后生效，不中止正在进行的请求，也不等待整个 Processing Turn 结束。
 - 点选模型列表项直接选择该模型，模型详情另有入口；列表提供分页、当前模型标记和刷新入口。
 - 选择按 Conversation 保存，重启后保留；同一 Conversation 内按模型分别记住思考等级，切回模型恢复它上次的等级。
@@ -21,6 +21,9 @@
 - 模型列表提供常用/全部，可收藏和移除；全部保留 Magpie 开放的完整模型目录。
 - 刷新目录失败时保留上次列表，展示失败状态并允许重试；当前模型被移除或停用时保留工作进度并提示重新选择。
 - 主请求有限重试耗尽后暂停，提供换模型和继续入口；Magpie 连接关闭时显示未连接，保留当前选择和工作进度。Nailong 不自行改选模型，Magpie 路由组仍遵守用户在 Magpie 的配置。
+- `/reset` 保留模型、各模型的思考等级、常用列表和草稿预览开关。暂停工作恢复时使用当前选择并复用已确认的执行结果。
+- 当前请求结束前连续选择多个模型，以最后一次选择为准；面板显示实际使用中的模型和等待生效的选择，请求结束后更新状态。
+- 常用列表与草稿预览开关按 Conversation 保存，重启后保留。
 
 ## 已核实的接入依据
 
@@ -28,17 +31,20 @@
 
 [接入应用文档](https://usemagpie.ai/docs/zh/integrate)说明：`GET /v1/models` 提供用户打开的模型及已知的能力信息，包括模型 ID、显示名、思考等级、上下文和输出限制及图片能力。该页面关于“插件不能添加 Agent”的说法与插件页不一致；当前源码已有 [Agent 插件加载入口](https://github.com/yetone/magpie/blob/main/internal/plugin/agent.go)。落地前仍需核实用户安装版本。
 
-Magpie [Agent 插件实现](https://github.com/yetone/magpie/blob/d783df46cbac9021e26a6bd71ca0b55544552eb2/internal/agent/plugged.go#L384)仅注册模型选择字段，没有思考等级字段；`connect()` 中的 `efforts` 是支持的等级数组，不是用户当前选择。思考等级能否也在 Magpie 设置，需要据此收窄范围或明确追加接入工作，不能由支持模型选择推导。
+Magpie [Agent 插件实现](https://github.com/yetone/magpie/blob/d783df46cbac9021e26a6bd71ca0b55544552eb2/internal/agent/plugged.go#L384)仅注册模型选择字段，没有思考等级字段；`connect()` 中的 `efforts` 是支持的等级数组，不是用户当前选择。[插件描述](https://github.com/yetone/magpie/blob/d783df46cbac9021e26a6bd71ca0b55544552eb2/internal/agentplug/agentplug.go#L66)也没有思考等级配置字段。内置 Pi adapter 已有模型和等级控件，但固定面向 Pi 自己的配置。用户要求两边均能调整等级，因此需包含 Magpie 配套接口工作；推荐扩展通用 Agent 插件，实施路线和运行配套版本的方式尚待确认。
+
+插件 page 只能读写自身 options 和有限只读数据，没有公开的 Agent 模型/等级控制接口，不能据此认为增加页面即可补齐双向设置。模型外部修改可由插件读回配置原值，但另一个模型能否规范化匹配目录选项仍需配套处理；不能把“读取文件”当作双向回显已完成。
+
+本机 `GET http://127.0.0.1:3425/api/hello` 于本轮只读查询返回 Magpie `0.1.1285`。版本查询不证明当前安装已经支持缺少的插件字段，仍须据接口确定接入方案。
 
 参考 [pi-telegram](https://github.com/llblab/pi-telegram/tree/6b4db8a573416e2cbe60d44f6e38847cb6392348) 的主面板、分页列表、当前项标记和模型/思考相邻入口。它依赖宿主目录；截图本身不能证明任意服务的实时模型发现能力。Nailong 的 Magpie 接入以 Magpie 自己的目录接口为依据。
 
 ## 待定
 
-- 用户可见的等待/生效反馈，以及连续变更、请求失败与重试时的采用规则。
-- Telegram 选择是否需要同步回 Magpie 页面，以及如何区分 Magpie 的明确修改和目录同步写入。
+- 请求失败与重试时的设置采用规则。
+- Magpie 思考等级接入方式、双向回显机制，以及如何区分 Magpie 的明确修改和目录同步写入。
 - 新 Conversation 的初始模型，以及思考等级能力变化时的行为。
-- reset 及暂停工作续接时的设置采用规则。
-- 草稿预览设置范围、连接配置格式和现有模型配置的衔接。
+- 连接配置格式和现有模型配置的衔接。
 
 ## 当前代码事实
 
