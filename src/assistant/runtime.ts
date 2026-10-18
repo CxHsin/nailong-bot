@@ -124,7 +124,7 @@ export async function createAssistant(options: AssistantOptions) {
         const prepared = await magpie.prepareRequest(id);
         const all = snapshot.catalog.map(model => ({...prepared.model, model:model.id,
           contextWindow:model.contextWindow,maxTokens:model.maxOutputTokens,reasoning:model.reasoning,
-          images:model.modalities?.includes("image") ?? false}));
+          images:model.modalities?.includes("image")}));
         await executor.configureModel(id, prepared, all);
         runnable.add(id);
       } else {

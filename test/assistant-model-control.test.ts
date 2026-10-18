@@ -81,7 +81,7 @@ test("switching to a known text-only model pauses without discarding an existing
   const requests: Wire[] = [];
   const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aPfoAAAAASUVORK5CYII=";
   const f = await assistantFixture((wire,response) => {requests.push(wire);sendChatCompletion(response,"image retained");}, undefined,
-    {catalog:[{id:"text",modalities:["text"],reasoning:false},{id:"vision",modalities:["text","image"],reasoning:false}],selectedModel:"text",primaryConversationId:conversationId});
+    {catalog:[{id:"text",modalities:["text"],reasoning:false},{id:"vision",modalities:["text","image"],reasoning:false},{id:"unknown",reasoning:false}],selectedModel:"text",primaryConversationId:conversationId});
   try {
     await f.app.receive({conversationId,inputId:"photo",text:"KEEP_IMAGE",images:[{type:"image",mimeType:"image/png",data:png}]});
     await f.app.waitForIdle();
@@ -97,6 +97,11 @@ test("switching to a known text-only model pauses without discarding an existing
     assert.equal(requests.length,1);
     assert.match(JSON.stringify(requests[0]!.messages),/data:image\/png;base64/);
     assert.match(JSON.stringify(requests[0]!.messages),/KEEP_IMAGE/);
+    await f.app.control(conversationId,{type:"model",model:"unknown"});
+    await f.app.receive({conversationId,inputId:"unknown-capability",text:"continue using the original image"});
+    await f.app.waitForIdle();
+    assert.equal(requests.length,2,"unknown image capability must not be misreported as known unsupported");
+    assert.match(JSON.stringify(requests[1]!.messages),/data:image\/png;base64/);
   } finally {await f.close();}
 });
 

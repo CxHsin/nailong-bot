@@ -263,7 +263,7 @@ export async function createMagpieControl(options: {
       return { model: { alias: "magpie", api: "openai-completions", baseUrl: connection.baseUrl,
         apiKey: connection.apiKey, model: model.id, contextWindow: model.contextWindow,
         maxTokens: model.maxOutputTokens, reasoning: model.reasoning,
-        images: model.modalities?.includes("image") ?? false }, thinking: state.thinking, catalogModel: structuredClone(model) };
+        images: model.modalities?.includes("image") }, thinking: state.thinking, catalogModel: structuredClone(model) };
     },
     close() { closed = true; clearInterval(timer); db.close(); },
   };
