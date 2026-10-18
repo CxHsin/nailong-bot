@@ -9,7 +9,9 @@ import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 test("official CLI shares exclusive data ownership and resumes the saved durable conversation", async () => {
   const entry = resolve("src/cli/main.ts");
+  let requests = 0;
   const f = await assistantFixture((wire, response) => {
+    requests++;
     assert.match(String(wire.messages[0]?.content), /BASE_ENV_FIRST\nReply clearly/);
     if (wire.messages.filter((message) => message.role === "user").length > 1)
       assert.match(JSON.stringify(wire.messages), /CLI_LOTUS/);
@@ -17,12 +19,11 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
   });
   const env = {
     ...process.env,
-    MODEL_NAMES: "local",
-    MODEL_DEFAULT: "local",
-    MODEL_LOCAL_API: "openai-completions",
-    MODEL_LOCAL_BASE_URL: f.options.modelConfiguration.models[0]!.baseUrl,
-    MODEL_LOCAL_MODEL: "local",
-    MODEL_LOCAL_API_KEY: "test",
+    // Old main-model variables must not act as an implicit direct fallback.
+    MODEL_NAMES: "",
+    MODEL_DEFAULT: "",
+    ASSISTANT_INTENT_MODEL: "",
+    NAILONG_MAGPIE_CONFIG: f.magpieConfigPath,
     ASSISTANT_DATA_DIR: f.options.dataDir,
     ASSISTANT_WORK_DIR: f.directory,
     AGENT_SYSTEM_PROMPT: "BASE_ENV_FIRST\nReply clearly.",
@@ -47,7 +48,10 @@ test("official CLI shares exclusive data ownership and resumes the saved durable
   try {
     await assert.rejects(run("CLI_LOTUS"), /数据目录.*使用/);
     await f.app.close();
-    const first = await run("CLI_LOTUS");
+    const waiting = await run("CLI_LOTUS");
+    assert.match(waiting.stdout, /模型|选择/);
+    assert.equal(requests, 0, "unselected CLI input persists without a direct-model request");
+    const first = await run("/model local");
     assert.match(first.stdout, /lotus reply/);
     const second = await run("what name");
     assert.match(second.stdout, /lotus reply/);
@@ -68,4 +72,10 @@ test("official configuration rejects missing or blank base instructions before c
   for (const value of [undefined, " \n "]) {
     await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: value, AGENT_PROMPT_FILE: "system-prompt.md" }), /AGENT_SYSTEM_PROMPT/);
   }
+});
+
+test("official entry validates independent intent credentials without requiring a main-model alias", async () => {
+  await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_MODEL: "router" }), /API Key|分类模型|模型别名/);
+  await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_MODEL: "not-a-valid-alias" }), /别名/);
+  await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_TIMEOUT_MS: "0" }), /正整数/);
 });

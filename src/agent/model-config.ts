@@ -48,8 +48,8 @@ export function modelEnvironment(env: NodeJS.ProcessEnv): ModelConfiguration {
 
 export function configuredModel(config: ModelConfig): Model<Api> {
   const contextWindow = config.contextWindow ?? 128_000; const maxTokens = config.maxTokens ?? 16_384;
-  if (!validModelAlias(config.alias) || !Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxTokens) || maxTokens <= 0 || contextWindow <= maxTokens)
-    throw new Error("模型别名无效，或上下文窗口不大于最大输出 token");
+  if (!validModelAlias(config.alias) || !Number.isSafeInteger(contextWindow) || !Number.isSafeInteger(maxTokens) || maxTokens <= 0 || contextWindow < maxTokens)
+    throw new Error("模型别名无效，或上下文窗口小于最大输出 token");
   const identity = createHash("sha256").update(JSON.stringify([config.alias, config.api, config.baseUrl.replace(/\/$/, ""), config.model])).digest("hex").slice(0, 16);
   return { id: config.model, name: config.alias, api: config.api, provider: `endpoint-${identity}`, baseUrl: config.baseUrl,
     reasoning: config.reasoning ?? false, input: config.images === false ? ["text"] : ["text", "image"], contextWindow, maxTokens,

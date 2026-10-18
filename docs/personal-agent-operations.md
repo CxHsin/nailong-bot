@@ -4,15 +4,41 @@
 
 ## Telegram 如何接入
 
-沿用现有 BotFather token。填写 `.env` 的 `AGENT_TELEGRAM_BOT_TOKEN` 和 `AGENT_TELEGRAM_USER_ID`（也接受 `TELEGRAM_*`），配置主模型及必填 `AGENT_SYSTEM_PROMPT` 后运行 `npm start`。服务通过 grammY long polling 接收该主人的私聊，文字、图片和 document 附件进入同一个主会话。当前不支持群聊或多 bot。CLI 使用 `npm run chat` 或 `npm run send -- "内容"`，可加 `--conversation-id telegram:private:<owner id>` 指定会话。
+沿用现有 BotFather token。填写 `.env` 的 `AGENT_TELEGRAM_BOT_TOKEN` 和 `AGENT_TELEGRAM_USER_ID`（也接受 `TELEGRAM_*`）及必填 `AGENT_SYSTEM_PROMPT` 后运行 `npm start`，再由 Magpie 连接并明确选择模型。未连接或未选模型也可打开控制入口，普通输入持久等待。服务通过 grammY long polling 接收该主人的私聊，文字、图片和 document 附件进入同一个主会话。当前不支持群聊或多 bot。CLI 使用 `npm run chat` 或 `npm run send -- "内容"`，可加 `--conversation-id telegram:private:<owner id>` 指定会话。
 
 只启动一个实例。若之前配置 webhook，须自行确认 polling 的使用方式；新版启动不会自动删除 webhook。先停止旧入口，再运行新版，避免两个进程消费同一 bot 的更新。旧 token 不必重新申请，旧数据也不会自动清除。
 
 支持 Markdown 富消息、代码与表格、长文分页、临时正文草稿预览和 `send_file` 文件交付。只有明确的格式 400 拒绝才降级原文块；连接断开等未知结果写入 `telegram-sends.jsonl`，不自动重发。草稿是预览，不能证明最终消息已送达。文件发送错误返回模型；结果不明时先核对记录。
 
+## Magpie 连接与模型选择
+
+先启动 Nailong 以创建默认配置目录，再从仓库根目录安装 [Agent 插件](../plugins/nailong-agent/README.md)：
+
+```powershell
+magpie plugin add ./plugins/nailong-agent
+```
+
+在 Magpie 的 Agent 页面连接 Nailong Bot，然后明确选模型。默认连接配置为用户目录下的 `.config/nailong/magpie.json`，在 Windows 也使用这个位置，不随启动工作目录变化。自定义位置时，在 Nailong 及启动 Magpie 的环境中设置同一个绝对路径 `NAILONG_MAGPIE_CONFIG`，并改为安装 `./plugins/nailong-agent/custom.agent.js`。Magpie 插件运行环境使用原生路径变量展开，自定义入口与默认入口二选一。`.env` 只会影响从该文件启动的 Nailong，不能替 Magpie 设置进程环境。
+
+插件仅维护 JSON 的 `baseUrl`、`apiKey` 和 `model`，保留其他配置。模型字段保存 `magpie/` 加完整目录 ID；例如 `magpie/provider/team/model` 对应实际请求的 `provider/team/model`。该前缀用于 Magpie 菜单回显，不能把目录 ID 本身按斜杠截短。不要手工把逐模型密钥搬到面板中。
+
+Telegram `/start` 打开首页，模型和思考按钮显示当前值，工作按钮显示等待数量；缓存、草稿与会话操作收在「设置」。`/model` 打开模型目录，每行一个模型，点击即选择；「详情与收藏」切换为点击查看能力及管理收藏，完整 ID 在详情页展示。全部与常用列表共享一次目录快照；打开模型页及明确刷新会更新目录，普通翻页不额外刷新。详情展示目录已提供的能力，缺失项显示未知。刷新失败保留上次列表并提示失败；成功刷新确认下架的模型保持原选择和工作，但需要重新选择。连接关闭时停止新的主请求，不自动回到旧直连配置。
+
+首页四行摘要沿用参考项目的 Status、Tokens、Cache、Context 排版和统计口径。Tokens ↑/↓ 累计当前会话已结算主执行请求的非缓存输入和输出，跨重启保留，reset 不清累计用量。Cache R 累计缓存读入，CH 为最近一条已结算请求的缓存读入/合计输入比例（合计包含非缓存输入、缓存读取和缓存创建）；进行中的请求待结算后计入，辅助压缩和记忆请求不计入。Context 按 SDK 当前活动模型上下文估算，使用最近有效 usage 加后续材料估算；`~` 标明估算，分母来自实际模型的目录窗口，reset 和原生压缩后重新计算。缺失字段显示未知；打开面板及返回首页时刷新摘要。
+
+`/stop` 即时保存当前批次的暂停决定并请求协作中断，不排在该请求后面。收到命令时显示 `stopping`，用新的 `/start` 查看停止后的状态；停止后为 `paused`，外部效果无法核实时仍为待核实。暂停保留进度，跨重启保持，明确使用 `/resume` 或工作详情里的继续操作才恢复该批次。该命令只作用于当前主执行，其他排队输入仍按序处理，已经派出的 helper 沿工作详情单独控制。没有活动请求时只提示当前无执行；重复投递不会暂停后来的请求。启动时会重新注册包含 `/stop` 的 Telegram 命令菜单；更新代码后需重启 Bot，并使用新的 `/start` 面板。
+
+Magpie 的模型字段仅绑定配置 owner 的 Telegram 主 Conversation。该会话在 Telegram 与 Magpie 的最后一次明确修改胜出；目录刷新、回写回声和重启不算新选择。其他 CLI Conversation 自己保存选择，可以用 `/model 完整模型ID` 设置。首次没有有效模型时，普通输入持久等待选择，不启动目录第一项；选择后按原顺序推进。已暂停的工作不会因为换模型而继续，仍需 `/resume` 或工作详情里的继续操作。
+
+模型和思考等级在请求准备时冻结，正在进行的请求继续原参数；工具继续并保留结果，下一次请求采用最新设置。首页区分实际请求设置和期望设置。思考等级仅使用目录明确声明的集合，每个完整模型 ID 分别记忆；首次优先 `medium`，然后 `low`，否则最低支持等级。非推理模型不显示可调入口，声明推理但未给集合时说明能力未提供，不猜测 effort。Magpie 端思考控件延期于 [#243](https://github.com/CxHsin/nailong-bot/issues/243)。
+
+面板可查看真实工作目标、取消指定工作、明确继续暂停项、查看现有缓存报表，并切换草稿预览。取消按已确认事实显示停止或待核实；发出中断不等于外部帮手已经停止。草稿默认开启，关闭只影响后续预览，最终文本、文件及发送回执照常交付。面板 reset 先说明影响并确认，再在安全边界重置上下文；它保留工作、helper、选择、等级、常用与草稿偏好。
+
+升级时保留原 `ASSISTANT_DATA_DIR`。`MODEL_NAMES`、`MODEL_DEFAULT` 及旧主模型别名不再提供正式主助手目录，无法精确匹配 Magpie 的旧选择须明确重选，不能猜测映射。独立输入分类仍可使用下述 `MODEL_<ALIAS>_*`，无需为主助手逐模型配置。真实插件安装、双向回显及手机验收与自动化模拟结果分别记录。
+
 ## 数据与会话
 
-`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`。显式配置可覆盖，但须使用独立执行空间；启动检查拒绝把旧 Session 目录当作新空间。配置、模型端点与凭据接入继续沿用，不导入旧历史、摘要、工具轨迹、Akasha 或 Task。[ADR-0014](adr/0014-retire-legacy-code-and-data.md)结束旧实现和旧离线工具的支持，遗留数据由明确的一次性维护清理；普通启动不自动删除资料。
+`ASSISTANT_DATA_DIR` 默认 `data/pi-durable-v1`。升级本控制面板时继续使用现役目录，保留 Conversation、队列、取消标记、helper 和 Durable 已确认步骤。启动仍拒绝把退役的旧 Session 目录当作现役空间，不导入旧历史、摘要、工具轨迹、Akasha 或 Task。[ADR-0014](adr/0014-retire-legacy-code-and-data.md)结束旧实现和旧离线工具的支持，遗留数据由明确的一次性维护清理；普通启动不自动删除资料。
 
 新空间分别保存完整输入与固定批次、主执行记录、会话控制与帮手材料，以及通道发送回执。已有外部 herdr 委派须保留并核对真实身份，不能因新会话没有历史就重新派发。工作目录由 `ASSISTANT_WORK_DIR` 指定，默认启动目录，重开会话沿用原目录；`AGENT_SHELL_PATH` 可指定 shell。工作目录与执行数据空间各自独立。
 
@@ -33,16 +59,19 @@
 | 命令 | 行为 |
 | --- | --- |
 | `/help` | 显示用法 |
+| `/start` | 打开会话控制面板，查看状态、实际请求与期望设置 |
 | `/kvcache` | 即时查看当前会话最近五轮 prompt cache 用量，不等待主模型或工具结束 |
-| `/model`、`/model 别名` | 查看或切换主模型；外部 Codex/Claude 模型不随之改变 |
+| `/model`、`/model 完整模型ID` | 查看 Magpie 目录或选择主模型；外部 Codex/Claude 模型不随之改变 |
+| `/thinking` | 调整目录明确提供的思考等级，按模型分别记忆 |
 | 自然语言补充 | 识别目标后按原顺序交给对应工作；主执行的普通补充不立即中止工具 |
 | 自然语言取消 | 取消排队目标或尽快发起执行/帮手中断，保留成果；停止状态单独核实 |
 | `/resume [批次ID]` | 明确继续本会话暂停的工作；省略 ID 时继续本会话全部暂停项 |
+| `/stop` | 即时请求暂停当前主执行并保留进度；通过 `/resume` 明确继续，不清排队输入 |
 | `/reset` | 清主上下文，保留已接收事件、执行进度和帮手身份；不取消工作、不停止外部进程 |
 
 旧 `/steer` 入口已退役，收到后提示直接用自然语言交办，不剥除前缀执行。连续补充保留各自来源身份；当前执行未消费时转为基于已有成果的后续处理。取消标记跨重启、reset 和 resume 保留。直接用户输入高于后台事件，可抢占低优先级轮次；未知外部效果仍先核实。
 
-`ASSISTANT_INTENT_MODEL` 指向 `MODEL_NAMES` 中已配置凭据的别名，独立于 `/model`。未配置时以 `not_configured` 原文兜底；非法别名启动时报错。默认总超时 8000ms、估算输入 8192 token、输出 1024 token、近期 6 个用户轮次及确认助手文字，可用同前缀的 `TIMEOUT_MS`、`INPUT_TOKENS`、`OUTPUT_TOKENS`、`RECENT_TURNS` 环境变量覆盖。正整数及模型窗口校验在启动时完成。判断无工具、非流式且不重试；超时的迟到结果无效。
+`ASSISTANT_INTENT_MODEL` 指向独立的 `MODEL_<ALIAS>_*` 配置，包含 API、BASE_URL、MODEL 和 API_KEY，独立于 `/model` 及 Magpie 主目录；不再需要 `MODEL_NAMES` 或 `MODEL_DEFAULT`。未配置时以 `not_configured` 原文兜底；非法别名或缺少凭据启动时报错。默认总超时 8000ms、估算输入 8192 token、输出 1024 token、近期 6 个用户轮次及确认助手文字，可用同前缀的 `TIMEOUT_MS`、`INPUT_TOKENS`、`OUTPUT_TOKENS`、`RECENT_TURNS` 环境变量覆盖。正整数及模型窗口校验在启动时完成。判断无工具、非流式且不重试；超时的迟到结果无效。
 
 每条普通用户消息持久接收后立即触发路由处理，不等主 Bot 结束当前工作；同一会话按接收顺序判断，不等待凑齐几条消息。在处理队首消息时检查先前工作，空闲直通也持久保存为普通 request 决定，重启和重复投递复用该决定；连续消息中的后一条能看到前一条已建立的工作。每次模型判断提供三类材料：`current` 的用户原文、图片标记与 Telegram 被回复消息的 ID/角色/正文或 caption（不下载被回复的图片），`recent` 的近期用户与 Bot 交流，以及 `works` 的当前、排队和已关联后台 helper 的工作身份、简短目标和状态。`replyTargets` 是由真实回复身份关联出的工作 ID，未知回复仍保留消息信息但不猜造工作关联。没有前置用户消息的已确认 Bot 文字也可进入近期材料。
 

@@ -176,7 +176,13 @@ test("hard-killed unsafe effects are verified before completion, re-execution, o
         assert.equal(effects, "one-effect\n");
         if (mode === "sequential") { assert.equal(secondBeforeVerification, 0); assert.equal(await readFile(join(f.directory, "second-effect.txt"), "utf8"), "second\n"); }
       } finally { await executor.close(); }
-    } finally { clearTimeout(timer); if (worker.exitCode === null) worker.kill("SIGKILL"); await f.close(); }
+    } finally {
+      clearTimeout(timer);
+      if (worker.exitCode === null && worker.signalCode === null) {
+        const exited = once(worker, "exit"); worker.kill("SIGKILL"); await exited;
+      }
+      await f.close();
+    }
   });
 });
 

@@ -1,0 +1,72 @@
+# 会话控制面板与 Magpie 模型目录讨论
+
+2026-10-18，通过 `grill-with-docs` 逐轮讨论并获用户整体确认。设计结论以 [Issue #242](https://github.com/CxHsin/nailong-bot/issues/242)为准，架构取舍见 [ADR-0016](../adr/0016-magpie-catalog-and-conversation-settings.md)。正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](conversation-control-panel-spec-2026-10-18.md)。本文保留讨论范围和事实依据，不表示功能已实现。
+
+## 已确认
+
+### 最新范围修订
+
+用户澄清：Telegram 首版仍支持思考等级调整，仅延期 Magpie 端的等级控件；本轮不采用自编译 Magpie 来补齐接口，后续计划向 Magpie 上游提交 PR。后续 PR 是计划事项，本轮未发布或提交。
+
+主助手模型目录统一来自 Magpie，不再合并旧 `.env` 逐模型直连列表。意图识别等独立调用的配置继续按其职责处理；旧主模型配置的退役与启动说明属于实现时需要衔接的工作。
+
+首次接入且无已保存或明确指定的模型时，打开列表由用户选择；此前收到的普通消息保留，选好后继续处理，不自动选择目录第一项。
+
+### 逐轮已确认行为
+
+- 设计统一会话控制面板，模型和思考等级属于其中的入口。
+- `/start` 打开首页，显示当前模型、思考等级、运行状态和等待工作数量；首版入口包括模型、思考等级、工作列表、缓存统计、会话操作。快捷命令进入对应页面。
+- 工作列表覆盖正在处理、排队、暂停及后台帮手的工作；首版支持查看详情、继续暂停工作和取消指定工作，取消后按事实显示停止中、已停止或状态待核实，独立请求继续遵循 FIFO。
+- 会话操作提供继续暂停工作和重置上下文；重置前说明影响并确认。沿用当前 reset 保留队列、执行进度和帮手的语义。
+- 首版增加草稿预览开关，工具活动展示设置暂不纳入已确认范围。
+- 模型选择不再局限于 `.env` 中逐个配置的别名。用户希望菜单能列出当前可选模型，参考截图中的分页、当前项标记和服务名/模型 ID 展示。
+- 用户使用 Magpie 管理供应商。采用 Magpie Agent 插件接入 Nailong Bot，Magpie 管理连接并提供模型目录。
+- 模型在 Nailong 的 Telegram 面板与 Magpie 中均可选择；Telegram 支持思考等级调整，Magpie 端的等级控件延期。
+- Magpie 的模型修改作用于当前 Telegram 主 Conversation，CLI 等其他 Conversation 保留自己的选择。
+- Magpie 与 Telegram 对该会话的设置以最后一次明确修改为准；目录刷新和程序重启不得覆盖用户最后的选择。Telegram 修改后的模型选择须回显到 Magpie，具体机制待核实。
+- 模型与思考等级的变更在当前模型请求结束后生效，不中止正在进行的请求，也不等待整个 Processing Turn 结束。
+- 点选模型列表项直接选择该模型，模型详情另有入口；列表提供分页、当前模型标记和刷新入口。
+- 选择按 Conversation 保存，重启后保留；同一 Conversation 内按模型分别记住思考等级，切回模型恢复它上次的等级。
+- 首次使用模型时，思考等级优先选择支持的 `medium`，否则 `low`，再否则使用支持的最低等级；不支持思考的模型不显示等级选项，选择范围以 Magpie 声明的能力为依据。
+- 模型列表提供常用/全部，可收藏和移除；全部保留 Magpie 开放的完整模型目录。
+- 刷新目录失败时保留上次列表，展示失败状态并允许重试；当前模型被移除或停用时保留工作进度并提示重新选择。
+- 主请求有限重试耗尽后暂停，提供换模型和继续入口；Magpie 连接关闭时显示未连接，保留当前选择和工作进度。Nailong 不自行改选模型，Magpie 路由组仍遵守用户在 Magpie 的配置。
+- `/reset` 保留模型、各模型的思考等级、常用列表和草稿预览开关。暂停工作恢复时使用当前选择并复用已确认的执行结果。
+- 当前请求结束前连续选择多个模型，以最后一次选择为准；面板显示实际使用中的模型和等待生效的选择，请求结束后更新状态。
+- 常用列表与草稿预览开关按 Conversation 保存，重启后保留。
+
+## 已核实的接入依据
+
+[Magpie Agent 插件文档](https://usemagpie.ai/docs/zh/plugins#agents)说明：插件可将应用加入 Agent 页，写入连接配置；省略 `agent.model` 时可只提供连接开关，由应用自己选择模型。`connect()` 能收到网关地址、Agent key 和模型目录，Magpie 模型变动会再次调用它。
+
+[接入应用文档](https://usemagpie.ai/docs/zh/integrate)说明：`GET /v1/models` 提供用户打开的模型及已知的能力信息，包括模型 ID、显示名、思考等级、上下文和输出限制及图片能力。该页面关于“插件不能添加 Agent”的说法与插件页不一致；当前源码已有 [Agent 插件加载入口](https://github.com/yetone/magpie/blob/main/internal/plugin/agent.go)。落地前仍需核实用户安装版本。
+
+Magpie [Agent 插件实现](https://github.com/yetone/magpie/blob/d783df46cbac9021e26a6bd71ca0b55544552eb2/internal/agent/plugged.go#L384)仅注册模型选择字段，没有思考等级字段；`connect()` 中的 `efforts` 是支持的等级数组，不是用户当前选择。[插件描述](https://github.com/yetone/magpie/blob/d783df46cbac9021e26a6bd71ca0b55544552eb2/internal/agentplug/agentplug.go#L66)也没有思考等级配置字段。内置 Pi adapter 已有模型和等级控件，但固定面向 Pi 自己的配置。补齐通用插件的等级字段作为后续上游 PR 方向，本轮不修改 Magpie。
+
+插件 page 只能读写自身 options 和有限只读数据，没有公开的 Agent 模型/等级控制接口，不能据此认为增加页面即可补齐双向设置。模型外部修改可由插件读回配置原值；使用插件支持的 `prefix` 保持配置值与 Magpie 选项的模型引用一致，是双向模型回显的待验证实现路径，不表示真实接入已通过。
+
+本机 `GET http://127.0.0.1:3425/api/hello` 于本轮只读查询返回 Magpie `0.1.1285`。版本查询不证明当前安装已经支持缺少的插件字段，仍须据接口确定接入方案。
+
+参考 [pi-telegram](https://github.com/llblab/pi-telegram/tree/6b4db8a573416e2cbe60d44f6e38847cb6392348) 的主面板、分页列表、当前项标记和模型/思考相邻入口。它依赖宿主目录；截图本身不能证明任意服务的实时模型发现能力。Nailong 的 Magpie 接入以 Magpie 自己的目录接口为依据。
+
+## 最终确认的切换边界
+
+- 切换模型时继续使用原上下文，较小窗口按既有原生压缩机制处理；仍无法承接时暂停提示，保留进度、不静默丢弃资料或自动 reset。
+- 暂停状态下仅切换模型不自动恢复工作，仍等待明确继续；正在运行的工作在后续请求使用新设置。
+
+## 后续工作
+
+Magpie 等级控件与上游 PR 计划单独记录为 [Issue #243](https://github.com/CxHsin/nailong-bot/issues/243)，不阻塞首版。本轮仅在本仓库发布跟踪 Issue，未向 Magpie 上游发送 Issue 或 PR，也未修改或替换 Magpie。
+
+## 实现阶段需核实
+
+- 配置提交后尚未准备的主请求及其重试采用最新选择；已经准备或发出的请求继续原设置。已有压缩请求按其保存的执行参数完成，不因模型切换重放。
+- 模型双向回显、区分用户明确修改和目录同步写入的机制，需要真实验证。
+- 连接配置格式、热加载和旧主模型配置退役方式需在规格与实现中具体化，独立分类配置的职责保留。
+
+## 当前代码事实
+
+- `src/assistant/runtime.ts` 在普通命令批次中处理 `/model`，查询和变更需要排队。
+- `src/assistant/durable-executor.ts` 按 Conversation 保存模型；初始和每次切换都把思考等级设置为推理模型 `low`、其他模型 `off`。
+- `src/agent/model-config.ts` 从 `.env` 中的模型别名构造静态列表；尚未对接 Magpie 目录。
+- 本次讨论仅更新领域术语与记录，未修改功能实现。

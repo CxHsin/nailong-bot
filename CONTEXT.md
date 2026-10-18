@@ -6,6 +6,8 @@ Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layer
 
 System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-context-order-and-self-file.md) and [spec #234](https://github.com/CxHsin/nailong-bot/issues/234). Base instructions, skills, project instructions, SELF and MEMORY retain that effective order. Identity and core persona change only through the user's explicit current request; relationship and expression may evolve from sourced user evidence.
 
+The Conversation Control Panel and Magpie Model Catalog follow [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md), [conclusion #242](https://github.com/CxHsin/nailong-bot/issues/242) and [spec #244](https://github.com/CxHsin/nailong-bot/issues/244). The official Telegram/CLI entry uses Magpie's catalog; Conversation-owned choices, thinking preferences, favorites and drafts persist in the existing data directory. Native Telegram controls remain available during requests and tools, and the next prepared request adopts new settings. The Agent plugin shares only the owner's Telegram main Conversation model. Automated behavior and live integration evidence are recorded in [control acceptance](docs/conversation-control-acceptance-20261018.md); actual plugin menu echo and phone acceptance remain pending. Magpie-side thinking controls are deferred under [#243](https://github.com/CxHsin/nailong-bot/issues/243).
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -17,6 +19,10 @@ System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-co
 **Channel**: Authenticates input and delivers text, images and files. Telegram renders rich messages and temporary public reply previews; a preview is not a final send receipt.
 
 **Conversation**: Stable identity selecting a main Session and saved work directory. Telegram uses `telegram:private:<owner id>`; CLI can explicitly select a conversation.
+
+**Conversation Control Panel**: A unified Telegram interface for viewing a Conversation's status, choosing the main assistant's model and thinking level, and accessing conversation operations.
+
+**Model Catalog**: The models offered for selection by a connected model service, together with their known capabilities. The Magpie catalog reflects the models the user has enabled there.
 
 **Work Directory**: Default directory for relative paths and project instructions. Reopening a conversation preserves it. It is separate from Session storage and is not a sandbox.
 

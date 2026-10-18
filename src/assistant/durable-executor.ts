@@ -10,7 +10,8 @@ import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { formatSkillsForPrompt, loadSkills, loadProjectContextFiles, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { ModelConfiguration } from "../agent/model-config.js";
+import type { ModelConfiguration, ModelConfig } from "../agent/model-config.js";
+import type { MagpiePreparedRequest } from "./magpie.js";
 import { durableModels, type RequestMetric } from "./durable-models.js";
 import { createToolArchive, type ToolArchiveLimits } from "./archive.js";
 import { AssistantMemory, type MemoryLimits } from "./memory.js";
@@ -18,6 +19,7 @@ import { memoryRefinement } from "./memory-refinement.js";
 import { sanitizeMemoryContext } from "./memory-context.js";
 import { persistMedia, type MediaOptions } from "./media.js";
 import { Type } from "typebox";
+import { estimateContextTokens } from "@earendil-works/pi-ai/utils/estimate";
 
 const RecoveryDoc = defineDoc({ kind: "nailong.effect-verification", version: 1, scope: "conversation", history: "latest", fork: "current",
   initial: () => ({ calls: {} as Record<string, { tool: string; state: "unresolved" | "confirmed" | "not_applied" | "unknown"; evidence: string }> }) });
@@ -49,6 +51,7 @@ export type DurableExecutorOptions = { cwd?: string; dataDir: string; prompt?: s
   media?: MediaOptions;
   compaction?: Partial<CompactionPolicy>;
   onRequestMetrics?: (metric: RequestMetric) => void;
+  beforeModelRequest?: (model: ModelConfig) => void;
   onPreview?: (preview: { conversationId: string; replyId: string; text?: string }) => void;
   reportFailure?: (error: unknown) => void };
 
@@ -64,7 +67,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     const directory = join(rootDirectory, createHash("sha256").update(conversationId).digest("hex"));
     await mkdir(directory, { recursive: true });
     let activeBatch: string | undefined;
-    const catalog = durableModels(options.modelConfiguration, { conversationId, batchId: () => activeBatch, record(metric) {
+    const catalog = durableModels(options.modelConfiguration, { conversationId, batchId: () => activeBatch, beforeRequest: options.beforeModelRequest, record(metric) {
       try { appendFileSync(join(directory, "requests.jsonl"), JSON.stringify(metric) + "\n");
         if (metric.status !== "pending") options.onRequestMetrics?.(metric); }
       catch (error) { options.reportFailure?.(error); }
@@ -301,9 +304,9 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         retry: { enabled: true, get maxRetries() { return retryLimit; }, baseDelayMs: 2000 }, toolExecution: "sequential",
         steeringMode: "all", followUpMode: "all", compaction: options.compaction }, env: () => environment, onReport: options.reportFailure,
     }, context);
-    const selected = catalog.select();
-    root = await harness.root(context, { agent: { model: selected.ref,
-      thinkingLevel: selected.model.reasoning ? "low" : "off", cwd } });
+    const selected = options.modelConfiguration.models.length ? catalog.select() : undefined;
+    root = await harness.root(context, { agent: { model: selected?.ref,
+      thinkingLevel: selected?.model.reasoning ? "low" : "off", cwd } });
     await root.configure({ instructions: null }, context);
     function activateInputs(events: DurableEvent[]) {
       const sources = events.map(event => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
@@ -380,6 +383,35 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    async contextUsage(conversationId: string) {
+      const opening = conversations.get(conversationId);
+      if (!opening) return undefined;
+      const {root} = await opening;
+      const view = await root.context(context);
+      return estimateContextTokens(view.messages).tokens;
+    },
+    /** Configure the agent for future native prepare phases. Request checkpoints stay immutable. */
+    async configureModel(conversationId: string, prepared?: MagpiePreparedRequest, available: ModelConfig[] = []) {
+      const {root, catalog} = await conversation(conversationId);
+      for (const config of available) catalog.register(config);
+      const selected = prepared && catalog.register(prepared.model);
+      await root.configure({ model: selected?.ref ?? null,
+        thinkingLevel: (prepared?.thinking ?? "off") as import("@earendil-works/pi-ai").ModelThinkingLevel }, context);
+    },
+    async actualSettings(conversationId: string) {
+      const opening = conversations.get(conversationId);
+      if (!opening) return undefined;
+      const {harness} = await opening;
+      const inspection = await harness.inspect(context);
+      for (const task of inspection.tasks) {
+        if (!["pi.generation","pi.compaction"].includes(task.record.kind)) continue;
+        const state = task.record.state as { checkpoint?: { phase: string; model?: {modelId:string}; thinkingLevel?: string } };
+        const frozen = state.checkpoint;
+        if (frozen && ["request", "poll", "summarize", "retry"].includes(frozen.phase) && frozen.model)
+          return {model:frozen.model.modelId, ...(frozen.thinkingLevel && frozen.thinkingLevel !== "off" ? {thinking:frozen.thinkingLevel} : {})};
+      }
+      return undefined;
+    },
     async intentContext(conversationId: string) {
       const {root} = await conversation(conversationId);
       const entries = (await root.context(context)).entries;
@@ -404,6 +436,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     },
     async execute(batch: DurableBatch, controls: DurableControls): Promise<DurableResult> {
       const { harness, root, rememberUncertain, selectWork, prepare, activateInputs } = await conversation(batch.conversationId);
+      if (controls.signal?.aborted) return {status:"preempted"};
       activateInputs(batch.events);
       if (!await selectWork(batch)) {
         await controls.emit({ conversationId: batch.conversationId, type: "text", outputId: `${batch.id}:retry-budget-exhausted`, text: "此项工作的有限重试已耗尽，已保留进度并暂停。可明确使用 /resume 继续。" });
@@ -431,7 +464,11 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       }
       stream.start(async (events) => {
         for (const event of events) {
-          if (event.type === "message_start" && event.message.role === "assistant") parts.clear();
+          if (event.type === "message_start" && event.message.role === "assistant") {
+            parts.clear();
+            event.message.content.forEach((part,index) => { if (part.type === "text") parts.set(index,part.text); });
+            preview();
+          }
           if (event.type === "message_update") {
             for (const change of event.changes) {
               if (change.type === "text_start") parts.set(change.contentIndex, change.block.type === "text" ? change.block.text : "");

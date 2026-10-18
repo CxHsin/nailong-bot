@@ -39,12 +39,12 @@ async function telegramRouterFixture(split = false) {
   }, async (cwd) => { await seedPendingAssistantWork(cwd, conversationId); return { intent: { model: "router" }, modelConfiguration: { defaultModel: "local", models: [
     { alias: "local", model: "local", api: "openai-completions", apiKey: "test", baseUrl: "" },
     { alias: "router", model: "router", api: "openai-completions", apiKey: "test", baseUrl: "" },
-  ] } }; });
+  ] } }; }, { primaryConversationId: conversationId, catalog: [{ id: "local", reasoning: false, modalities: ["text", "image"] }] });
   let nextMessage = 1000;
-  const sent: Array<{ method: string; messageId: number }> = []; const errors: unknown[] = [];
-  const bot = new Bot("test", { botInfo, client: { fetch: async (url) => {
+  const sent: Array<{ method: string; messageId: number; body?: unknown }> = []; const errors: unknown[] = [];
+  const bot = new Bot("test", { botInfo, client: { fetch: async (url, init) => {
     const method = String(url).split("/").at(-1)!; const messageId = ++nextMessage;
-    sent.push({ method, messageId });
+    sent.push({ method, messageId, body: init?.body });
     return new ApiResponse(JSON.stringify({ ok: true, result: { message_id: messageId, date: 0, chat: { id: 42, type: "private" } } }), { headers: { "content-type": "application/json" } });
   } } });
   const channel = await connectTelegram({ app: f.app, bot, ownerId: 42, dataDir: f.directory,
@@ -142,7 +142,14 @@ test("classifier recent turns include confirmed assistant text and reset exclude
     const before = f.snapshots.find((entry) => entry.current.inputId === "52")!;
     assert.ok(before.recent.some((entry) => entry.role === "user" && entry.text.includes("OLD_VISIBLE")));
     assert.ok(before.recent.some((entry) => entry.role === "assistant" && entry.text.includes("confirmed answer 1")));
-    await f.bot.handleUpdate(update(53, { text: "/reset" })); await f.flush();
+    await f.bot.handleUpdate(update(53, { text: "/reset" }));
+    const confirmation = f.sent.filter(item => item.method === "sendMessage").at(-1)!;
+    const markup = JSON.parse(String(confirmation.body)).reply_markup.inline_keyboard.flat() as Array<{text:string;callback_data:string}>;
+    const confirm = markup.find(item => item.text === "确认重置")!;
+    await f.bot.handleUpdate({ update_id: 530, callback_query: { id: "reset-confirm", from: {id:42,is_bot:false,first_name:"owner"},
+      chat_instance: "owner", data: confirm.callback_data, message: {message_id:confirmation.messageId,date:0,from:botInfo,
+        chat:{id:42,type:"private",first_name:"owner"},text:"reset confirmation"} } });
+    await f.flush();
     await f.bot.handleUpdate(update(54, { text: "NEW_VISIBLE discuss weather" })); await f.flush();
     const after = f.snapshots.find((entry) => entry.current.inputId === "54")!;
     assert.doesNotMatch(JSON.stringify(after.recent), /OLD_VISIBLE|follow up on report|confirmed answer [12]/);

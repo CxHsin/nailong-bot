@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ServerResponse } from "node:http";
 import { Type } from "typebox";
-import { cacheReport } from "../src/assistant/cache-report.js";
+import { cacheReport, conversationUsage } from "../src/assistant/cache-report.js";
 import type { RequestMetric } from "../src/assistant/durable-models.js";
 import type { StoredBatch } from "../src/assistant/queue.js";
 import { assistantFixture } from "./fixtures/assistant.js";
@@ -27,6 +27,22 @@ async function reportFixture(records: RequestMetric[], batches: StoredBatch[] = 
     return await cacheReport(directory, "one", batches);
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
+
+test("conversation summary deduplicates pending, excludes auxiliary and preserves unknown counters", async () => {
+  const directory = await mkdtemp(join(tmpdir(),"conversation-usage-"));
+  const path = join(directory,"executions",createHash("sha256").update("one").digest("hex"));
+  try {
+    await mkdir(path,{recursive:true});
+    const records = [metric("turn",null,null,{status:"pending"}),metric("turn",100,900,{cacheWrite:100}),
+      metric("other",999,999,{conversationId:"other"}),metric("aux",999,999,{purpose:"auxiliary"})];
+    const save = () => writeFile(join(path,"requests.jsonl"),records.map(record => JSON.stringify(record)).join("\n"));
+    await save();
+    assert.deepEqual(await conversationUsage(directory,"one"),{input:100,output:10,cacheRead:900,cacheHit:900/1100*100});
+    records.push(metric("missing",null,null,{output:3}));await save();
+    assert.deepEqual(await conversationUsage(directory,"one"),{input:null,output:13,cacheRead:null,cacheHit:null});
+    assert.deepEqual(await conversationUsage(directory,"empty"),{input:null,output:null,cacheRead:null,cacheHit:null});
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
 
 test("cache report groups tool requests, replaces pending, weights tokens and includes cache writes", async () => {
   const report = await reportFixture([

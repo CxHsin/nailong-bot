@@ -1,0 +1,7 @@
+{
+  "name": "nailong-magpie-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "magpie": { "agent": "./agent.js" }
+}

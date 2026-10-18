@@ -19,6 +19,7 @@ export type QueuedAssistantOptions = {
   executor: QueueExecutor;
   startPaused?: boolean;
   reportFailure?: (error: unknown) => void;
+  canRun?: (conversationId: string) => boolean;
 };
 
 export async function createQueuedAssistant(options: QueuedAssistantOptions) {
@@ -29,13 +30,13 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
   let queue: PersistentAssistantQueue;
   try { queue = new PersistentAssistantQueue(join(options.dataDir, "queue.sqlite")); }
   catch (error) { owner.close(); throw error; }
-  const active = new Map<string, {promise: Promise<void>; batch: ProcessingBatch; controller: AbortController}>();
+  const active = new Map<string, {promise: Promise<void>; batch: ProcessingBatch; controller: AbortController; stopping?: boolean}>();
   const listeners = new Set<(output: AssistantOutput) => void | Promise<void>>();
   let closed = false;
   let started = false;
   const emit = async (output: AssistantOutput) => { for (const listener of listeners) await listener(output); };
   function pump(conversationId: string) {
-    if (closed || !started || active.has(conversationId)) return;
+    if (closed || !started || active.has(conversationId) || options.canRun?.(conversationId) === false) return;
     const batch = queue.claim(conversationId);
     if (!batch) return;
     const controller = new AbortController();
@@ -43,9 +44,12 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       try {
         const result = await options.executor.execute(batch, { signal: controller.signal, emit,
           recordSubmission: (id) => queue.recordSubmission(batch.id, id) });
-        queue.settle(batch.id, result.status, result.reason);
+        if (active.get(conversationId)?.stopping && result.status !== "needs_confirmation")
+          queue.settle(batch.id, "paused", "user_stop");
+        else queue.settle(batch.id, result.status, result.reason);
       } catch (error) {
-        if (!closed && controller.signal.aborted) queue.settle(batch.id, "preempted");
+        if (active.get(conversationId)?.stopping) queue.settle(batch.id, "paused", "user_stop");
+        else if (!closed && controller.signal.aborted) queue.settle(batch.id, "preempted");
         else if (!closed) {
           queue.settle(batch.id, "paused", error instanceof Error ? error.message : String(error));
           (options.reportFailure ?? console.error)(error);
@@ -78,6 +82,17 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       return receipt;
     },
     getActiveBatch(conversationId: string) { return active.get(conversationId)?.batch; },
+    isStopping(conversationId: string) { return active.get(conversationId)?.stopping === true; },
+    stop(conversationId: string) {
+      if (closed) throw new Error("Assistant is closed");
+      const running = active.get(conversationId);
+      if (!running) return false;
+      // Commit the user's decision before cooperative interruption, including a crash during abort.
+      queue.settle(running.batch.id, "paused", "user_stop");
+      running.stopping = true;
+      running.controller.abort("user_stop");
+      return true;
+    },
     receiveQuery(input: QueueInput) {
       if (closed) throw new Error("Assistant is closed");
       return queue.receiveQuery(input);
@@ -106,7 +121,11 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       listeners.add(listener); return () => { listeners.delete(listener); };
     },
     async waitForIdle() { while (active.size) await Promise.all([...active.values()].map((entry) => entry.promise)); },
-    async resume(conversationId: string, batchId?: string) { queue.resume(conversationId, batchId); pump(conversationId); },
+    async resume(conversationId: string, batchId?: string) {
+      const running = active.get(conversationId);
+      if (running?.stopping && (!batchId || running.batch.id === batchId)) await running.promise;
+      queue.resume(conversationId, batchId); pump(conversationId);
+    },
     async close() {
       if (closed) return;
       closed = true;

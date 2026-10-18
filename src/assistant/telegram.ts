@@ -8,6 +8,7 @@ import { richReplyPages, textOnlyMarkdown } from "../telegram/rich-reply.js";
 import type { Assistant } from "./runtime.js";
 import { createDraftPreview } from "../telegram/draft-preview.js";
 import { saveTelegramDocument } from "./telegram-documents.js";
+import { registerTelegramPanel } from "./telegram-panel.js";
 
 export async function connectTelegram(options: {
   app: Assistant;
@@ -22,6 +23,8 @@ export async function connectTelegram(options: {
   const conversationId = `telegram:private:${ownerId}`;
   await mkdir(options.dataDir, { recursive: true });
   const receipts = join(options.dataDir, "telegram-sends.jsonl");
+  let draftsEnabled = (await app.controlSnapshot(conversationId)).drafts;
+  let previewGeneration = 0;
   const record = (value: unknown) =>
     appendFile(
       receipts,
@@ -30,6 +33,7 @@ export async function connectTelegram(options: {
   const drafts = createDraftPreview({
     reportFailure,
     send: async (id, text) => {
+      if (!draftsEnabled) return;
       const page = richReplyPages(text).at(-1);
       if (!page?.text.trim()) return;
       return bot.api.sendRichMessageDraft(
@@ -42,7 +46,8 @@ export async function connectTelegram(options: {
     },
   });
   const unsubscribePreviews = app.subscribePreviews((preview) => {
-    if (preview.conversationId === conversationId) drafts.update(preview);
+    if (draftsEnabled && preview.conversationId === conversationId)
+      drafts.update({ ...preview, replyId: `${preview.replyId}:preview:${previewGeneration}` });
   });
   async function send(
     kind: string,
@@ -105,6 +110,13 @@ export async function connectTelegram(options: {
         /* Receipts retain rejection/ambiguity; later pages can still be delivered. */
       }
     }
+  });
+  registerTelegramPanel({ app, bot, ownerId, conversationId, reportFailure,
+    async draftsChanged(enabled) {
+      if (enabled && !draftsEnabled) previewGeneration++;
+      draftsEnabled = enabled;
+      if (!enabled) await drafts.stop();
+    },
   });
   const input = registerTelegramInput(bot, {
     ownerId,

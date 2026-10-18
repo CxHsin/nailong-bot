@@ -25,7 +25,7 @@
 - **用自然语言补充和取消。** 独立请求按到达顺序排队，补充关联已有目标，排队工作的补充保留原位置。取消会保留已有成果，并核实实际停止状态。
 - **记住偏好与相处方式。** 共享长期记忆保存有来源的事实、偏好和项目主题；SELF 文件维护身份与人设。可以明确要求记住、纠正或忘记，也可以按需检索原始记录。
 - **将编码交给专门的帮手。** 主助手通过 herdr-workflow 委派给 Codex 或 Claude Code，接回结果后检查真实文件、差异和验证结果。
-- **本机存储，自行配置模型。** 会话、执行记录、记忆和工具原件保存在本地。模型通过 API 接入，支持配置多个别名并在会话中切换。
+- **本机存储，Magpie 管理模型。** 会话、执行记录、记忆和工具原件保存在本地。主助手从 Magpie 读取模型目录，在 Telegram 和 Magpie 中选择同一主会话的模型。
 
 当前面向 Windows 本机单服务使用，Telegram 仅接收配置主人的私聊。服务器部署、群聊、多 bot，以及 cron、邮件、Slack 等主动连接器尚不在支持范围内。
 
@@ -34,7 +34,7 @@
 ### 环境要求
 
 - Windows、Node.js 24 或更新版本、npm、Git。
-- 一个可用的模型 API 端点与 API Key；项目不内置共享模型账号。
+- 已安装的 Magpie，以及在其中配置的模型供应商和账号。
 - 使用 Telegram 时，需要 BotFather 创建的 bot token 和主人的 Telegram 用户 ID。
 - 使用编码委派时，需要另行安装并配置 herdr 与 Codex 或 Claude Code，见 [herdr-workflow](.agents/skills/herdr-workflow/SKILL.md)。
 
@@ -50,13 +50,13 @@ npm run hooks:install
 Copy-Item .env.example .env
 ```
 
-编辑 `.env`，按 [.env.example](.env.example) 配置模型：
+编辑 `.env`，按 [.env.example](.env.example) 配置运行入口：
 
-1. 设置 `MODEL_NAMES` 和 `MODEL_DEFAULT`，选择默认模型别名。
-2. 填写对应的 `MODEL_<ALIAS>_API`、`BASE_URL`、`MODEL` 和 `API_KEY`，并核对该模型的图片支持与上下文容量。示例中的 `ds`、`gpt` 是可替换的别名；更换服务时一起更换端点、模型 ID 和凭据。
+1. 按 [Magpie 接入说明](docs/personal-agent-operations.md#magpie-连接与模型选择)安装仓库内的 Agent 插件，在 Magpie 中连接 Nailong。
+2. 默认共享配置位于 `~/.config/nailong/magpie.json`。需要改位置时，在 Nailong 和启动 Magpie 的环境中设置相同的 `NAILONG_MAGPIE_CONFIG`。
 3. 保留或修改必填的 `AGENT_SYSTEM_PROMPT` 基础指令。它直接接收文本，支持带引号的多行值；身份和人设由数据目录内的 `memory/SELF.md` 维护。
 
-先从终端发起一次请求：
+在 Magpie 选择 Telegram 主会话模型，或在 Telegram `/model` 中明确选择。独立 CLI 会话可先用 `npm run send -- "/model"` 查看目录，再用 `npm run send -- "/model 完整模型ID"` 选择；随后发起请求：
 
 ```powershell
 npm run send -- "介绍一下你能做什么"
@@ -87,6 +87,10 @@ npm start
 
 Telegram 支持文字、图片、document 附件、Markdown 富消息、长文分页、临时正文预览和文件交付。预览用于查看生成进展；最终发送结果另有记录，发送结果不明时不自动重发。
 
+`/start` 打开会话控制面板。首页按钮显示当前模型、思考等级和等待数量；缓存统计、草稿开关和会话操作位于「设置」。模型列表每行一个模型，点击即选择；「详情与收藏」切换到能力和收藏入口，详情显示完整 ID。面板按钮在同一条消息中切换页面和更新设置，翻页、返回、缓存和收藏不会重复发送菜单；主动输入快捷命令会打开新面板。模型请求或工具运行时仍可查看面板和调整设置；当前请求保持原设置，之后准备的请求采用最新选择。有待生效变更时，首页单独显示实际请求和新设置。未选择模型时，输入保留并等待明确选择；暂停的工作仍需明确继续。
+
+首页摘要显示 Status、Tokens、Cache 和 Context，沿用参考项目的统计口径。Tokens 的 ↑/↓ 为当前会话已结算主执行请求的累计非缓存输入/输出；Cache 的 R 为累计缓存读取，CH 为最近一条已结算请求的缓存读入/合计输入比例，不计辅助压缩和记忆请求。Context 使用 SDK 对当前活动上下文的估算，`~` 表示估算值，分母为实际模型的目录窗口；重置后重新计算，不使用累计输入作为占用。没有用量或窗口数据时显示「未知」。
+
 终端入口支持交互、单次输入、图片和逐行 JSON 输出：
 
 | 用途 | 命令 |
@@ -104,9 +108,12 @@ Telegram 支持文字、图片、document 附件、Markdown 富消息、长文�
 | 命令 | 行为 |
 | --- | --- |
 | `/help` | 显示用法 |
-| `/model`、`/model 别名` | 查看或切换主助手模型；Codex/Claude Code 的模型各自配置 |
+| `/start` | 打开会话控制面板 |
+| `/model`、`/model 完整模型ID` | 查看 Magpie 目录或选择主助手模型；Codex/Claude Code 的模型各自配置 |
+| `/thinking` | 查看或调整当前模型明确支持的思考等级 |
 | `/kvcache` | 查看当前会话最近五轮的 prompt cache 用量 |
 | `/resume [批次ID]` | 继续本会话暂停的工作；省略 ID 时继续全部暂停项 |
+| `/stop` | 立即请求暂停当前执行并保留进度，使用 `/resume` 继续；其他排队输入仍可处理 |
 | `/reset` | 清理主上下文，保留排队输入、执行进度、委派与长期记忆 |
 
 直接用自然语言交办、补充或取消工作，例如“把刚才的报告改成中文”“取消整理文件，保留已经生成的材料”。当前工作的补充在执行器支持的输入边界读取。旧 `/steer` 命令已退役，收到后会提示改用自然语言。
@@ -144,7 +151,7 @@ scripts/                构建、文档检查与 Git hooks 等维护脚本
 docs/adr/               架构决策
 docs/                   操作说明、验收记录与研究材料
 CONTEXT.md              领域术语与当前设计入口
-.env.example            模型、基础指令与运行配置示例
+.env.example            Magpie 连接路径、独立分类、基础指令与运行配置示例
 ```
 
 ## 本地数据与恢复
