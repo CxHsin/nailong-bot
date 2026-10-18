@@ -21,3 +21,7 @@ status: accepted
 仓库内提供 [Agent 插件](../../plugins/nailong-agent/README.md)，共享配置默认在 `~/.config/nailong/magpie.json`，覆盖入口为 `NAILONG_MAGPIE_CONFIG`。偏好与配置观测记录保存在现有 `assistant.sqlite`；首次没有有效模型时保留输入等待选择，暂停工作仍需明确继续。等级只来自目录，扩展 effort 在现有 provider 编码边界保留。
 
 交付与验证由 [#247](https://github.com/CxHsin/nailong-bot/issues/247)跟踪，见[控制面板验收](../conversation-control-acceptance-20261018.md)及[操作说明](../personal-agent-operations.md)。本机 Magpie 0.1.1285 的真实目录只读查询成功；插件安装、真实双端菜单回显和 Telegram 手机操作尚未验收，代码实现与模拟测试不代表生产服务已切换。
+
+2026-10-19，按[设置协调规格 #251](https://github.com/CxHsin/nailong-bot/issues/251)收拢设置生效职责：[会话设置协调 module](../../src/assistant/conversation-settings.ts)负责快照、每会话串行同步、全会话传播、配置 Durable、可运行性与同步任务的等待和关闭。Magpie 继续负责连接、目录、会话设置的持久保存、双端选择观测和发送前校验；Durable 继续冻结当前请求并为后续请求准备配置；runtime 组合这些能力并执行路由与队列调度。
+
+控制查询仍等待全部会话的设置传播，包括等待期间新增的任务；被等待的同步失败使查询拒绝。等待空闲保留单次等待当前设置任务的语义，关闭则先停止协调唤醒，再循环排空设置任务，随后释放执行器与存储。公开 Assistant interface、旧模型配置注入路径和现有数据格式保持兼容，设置变化不自动恢复 Paused Work。本次结构调整的验证见[控制面板验收中的设置协调记录](../conversation-control-acceptance-20261018.md#设置协调职责收拢2026-10-19)。

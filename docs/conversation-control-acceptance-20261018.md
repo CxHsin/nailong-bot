@@ -91,3 +91,29 @@
 - 手机上的工作详情、取消/继续、reset 确认、草稿与最终文件交付。
 
 因此 #244 的真实链路验收尚不完整。模拟网关通过不能替代以上结果，也不能把本地代码提交视为生产部署或 Issue 已关闭。
+
+## 设置协调职责收拢（2026-10-19）
+
+规格 [#251](https://github.com/CxHsin/nailong-bot/issues/251)，实现与验证任务为 [#252](https://github.com/CxHsin/nailong-bot/issues/252)、[#253](https://github.com/CxHsin/nailong-bot/issues/253)、[#254](https://github.com/CxHsin/nailong-bot/issues/254)。基准为 `5d779b1`，集成分支为 `development`。本次保留既有设置行为、公开入口与数据格式；当前职责见 [ADR-0016](adr/0016-magpie-catalog-and-conversation-settings.md)。上文真实双端回显和手机验收的状态沿用原记录。
+
+既有 Assistant 与 Telegram 用例继续验证请求冻结、工具效果复用、后续 prepare 采用最终设置、全局连接与目录变化、FIFO、暂停显式续接、持久保存和旧协议注入。新增受控用例通过真实 Magpie 目录 HTTP 与临时 SQLite，在协调 module 的内部组合 seam 延迟或拒绝 Durable 配置，观察查询完成、配置结果、可运行性与关闭时机；不检查内部缓存或 Promise 集合。
+
+| 迁移风险与观察结果 | 证据入口 |
+| --- | --- |
+| 查询等待其他 Conversation，等待期间新增的配置任务同样阻止查询完成 | `conversation-settings.test.ts` 的 `a query waits for other Conversations…` |
+| 全局传播拒绝使查询拒绝并报告原错误；后续成功同步不被历史失败阻塞，不发送模型生成请求 | 同文件的 `a rejected global propagation…` |
+| 初始 Magpie 观测不提前配置执行器；恢复时各会话采用已保存模型，配置完成后才通知可运行 | 同文件的 `restored Conversations…`；既有 `assistant-model-control.test.ts` 验证重启后的原输入 FIFO |
+| drain 容纳拒绝和等待期间新增任务；idle 只等待调用时的当前任务 | `conversation-settings.test.ts` 的 `draining survives…` 与 `waiting for idle…` |
+| stop 后不再通知路由放行，已开始配置仍收尾，排队与后来新增的同步拒绝仍被排空 | 同文件的 `stopping coordination…` |
+| 真实 Assistant 关闭等待被延迟的目录读取，完成时不唤醒保存的输入；同目录重开后按原 FIFO 继续 | `assistant-runtime.test.ts` 的 `closing during settings propagation…` |
+| Magpie 已建立但 Queue System 初始化失败时释放依赖，同目录可再次创建；历史配置快照、设置拒绝和实际请求保持兼容 | 同文件的 `failed Magpie queue startup…` 与 `historical model injection…` |
+
+全部源码与测试写入者确认停写后，受检状态为 `5d779b1` 加本次暂存的协调 module、runtime 与测试差异；综合检查期间及完成后未再修改这些输入。新增 9 项测试，定向验证两个受影响文件 **16/16 通过**；新增断言验证已结束的历史失败在成功重同步前也不阻塞后续查询，定向复跑 **1/1 通过**。这是保持既有行为的覆盖补齐，没有将测试夹具的等待时机修正记为产品缺陷。
+
+- `node --import tsx --test --test-concurrency=4 test/*.test.ts`：**225/225 通过**，0 失败、取消或跳过，约 103 秒。
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- `npm run docs:check`：通过，107 份受跟踪 Markdown、458 个本地链接。
+- `git diff --cached --check`：通过。
+
+本次在 `development` 完成本地验证与提交；推送和 `development` → `main` PR 仍遵循用户明确授权流程。上述自动化结果不改变 #244 的真实双端回显和手机验收状态。
