@@ -26,22 +26,28 @@ async function readRequestMetrics(dataDir: string, conversationId: string) {
   return { requests: [...requests.values()], invalid };
 }
 
-/** Cumulative settled execution usage for this conversation; unknown counters stay unknown. */
+/** Accumulate known settled usage and disclose missing counters without treating them as zero. */
 export async function conversationUsage(dataDir: string, conversationId: string) {
   const { requests, invalid } = await readRequestMetrics(dataDir, conversationId);
   const settled = requests.filter(metric => metric.status !== "pending");
   const sum = (read: (metric: RequestMetric) => number | null) => {
-    const values = settled.map(read);
-    return invalid || !values.length || !values.every(token) ? null : values.reduce((total, value) => total + value, 0);
+    const values = settled.map(read).filter(token);
+    return invalid || !values.length ? null : values.reduce((total, value) => total + value, 0);
   };
   const input = sum(metric => metric.input);
   const output = sum(metric => metric.output);
   const cacheRead = sum(metric => metric.cacheRead);
+  const missing = {
+    input: settled.filter(metric => !token(metric.input)).length,
+    output: settled.filter(metric => !token(metric.output)).length,
+    cacheRead: settled.filter(metric => !token(metric.cacheRead)).length,
+    requests: settled.filter(metric => !token(metric.input) || !token(metric.output) || !token(metric.cacheRead)).length,
+  };
   // Match pi-telegram: CH describes the latest settled request, while counters accumulate.
   const latest = settled.at(-1);
   const total = latest && token(latest.input) && token(latest.cacheRead) && (latest.cacheWrite === null || token(latest.cacheWrite))
     ? latest.input + latest.cacheRead + (latest.cacheWrite ?? 0) : null;
-  return { input, output, cacheRead, cacheHit: !invalid && total !== null && total > 0 ? latest!.cacheRead! / total * 100 : null };
+  return { input, output, cacheRead, cacheHit: !invalid && total !== null && total > 0 ? latest!.cacheRead! / total * 100 : null, missing };
 }
 
 export async function cacheReport(dataDir: string, conversationId: string, batches: StoredBatch[]) {

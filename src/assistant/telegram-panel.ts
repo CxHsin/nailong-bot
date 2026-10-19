@@ -38,9 +38,11 @@ export function registerTelegramPanel(options: {
       !s.connected ? "Magpie 未连接。请检查本机 Magpie 连接配置。" : "Magpie 已连接";
     const failure = s.catalogStatus === "stale" ? "目录刷新失败；显示上次成功列表，可重试刷新。" :
       s.catalogStatus === "unavailable" ? "模型目录暂不可用，请刷新重试。" : "";
+    const usageCount = (field: "input" | "output" | "cacheRead") =>
+      count(s.usage[field]) + (s.usage[field] !== null && s.usage.missing[field] > 0 ? "*" : "");
     switch (view.page) {
       case "home":
-        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${count(s.usage.input)} ↓${count(s.usage.output)}\nCache: R${count(s.usage.cacheRead)} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
+        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${usageCount("input")} ↓${usageCount("output")}\nCache: R${usageCount("cacheRead")} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}${s.usage.missing.requests ? `\n* 仅已知用量 · ${s.usage.missing.requests} 条缺失` : ""}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
         if (s.status === "waiting_model") text += "\n等待选择可用模型；已接收输入保留。";
         if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";

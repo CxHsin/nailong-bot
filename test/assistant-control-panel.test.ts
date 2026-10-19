@@ -120,6 +120,7 @@ test("home summarizes real settled usage and current context across tools, model
     assert.match(latestPanel(f).text,/Tokens:<\/b> <code>↑1\.1k ↓200<\/code>/);
     assert.match(latestPanel(f).text,/Cache:<\/b> <code>R1\.9k CH50\.0%<\/code>/);
     assert.match(latestPanel(f).text,/Context:<\/b> <code>~0\.2%\/1\.0M<\/code>/);
+    assert.doesNotMatch(latestPanel(f).text,/\*|条缺失/);
     const snapshot = await f.app.controlSnapshot("telegram:private:42");
     assert.equal(snapshot.context.tokens,2100,"current context uses last request, not cumulative input");
     assert.equal((await f.app.controlSnapshot("cli:other")).usage.input,null);
@@ -132,6 +133,33 @@ test("home summarizes real settled usage and current context across tools, model
     await f.bot.handleUpdate(command(2306,"/reset")); await click(f,"确认重置"); await f.flush();
     assert.equal((await f.app.controlSnapshot("telegram:private:42")).context.tokens,0);
     assert.equal(f.requests.length,2,"controls never generate model usage");
+    assert.deepEqual(f.errors,[]);
+  } finally {await f.close();}
+});
+
+test("home shows known totals with compact per-field markers after missing usage and restart", async () => {
+  const f = await controlPanelFixture({provider: (_wire,response) => {
+    response.writeHead(200,{"content-type":"text/event-stream"});
+    response.end(`data: ${JSON.stringify({choices:[{index:0,delta:{content:"done"},finish_reason:"stop"}],
+      usage:f.requests.length === 1 ? {completion_tokens:7} :
+        {prompt_tokens:1000,completion_tokens:10,prompt_tokens_details:{cached_tokens:900}}})}\n\ndata: [DONE]\n\n`);
+  }});
+  try {
+    await f.bot.handleUpdate(command(2401,"PARTIAL_USAGE")); await f.flush();
+    await f.bot.handleUpdate(command(2402,"/start"));
+    assert.match(latestPanel(f).text,/Tokens:<\/b> <code>↑未知 ↓7<\/code>/);
+    assert.match(latestPanel(f).text,/Cache:<\/b> <code>R未知 CH未知<\/code>/);
+    assert.match(latestPanel(f).text,/\* 仅已知用量 · 1 条缺失/);
+    await f.bot.handleUpdate(command(2403,"KNOWN_USAGE")); await f.flush();
+    await f.bot.handleUpdate(command(2404,"/start"));
+    assert.match(latestPanel(f).text,/Tokens:<\/b> <code>↑100\* ↓17<\/code>/);
+    assert.match(latestPanel(f).text,/Cache:<\/b> <code>R900\* CH90\.0%<\/code>/);
+    assert.match(latestPanel(f).text,/\* 仅已知用量 · 1 条缺失/);
+    await f.reopen();
+    await f.bot.handleUpdate(command(2405,"/start"));
+    assert.match(latestPanel(f).text,/↑100\* ↓17/);
+    assert.match(latestPanel(f).text,/\* 仅已知用量 · 1 条缺失/);
+    assert.equal(f.requests.length,2,"opening the panel and reopening do not generate usage");
     assert.deepEqual(f.errors,[]);
   } finally {await f.close();}
 });
