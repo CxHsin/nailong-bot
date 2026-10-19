@@ -8,6 +8,8 @@ System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-co
 
 The Conversation Control Panel and Magpie Model Catalog follow [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md), [conclusion #242](https://github.com/CxHsin/nailong-bot/issues/242) and [spec #244](https://github.com/CxHsin/nailong-bot/issues/244). The official Telegram/CLI entry uses Magpie's catalog; Conversation-owned choices, thinking preferences, favorites and drafts persist in the existing data directory. Native Telegram controls remain available during requests and tools, and the next prepared request adopts new settings. The Agent plugin shares only the owner's Telegram main Conversation model. Automated behavior and live integration evidence are recorded in [control acceptance](docs/conversation-control-acceptance-20261018.md); actual plugin menu echo and phone acceptance remain pending. Magpie-side thinking controls are deferred under [#243](https://github.com/CxHsin/nailong-bot/issues/243).
 
+Conversation settings coordination follows [spec #251](https://github.com/CxHsin/nailong-bot/issues/251). The [coordination module](src/assistant/conversation-settings.ts) owns settings snapshots, per-Conversation synchronization, global propagation, Durable configuration, run eligibility and synchronization lifetime. Runtime owns routing and queue scheduling. Control queries retain the wait for settings propagation across all registered Conversations; Magpie persistence and Durable request checkpoints retain their existing responsibilities.
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.

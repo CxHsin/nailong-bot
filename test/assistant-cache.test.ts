@@ -28,7 +28,7 @@ async function reportFixture(records: RequestMetric[], batches: StoredBatch[] = 
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-test("conversation summary deduplicates pending, excludes auxiliary and preserves unknown counters", async () => {
+test("conversation summary accumulates known counters and tracks missing usage per field", async () => {
   const directory = await mkdtemp(join(tmpdir(),"conversation-usage-"));
   const path = join(directory,"executions",createHash("sha256").update("one").digest("hex"));
   try {
@@ -37,10 +37,23 @@ test("conversation summary deduplicates pending, excludes auxiliary and preserve
       metric("other",999,999,{conversationId:"other"}),metric("aux",999,999,{purpose:"auxiliary"})];
     const save = () => writeFile(join(path,"requests.jsonl"),records.map(record => JSON.stringify(record)).join("\n"));
     await save();
-    assert.deepEqual(await conversationUsage(directory,"one"),{input:100,output:10,cacheRead:900,cacheHit:900/1100*100});
-    records.push(metric("missing",null,null,{output:3}));await save();
-    assert.deepEqual(await conversationUsage(directory,"one"),{input:null,output:13,cacheRead:null,cacheHit:null});
-    assert.deepEqual(await conversationUsage(directory,"empty"),{input:null,output:null,cacheRead:null,cacheHit:null});
+    assert.equal((await conversationUsage(directory,"one")).input,100);
+    records.push(metric("missing",null,null,{output:3,status:"aborted"}));await save();
+    const partial = await conversationUsage(directory,"one");
+    assert.equal(partial.input,100,"a request without input usage must not hide earlier measured input");
+    assert.deepEqual(partial,{input:100,output:13,cacheRead:900,cacheHit:null,
+      missing:{input:1,output:0,cacheRead:1,requests:1}});
+    records.push(metric("recovered",50,150,{output:5}));await save();
+    assert.deepEqual(await conversationUsage(directory,"one"),{input:150,output:18,cacheRead:1050,cacheHit:75,
+      missing:{input:1,output:0,cacheRead:1,requests:1}});
+    assert.deepEqual(await conversationUsage(directory,"empty"),{input:null,output:null,cacheRead:null,cacheHit:null,
+      missing:{input:0,output:0,cacheRead:0,requests:0}});
+    records.splice(0,records.length,metric("failed",null,null,{output:null,status:"error"}));await save();
+    assert.deepEqual(await conversationUsage(directory,"one"),{input:null,output:null,cacheRead:null,cacheHit:null,
+      missing:{input:1,output:1,cacheRead:1,requests:1}});
+    records.push(metric("measured-zero",0,0,{output:0}));await save();
+    assert.deepEqual(await conversationUsage(directory,"one"),{input:0,output:0,cacheRead:0,cacheHit:null,
+      missing:{input:1,output:1,cacheRead:1,requests:1}});
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 

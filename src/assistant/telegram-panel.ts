@@ -38,9 +38,11 @@ export function registerTelegramPanel(options: {
       !s.connected ? "Magpie 未连接。请检查本机 Magpie 连接配置。" : "Magpie 已连接";
     const failure = s.catalogStatus === "stale" ? "目录刷新失败；显示上次成功列表，可重试刷新。" :
       s.catalogStatus === "unavailable" ? "模型目录暂不可用，请刷新重试。" : "";
+    const usageCount = (field: "input" | "output" | "cacheRead") =>
+      count(s.usage[field]) + (s.usage[field] !== null && s.usage.missing[field] > 0 ? "*" : "");
     switch (view.page) {
       case "home":
-        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${count(s.usage.input)} ↓${count(s.usage.output)}\nCache: R${count(s.usage.cacheRead)} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
+        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${usageCount("input")} ↓${usageCount("output")}\nCache: R${usageCount("cacheRead")} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}${s.usage.missing.requests ? `\n* 仅已知用量 · ${s.usage.missing.requests} 条缺失` : ""}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
         if (s.status === "waiting_model") text += "\n等待选择可用模型；已接收输入保留。";
         if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
@@ -91,10 +93,12 @@ export function registerTelegramPanel(options: {
         if (s.thinkingAdjusted) text += "\n能力已更新，原偏好不再支持，已调整为支持的等级。";
         break;
       case "works": {
+        // Queue order is oldest first; show recent work before paginating.
+        const works = s.works.toReversed();
         const offset = Math.max(0, view.offset ?? 0);
         text = `⏳ 工作列表\n\n${s.works.length ? `共 ${s.works.length} 项 · 点击查看进度与操作\n◽ 本轮结束仅表示处理结束，成果仍需核对。` : "暂无工作。"}`;
         const workIcons: Record<string, string> = { completed: "◽", cancelled: "🚫", paused: "⏸", running: "▶️", queued: "⌛" };
-        for (const work of s.works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${workIcons[work.status] ?? "•"} ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
+        for (const work of works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${workIcons[work.status] ?? "•"} ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
         const navigation: Button[] = [];
         if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
         if (offset + PAGE_SIZE < s.works.length) navigation.push(button("下一页", { ...view, offset: offset + PAGE_SIZE }));
@@ -130,7 +134,7 @@ export function registerTelegramPanel(options: {
         break;
     }
     if (failure) text += `\n${failure}`;
-    if (note && ["home", "cache", "session", "work"].includes(view.page)) text += `\n${note}`;
+    if (note && ["home", "cache", "session", "work", "works"].includes(view.page)) text += `\n${note}`;
     if (["cache", "session"].includes(view.page)) rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");

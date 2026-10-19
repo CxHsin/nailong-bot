@@ -40,6 +40,37 @@ test("user stop persists before abort, survives late completion and restart, and
   } finally {finish.resolve();await service.close();await rm(directory,{recursive:true,force:true});}
 });
 
+test("untargeted resume requires a choice across paused batches and only resumes one after restart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-resume-choice-"));
+  let service = await createQueuedAssistant({dataDir:directory,executor:{async execute(batch) {
+    return {status:batch.events[0]!.inputId === "first" ? "paused" : "needs_confirmation"};
+  }}});
+  try {
+    await service.receive({conversationId:"one",inputId:"first",text:"discuss a plan"}); await service.waitForIdle();
+    await service.receive({conversationId:"one",inputId:"second",text:"continue discussing"}); await service.waitForIdle();
+    const [first, second] = service.listBatches("one");
+    await service.close();
+    const seen: string[] = [];
+    service = await createQueuedAssistant({dataDir:directory,executor:{async execute(batch) {
+      seen.push(batch.events[0]!.inputId); return {status:"completed"};
+    }}});
+    service.start();
+    const result = await service.resume("one");
+    await service.waitForIdle();
+    assert.deepEqual(seen, []);
+    assert.deepEqual(result, {resumed:false,paused:2});
+    assert.equal(service.getBatch(first!.id)?.status, "paused");
+    assert.equal(service.getBatch(second!.id)?.status, "needs_confirmation");
+    assert.deepEqual(await service.resume("other", first!.id), {resumed:false,paused:0});
+    assert.deepEqual(await service.resume("one", second!.id), {resumed:true,paused:1});
+    await service.waitForIdle(); assert.deepEqual(seen, ["second"]);
+    assert.equal(service.getBatch(first!.id)?.status, "paused");
+    assert.deepEqual(await service.resume("one"), {resumed:true,paused:1});
+    await service.waitForIdle(); assert.deepEqual(seen, ["second", "first"]);
+    assert.deepEqual(await service.resume("one"), {resumed:false,paused:0});
+  } finally {await service.close();await rm(directory,{recursive:true,force:true});}
+});
+
 test("resume during user stop waits for the interrupted executor before reopening its batch", async () => {
   const directory = await mkdtemp(join(tmpdir(), "nailong-stop-resume-"));
   const started = deferred(), finish = deferred(); let calls = 0;

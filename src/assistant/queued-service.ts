@@ -124,7 +124,8 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
     async resume(conversationId: string, batchId?: string) {
       const running = active.get(conversationId);
       if (running?.stopping && (!batchId || running.batch.id === batchId)) await running.promise;
-      queue.resume(conversationId, batchId); pump(conversationId);
+      const resumed = queue.resume(conversationId, batchId); pump(conversationId);
+      return resumed;
     },
     async close() {
       if (closed) return;

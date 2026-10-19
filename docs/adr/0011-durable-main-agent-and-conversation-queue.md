@@ -8,6 +8,8 @@ status: accepted
 
 2026-10-16，输入语义由 [ADR-0013](0013-contextual-input-routing.md)局部替代：采用上下文意图判断与自然语言补充，移除用户输入入口 `/steer`；队列、Pi Durable 和 herdr 分工保留。下文的普通 FIFO 与显式 `/steer` 记录原设计及其验收；现行行为与验证状态见 [路由验收记录](../contextual-input-routing-acceptance-20261016.md)，历史确认过程保留。
 
+2026-10-19，按用户报告的[恢复范围缺陷 #256](https://github.com/CxHsin/nailong-bot/issues/256)，收窄下文无 ID `/resume` 恢复全部暂停项的行为：只有一项暂停批次时直接恢复，多项时保留暂停并要求明确选择。历史原输入不会因为恢复就变成当前新指令，恢复也不批准助手后来提出的实施方案；后续模型输入携带仍暂停目标的事实及当前执行范围。原有 `/stop` 只暂停当前主执行、其他独立输入仍可处理的边界保留。
+
 2026-10-15，在完成 [9 项接入实验](../research/pi-durable-integration-2026-10-15.md)并澄清现有工具用途后，用户确认采用 Pi Durable 1.2.0 承载主 agent 的持久执行，由 nailong 自有持久队列负责事件路由、去重、会话选择、优先级、同级 FIFO 与合批。[行为结论与规格确认记录](../research/event-queue-durable-workflow-2026-10-15.md)记录完整范围。此决定替代 [ADR-0010](0010-native-pi-assistant.md)中暂缓主 agent 持久工作流与采用原生 steering 接收新输入的方向。
 
 选择 Pi Durable 可复用模型和工具步骤的持久执行能力，避免在旧 SDK 上自建全部工具恢复协议，也无需部署 Temporal 的独立 Service/Worker。代价是 Harness、现有会话和工具接口需要衔接；实验尚未验证所有队列/执行器崩溃交接窗口，亦不提供跨系统 exactly-once 或外部效果回滚保证。

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { createAssistant } from "../src/assistant/runtime.js";
 import { join } from "node:path";
 import { Type } from "typebox";
-import { assistantFixture } from "./fixtures/assistant.js";
+import { assistantFixture, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => {resolve=done;}); return {promise,resolve}; }
@@ -29,6 +29,94 @@ test("failed queue startup releases the service lock so corrected data can start
     await app.waitForIdle();
     assert.match(replies.join("\n"), /\/reset/);
   } finally { await app?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("failed Magpie queue startup releases dependencies so the same directory can reopen", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "nailong-magpie-startup-failure-"));
+  const dataDir = join(directory, "fresh");
+  const configPath = join(directory, "magpie.json");
+  await mkdir(dataDir);
+  await writeFile(configPath, "{}");
+  const queueFile = join(dataDir, "queue.sqlite");
+  await mkdir(queueFile);
+  const options = { cwd: directory, dataDir, magpie: { configPath } };
+  let app: Awaited<ReturnType<typeof createAssistant>> | undefined;
+  try {
+    await assert.rejects(createAssistant(options), /unable to open database file/);
+    await rm(queueFile, { recursive: true });
+    app = await createAssistant(options);
+    const snapshot = await app.controlSnapshot("one");
+    assert.equal(snapshot.connected, false);
+    assert.equal(snapshot.status, "waiting_model");
+    await app.close();
+    app = await createAssistant(options);
+    assert.equal((await app.controlSnapshot("one")).selectedModel, undefined);
+  } finally { await app?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("historical model injection retains its control snapshot and rejects Magpie settings operations", async () => {
+  const requests: Array<Wire & { model: string }> = [];
+  const f = await assistantFixture((wire, response) => {
+    requests.push(wire as typeof requests[number]);
+    sendChatCompletion(response, "legacy request complete");
+  });
+  try {
+    const snapshot = await f.app.controlSnapshot("legacy");
+    assert.equal(snapshot.selectedModel, "local");
+    assert.deepEqual(snapshot.catalog.map(model => [model.id, model.displayName]), [["local", "local"]]);
+    assert.equal(snapshot.connected, true);
+    assert.equal(snapshot.pending, false);
+    for (const action of [
+      { type: "model", model: "local" }, { type: "thinking", level: "high" },
+      { type: "favorite", model: "local", enabled: true }, { type: "draft", enabled: false },
+    ] as const) await assert.rejects(f.app.control("legacy", action), /旧主模型配置已退役/);
+    assert.equal(requests.length, 0);
+    await f.app.receive({ conversationId: "legacy", inputId: "work", text: "LEGACY_GOAL" });
+    await f.app.waitForIdle();
+    assert.deepEqual(requests.map(request => request.model), ["local"]);
+  } finally { await f.close(); }
+});
+
+test("closing during settings propagation waits, preserves queued FIFO and releases dependencies for reopening", { timeout: 15000 }, async t => {
+  const entered = deferred(), release = deferred();
+  const requests: Wire[] = [];
+  const f = await assistantFixture((wire, response) => {
+    requests.push(wire);
+    sendChatCompletion(response, "restored FIFO complete");
+  }, async () => ({ reportFailure() {} }), {
+    catalog: [{ id: "model/A", reasoning: false }], selectedModel: null, primaryConversationId: "primary",
+  });
+  const originalFetch = globalThis.fetch;
+  let fetchMock: ReturnType<typeof t.mock.method<typeof globalThis, "fetch">> | undefined;
+  try {
+    await f.app.receive({ conversationId: "primary", inputId: "first", text: "FIRST_SAVED_GOAL" });
+    await f.app.receive({ conversationId: "primary", inputId: "second", text: "SECOND_SAVED_GOAL" });
+    await f.app.waitForIdle();
+    fetchMock = t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url === `${f.baseUrl}/models`) { entered.resolve(); await release.promise; }
+      return originalFetch(input, init);
+    });
+    await f.writeMagpie({ model: "magpie/model/A" });
+    const query = f.app.controlSnapshot("primary", { refresh: true }).then(() => {}, () => {});
+    await entered.promise;
+    let closed = false;
+    const closing = f.app.close().then(() => { closed = true; });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(closed, false, "close cannot release dependencies while the settings read is held");
+    assert.equal(requests.length, 0);
+    release.resolve();
+    await closing;
+    await query;
+    assert.equal(requests.length, 0, "finishing settings during close must not wake saved work");
+    fetchMock.mock.restore();
+    await f.reopen();
+    await f.app.waitForIdle();
+    assert.equal(requests.length, 1);
+    const messages = JSON.stringify(requests[0]!.messages);
+    assert.ok(messages.indexOf("FIRST_SAVED_GOAL") >= 0);
+    assert.ok(messages.indexOf("FIRST_SAVED_GOAL") < messages.indexOf("SECOND_SAVED_GOAL"));
+  } finally { release.resolve(); fetchMock?.mock.restore(); await f.close(); }
 });
 
 test("priority preemption preserves the background generation retry budget", { timeout: 30000 }, async () => {

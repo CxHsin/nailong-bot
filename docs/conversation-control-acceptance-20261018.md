@@ -75,7 +75,9 @@
 
 用户继续要求 `/stop` 暂停当前请求，并按截图补上 Status、Tokens、Cache、Context 四行摘要。此次变更基于 `8b9b682`。暂停命令走即时查询控制路径，先持久保存当前批次为暂停，再协作中断；迟到的执行结果不能覆盖暂停决定，未知外部效果仍保留 `needs_confirmation`。暂停跨重启保持，明确 `/resume` 才续接该批次；停止中立即收到 resume 时等待原执行释放后再恢复。其他排队输入仍可处理，helper 沿工作详情单独控制。Telegram 启动注册的命令菜单和共享帮助同时补上 `/stop`。
 
-首页摘要按固定参考版本 [pi-telegram 的统计实现](https://github.com/llblab/pi-telegram/blob/6b4db8a573416e2cbe60d44f6e38847cb6392348/lib/status.ts#L1766)呈现：Tokens ↑/↓ 累计当前会话已结算主执行请求的非缓存输入/输出，Cache R 累计缓存读取，CH 取最近一条已结算请求的缓存读入/合计输入比例。请求 ID 替换 pending 记录，不重复计算；辅助压缩、记忆及其他会话不计入。数值缺失显示未知，Context 使用 SDK 对当前活动上下文的估算并标注 `~`，以实际模型目录窗口为分母；切换模型、reset 和重启后重新读取，不用累计输入替代占用。
+首页摘要按固定参考版本 [pi-telegram 的统计实现](https://github.com/llblab/pi-telegram/blob/6b4db8a573416e2cbe60d44f6e38847cb6392348/lib/status.ts#L1766)呈现：Tokens ↑/↓ 累计当前会话已结算主执行请求的非缓存输入/输出，Cache R 累计缓存读取，CH 取最近一条已结算请求的缓存读入/合计输入比例。请求 ID 替换 pending 记录，不重复计算；辅助压缩、记忆及其他会话不计入。累计用量按字段累加已知值，部分缺失的数值后加 `*`，并显示一行 `* 仅已知用量 · N 条缺失`；N 按缺少输入、输出或缓存读取任一项的请求去重计算，完整字段不加标记。完全没有已知值仍显示未知，已测量的零显示 0；不可解析的记录仍令累计不可用。CH 保留最近请求口径。Context 使用 SDK 对当前活动上下文的估算并标注 `~`，以实际模型目录窗口为分母；切换模型、reset 和重启后重新读取，不用累计输入替代占用。
+
+2026-10-19，[修复 #258](https://github.com/CxHsin/nailong-bot/issues/258)补上历史失败/取消请求缺用量后的累计显示与首页标记。`node --import tsx --test test/assistant-cache.test.ts test/assistant-control-panel.test.ts` **35/35 通过**，覆盖按字段缺失、后续正常用量、零与未知、原请求去重和排除范围，以及 Telegram 首页跨重启显示。临时恢复“任一缺失使累计未知”的旧逻辑后，回归用例因实际 `null`、期望 `100` 失败；随后恢复修复。类型检查和文档链接检查通过。此验证使用受控 Telegram/模型接口，不代表运行中的 Bot 已加载新代码。
 
 新增组合验证覆盖真实 HTTP 请求挂起时即时 stop、鉴权、暂停后重启与重复投递、显式 resume、无活动请求，以及多次工具请求的累计用量、最近请求命中率、当前上下文和窗口变化。队列用例验证迟到完成不能撤销暂停、停止中立即 resume、独立工作仍可运行与未知效果状态保留。强杀子进程用例停在暂停已入库但底层 abort 尚未送达的窗口，重启保持暂停，明确 resume 后才发送下一次真实受控 HTTP 请求。
 
@@ -91,3 +93,29 @@
 - 手机上的工作详情、取消/继续、reset 确认、草稿与最终文件交付。
 
 因此 #244 的真实链路验收尚不完整。模拟网关通过不能替代以上结果，也不能把本地代码提交视为生产部署或 Issue 已关闭。
+
+## 设置协调职责收拢（2026-10-19）
+
+规格 [#251](https://github.com/CxHsin/nailong-bot/issues/251)，实现与验证任务为 [#252](https://github.com/CxHsin/nailong-bot/issues/252)、[#253](https://github.com/CxHsin/nailong-bot/issues/253)、[#254](https://github.com/CxHsin/nailong-bot/issues/254)。基准为 `5d779b1`，集成分支为 `development`。本次保留既有设置行为、公开入口与数据格式；当前职责见 [ADR-0016](adr/0016-magpie-catalog-and-conversation-settings.md)。上文真实双端回显和手机验收的状态沿用原记录。
+
+既有 Assistant 与 Telegram 用例继续验证请求冻结、工具效果复用、后续 prepare 采用最终设置、全局连接与目录变化、FIFO、暂停显式续接、持久保存和旧协议注入。新增受控用例通过真实 Magpie 目录 HTTP 与临时 SQLite，在协调 module 的内部组合 seam 延迟或拒绝 Durable 配置，观察查询完成、配置结果、可运行性与关闭时机；不检查内部缓存或 Promise 集合。
+
+| 迁移风险与观察结果 | 证据入口 |
+| --- | --- |
+| 查询等待其他 Conversation，等待期间新增的配置任务同样阻止查询完成 | `conversation-settings.test.ts` 的 `a query waits for other Conversations…` |
+| 全局传播拒绝使查询拒绝并报告原错误；后续成功同步不被历史失败阻塞，不发送模型生成请求 | 同文件的 `a rejected global propagation…` |
+| 初始 Magpie 观测不提前配置执行器；恢复时各会话采用已保存模型，配置完成后才通知可运行 | 同文件的 `restored Conversations…`；既有 `assistant-model-control.test.ts` 验证重启后的原输入 FIFO |
+| drain 容纳拒绝和等待期间新增任务；idle 只等待调用时的当前任务 | `conversation-settings.test.ts` 的 `draining survives…` 与 `waiting for idle…` |
+| stop 后不再通知路由放行，已开始配置仍收尾，排队与后来新增的同步拒绝仍被排空 | 同文件的 `stopping coordination…` |
+| 真实 Assistant 关闭等待被延迟的目录读取，完成时不唤醒保存的输入；同目录重开后按原 FIFO 继续 | `assistant-runtime.test.ts` 的 `closing during settings propagation…` |
+| Magpie 已建立但 Queue System 初始化失败时释放依赖，同目录可再次创建；历史配置快照、设置拒绝和实际请求保持兼容 | 同文件的 `failed Magpie queue startup…` 与 `historical model injection…` |
+
+全部源码与测试写入者确认停写后，受检状态为 `5d779b1` 加本次暂存的协调 module、runtime 与测试差异；综合检查期间及完成后未再修改这些输入。新增 9 项测试，定向验证两个受影响文件 **16/16 通过**；新增断言验证已结束的历史失败在成功重同步前也不阻塞后续查询，定向复跑 **1/1 通过**。这是保持既有行为的覆盖补齐，没有将测试夹具的等待时机修正记为产品缺陷。
+
+- `node --import tsx --test --test-concurrency=4 test/*.test.ts`：**225/225 通过**，0 失败、取消或跳过，约 103 秒。
+- `npm run typecheck`：通过。
+- `npm run build`：通过。
+- `npm run docs:check`：通过，107 份受跟踪 Markdown、458 个本地链接。
+- `git diff --cached --check`：通过。
+
+本次在 `development` 完成本地验证与提交；推送和 `development` → `main` PR 仍遵循用户明确授权流程。上述自动化结果不改变 #244 的真实双端回显和手机验收状态。
