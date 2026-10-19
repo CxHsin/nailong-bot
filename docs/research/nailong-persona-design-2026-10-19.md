@@ -2,6 +2,8 @@
 
 2026-10-19，用户通过 `grill-with-docs` 逐轮确认以下产品方向，结论发布为 [Issue #259](https://github.com/CxHsin/nailong-bot/issues/259)。本文记录讨论结论，尚未实现或验证运行行为；后续规格与实施任务以 GitHub Issues 关联。
 
+正式规格为 [Issue #260](https://github.com/CxHsin/nailong-bot/issues/260)，见[本地规格归档](nailong-persona-spec-2026-10-19.md)。规格发布不代表功能已经实现。
+
 ## 问题与定位
 
 用户希望采纳 Gemini 提出的 Telegram 奶龙化方案，让私人助手在聊天、多媒体表达和等待反馈中更有性格，同时保留可靠的工作能力。
