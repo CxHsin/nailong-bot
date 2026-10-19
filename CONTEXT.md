@@ -10,6 +10,8 @@ The Conversation Control Panel and Magpie Model Catalog follow [ADR-0016](docs/a
 
 Conversation settings coordination follows [spec #251](https://github.com/CxHsin/nailong-bot/issues/251). The [coordination module](src/assistant/conversation-settings.ts) owns settings snapshots, per-Conversation synchronization, global propagation, Durable configuration, run eligibility and synchronization lifetime. Runtime owns routing and queue scheduling. Control queries retain the wait for settings propagation across all registered Conversations; Magpie persistence and Durable request checkpoints retain their existing responsibilities.
 
+The accepted extension in [conclusion #259](https://github.com/CxHsin/nailong-bot/issues/259) adds a global Routing Model selector to the Conversation Control Panel, using Magpie's catalog independently of the main model. It preserves service-wide scope and applies changes to the next routing judgment. This is a design decision awaiting implementation; current routing still uses fixed startup configuration. See the [design record](docs/research/nailong-persona-design-2026-10-19.md) and [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md).
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -25,6 +27,8 @@ Conversation settings coordination follows [spec #251](https://github.com/CxHsin
 **Conversation Control Panel**: A unified Telegram interface for viewing a Conversation's status, choosing the main assistant's model and thinking level, and accessing conversation operations.
 
 **Model Catalog**: The models offered for selection by a connected model service, together with their known capabilities. The Magpie catalog reflects the models the user has enabled there.
+
+**Routing Model**: The model that interprets an Input Event's relationship to existing work and proposes Routing Actions. Its selection is shared across the Assistant Service's Conversations and is independent of each Conversation's main model.
 
 **Work Directory**: Default directory for relative paths and project instructions. Reopening a conversation preserves it. It is separate from Session storage and is not a sandbox.
 

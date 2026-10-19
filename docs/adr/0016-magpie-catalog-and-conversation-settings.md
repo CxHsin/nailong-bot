@@ -14,6 +14,12 @@ status: accepted
 
 正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](../research/conversation-control-panel-spec-2026-10-18.md)。规格通过 Assistant Service 与 Telegram 的组合入口验证实际请求、同步、持久状态和工作操作，真实 Magpie 回显另需实际接入证据。
 
+## 后续设计调整：全局路由模型也使用 Magpie 目录
+
+2026-10-19，用户在[设计结论 #259](https://github.com/CxHsin/nailong-bot/issues/259)中确认：`/start` 增加独立的“全局路由模型”选择入口，与主模型共用 Magpie 目录，但分别保存选择。路由模型沿用整个 Assistant Service 共用的范围，不按 Conversation 分开；切换从下一次路由判断生效，重启后保留，不重新执行已有判断或改变工作状态。完整结论见[讨论归档](../research/nailong-persona-design-2026-10-19.md)。
+
+这项决定扩展前文“仅迁移主模型目录，保留独立意图模型配置”的范围，以统一模型来源和面板管理为收益，同时保留两类模型的职责及选择独立性。以下实现记录描述现役代码：路由模型仍通过独立启动配置创建，新的目录接入与热切换尚待规格和实现。
+
 ## 实现状态
 
 2026-10-18，实现任务 [#245](https://github.com/CxHsin/nailong-bot/issues/245)、[#248](https://github.com/CxHsin/nailong-bot/issues/248)、[#246](https://github.com/CxHsin/nailong-bot/issues/246)已接入现役 Assistant Service、Queue System、SQLite 和 Pi Durable；正式 Telegram/CLI 入口只从 Magpie 选择主模型，旧逐模型环境项仅保留独立意图分类的用途。`controlSnapshot` / `control` 提供统一查询与操作，原生面板复用这些操作；请求 checkpoint 冻结设置，后续 prepare 读取新选择，已确认工具结果和上下文保持。
