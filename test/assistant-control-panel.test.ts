@@ -350,6 +350,40 @@ test("turning drafts off during a streamed response stops later previews while f
   } finally { proceed.resolve(); await f.close(); }
 });
 
+test("work list shows newest first across pages and restart without changing FIFO queue order", async () => {
+  const f = await controlPanelFixture();
+  const summaries = Array.from({ length: 8 }, (_, index) => `ORDER_WORK_${index + 1}`);
+  const displayedWorks = () => latestPanel(f).buttons.filter(button => button.text.includes("ORDER_WORK_")).map(button => button.text);
+  const newestPage = summaries.slice(2).reverse().map(summary => `◽ ${summary}`);
+  const oldestPage = summaries.slice(0, 2).reverse().map(summary => `◽ ${summary}`);
+  try {
+    for (const [index, summary] of summaries.entries()) {
+      await f.bot.handleUpdate(command(index + 1, summary));
+      await f.flush();
+    }
+    await f.bot.handleUpdate(command(9, "/start"));
+    await click(f, "工作列表");
+    assert.deepEqual(displayedWorks(), newestPage);
+    await click(f, "下一页");
+    assert.deepEqual(displayedWorks(), oldestPage);
+    assert.ok(!latestPanel(f).buttons.some(button => button.text === "下一页"));
+    await click(f, "上一页");
+    assert.deepEqual(displayedWorks(), newestPage);
+    await click(f, "ORDER_WORK_8");
+    assert.match(latestPanel(f).text, /工作详情<\/b>\nORDER_WORK_8\n目标：/);
+    await click(f, "返回工作列表");
+    assert.deepEqual(displayedWorks(), newestPage);
+    assert.deepEqual((await f.app.controlSnapshot("telegram:private:42")).works.map(work => work.summary), summaries);
+    await f.reopen();
+    await f.bot.handleUpdate(command(10, "/work"));
+    assert.deepEqual(displayedWorks(), newestPage);
+    await click(f, "下一页");
+    assert.deepEqual(displayedWorks(), oldestPage);
+    assert.equal(f.requests.length, summaries.length);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
+
 test("work details identify one queued target and cancellation preserves other FIFO work", { timeout: 20000 }, async () => {
   const entered = gate(); const release = gate();
   const f = await controlPanelFixture({ provider: async (_wire, response) => {

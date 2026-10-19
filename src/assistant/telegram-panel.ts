@@ -91,10 +91,12 @@ export function registerTelegramPanel(options: {
         if (s.thinkingAdjusted) text += "\n能力已更新，原偏好不再支持，已调整为支持的等级。";
         break;
       case "works": {
+        // Queue order is oldest first; show recent work before paginating.
+        const works = s.works.toReversed();
         const offset = Math.max(0, view.offset ?? 0);
         text = `⏳ 工作列表\n\n${s.works.length ? `共 ${s.works.length} 项 · 点击查看进度与操作\n◽ 本轮结束仅表示处理结束，成果仍需核对。` : "暂无工作。"}`;
         const workIcons: Record<string, string> = { completed: "◽", cancelled: "🚫", paused: "⏸", running: "▶️", queued: "⌛" };
-        for (const work of s.works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${workIcons[work.status] ?? "•"} ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
+        for (const work of works.slice(offset, offset + PAGE_SIZE)) rows.push([button(`${workIcons[work.status] ?? "•"} ${work.summary}`.slice(0, 90), { page: "work", target: work.id })]);
         const navigation: Button[] = [];
         if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
         if (offset + PAGE_SIZE < s.works.length) navigation.push(button("下一页", { ...view, offset: offset + PAGE_SIZE }));
