@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { capabilityEnvironment } from "../agent/capability-config.js";
-import { modelEnvironment } from "../agent/model-config.js";
 import { connectMcp } from "../agent/mcp-catalog.js";
 import { connectTinyfish } from "../agent/tinyfish.js";
 import { createAssistant } from "./runtime.js";
@@ -11,8 +10,6 @@ import type { IntentOptions } from "./intent.js";
 
 export function intentEnvironment(env: NodeJS.ProcessEnv): IntentOptions {
   const intent: IntentOptions = {};
-  const model = env.ASSISTANT_INTENT_MODEL?.trim();
-  if (model) intent.model = model;
   const fields = { timeoutMs: "TIMEOUT_MS", inputTokens: "INPUT_TOKENS", outputTokens: "OUTPUT_TOKENS", recentTurns: "RECENT_TURNS" } as const;
   for (const [key, suffix] of Object.entries(fields)) {
     const name = `ASSISTANT_INTENT_${suffix}`;
@@ -49,7 +46,6 @@ export async function assistantEnvironment(
   const contextConfig = contextInput as Pick<Parameters<typeof createAssistant>[0], "archive" | "memory" | "media" | "compaction">;
   const capabilities = await capabilityEnvironment(env);
   const intent = intentEnvironment(env);
-  const intentModels = intent.model ? modelEnvironment({...env,MODEL_NAMES:intent.model,MODEL_DEFAULT:intent.model}) : {defaultModel:"",models:[]};
   const telegramOwner = (env.AGENT_TELEGRAM_USER_ID ?? env.TELEGRAM_USER_ID)?.trim();
   const connections: Awaited<ReturnType<typeof connectMcp>>[] = [];
   let web: Awaited<ReturnType<typeof connectTinyfish>> | undefined;
@@ -62,7 +58,6 @@ export async function assistantEnvironment(
       ...contextConfig,
       dataDir,
       cwd,
-      modelConfiguration: intentModels,
       magpie: {configPath:env.NAILONG_MAGPIE_CONFIG?.trim(),primaryConversationId:telegramOwner ? `telegram:private:${telegramOwner}` : undefined},
       intent,
       prompt,

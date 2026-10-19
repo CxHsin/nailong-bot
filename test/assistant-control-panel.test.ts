@@ -25,8 +25,11 @@ test("Telegram /start opens owner conversation controls without a model request"
     assert.match(panel.text!, /Tokens:<\/b> <code>↑未知 ↓未知<\/code>/);
     const labels = panel.reply_markup.inline_keyboard.flat().map(b => b.text).join(" ");
     assert.match(labels, /模型：local/); assert.match(labels, /工作/); assert.match(labels, /设置/);
-    assert.equal(panel.reply_markup.inline_keyboard.length, 3, "non-reasoning models hide the thinking row");
-    assert.ok(panel.reply_markup.inline_keyboard.every(row => row.length === 1));
+    assert.match(labels, /缓存统计/);
+    assert.match(labels, /饱食/);
+    assert.match(labels, /投喂/);
+    assert.match(labels, /全局路由模型/);
+    assert.doesNotMatch(labels, /思考等级/, "non-reasoning models hide the thinking row");
     assert.equal(requests, 0);
   } finally { await f.close(); }
 });
@@ -221,7 +224,6 @@ test("panel buttons navigate and change settings in one Telegram message without
   try {
     await f.bot.handleUpdate(command(2001, "/start"));
     const original = latestPanel(f);
-    await click(f, "设置");
     await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
     assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1, "cache navigation must reuse the original panel");
     await click(f, "返回首页");
@@ -311,7 +313,7 @@ test("busy model controls acknowledge immediately and only the last selected set
     assert.match(panel.text, /实际请求：provider\/A · medium/); assert.match(panel.text, /待生效/);
     assert.equal(f.requests.length, 1);
     assert.ok(f.sent.some(s => s.method === "answerCallbackQuery"));
-    await click(f, "设置"); await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
+    await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
     await f.bot.handleUpdate(command(5, "/model")); await click(f, "详情与收藏"); await click(f, "Alpha"); await click(f, "加入常用"); await click(f, "返回模型列表"); await click(f, "常用模型");
     assert.equal(f.requests.length, 1);
     release.resolve(); await f.flush();

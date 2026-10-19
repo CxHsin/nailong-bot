@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { ReplyMessage } from "../application/app-types.js";
+import type { TelegramMaterial } from "./persona.js";
 
 export type QueueInput = {
   conversationId: string;
@@ -17,6 +18,7 @@ export type QueueInput = {
   replyToInputId?: string;
   receivedAt?: number;
   runtimeMaterials?: string[];
+  telegram?: TelegramMaterial;
   targetId?: string;
   actionText?: string;
 };

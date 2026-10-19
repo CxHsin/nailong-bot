@@ -74,8 +74,6 @@ test("official configuration rejects missing or blank base instructions before c
   }
 });
 
-test("official entry validates independent intent credentials without requiring a main-model alias", async () => {
-  await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_MODEL: "router" }), /API Key|分类模型|模型别名/);
-  await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_MODEL: "not-a-valid-alias" }), /别名/);
+test("official entry still validates the routing request budget before startup", async () => {
   await assert.rejects(assistantEnvironment({ AGENT_SYSTEM_PROMPT: "Valid base rules", ASSISTANT_INTENT_TIMEOUT_MS: "0" }), /正整数/);
 });

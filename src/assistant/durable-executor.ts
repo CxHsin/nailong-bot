@@ -383,6 +383,30 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    async generateStartup(conversationId: string, prepared: { model: ModelConfig; thinking?: string }, signal: AbortSignal) {
+      // A separate catalog shares the provider adapter and metrics, but never opens a Durable Conversation.
+      const directory = join(rootDirectory, createHash("sha256").update(conversationId).digest("hex"));
+      await mkdir(directory, { recursive: true });
+      const catalog = durableModels({ defaultModel: prepared.model.alias, models: [prepared.model] }, {
+        conversationId, beforeRequest: options.beforeModelRequest,
+        record(metric) {
+          appendFileSync(join(directory, "requests.jsonl"), JSON.stringify(metric) + "\n");
+          if (metric.status !== "pending") options.onRequestMetrics?.(metric);
+        },
+      });
+      const system = [options.prompt ?? "Follow SELF and current user instructions. Report only actual results.",
+        memory.currentSelf(options.workDir?.(conversationId) ?? cwd)].filter(Boolean).join("\n\n");
+      const response = await catalog.models.completeSimple(catalog.select().model, { messages: [
+        { role: "system", timestamp: Date.now(), content: system },
+        { role: "user", timestamp: Date.now(), content: `服务启动事件：Telegram 私聊与会话控制面板已经初始化。请给主人生成一句简短的奶龙上线招呼，最多 120 字。只描述现在上线；不宣称旧工作已完成或已恢复。此次独立模型测试使用 ${prepared.model.model}，thinking=${prepared.thinking ?? "off"}；这不验证之后切换的模型。只返回招呼正文。` },
+      ] }, { maxTokens: 200, maxRetries: 0, signal,
+        reasoning: (prepared.thinking === "off" ? undefined : prepared.thinking) as import("@earendil-works/pi-ai").ThinkingLevel | undefined });
+      signal.throwIfAborted();
+      const text = response.content.filter(part => part.type === "text").map(part => part.text).join("\n").trim();
+      if (response.stopReason !== "stop" || !text || text.length > 500 || response.content.some(part => part.type === "toolCall"))
+        throw new Error(response.errorMessage ?? "启动模型测试未返回有效短文本");
+      return text;
+    },
     async contextUsage(conversationId: string) {
       const opening = conversations.get(conversationId);
       if (!opening) return undefined;
@@ -449,7 +473,10 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       const emitted = new Map<number, Promise<void>>();
       const replyId = `${batch.conversationId}:draft:${batch.requestKey}`;
       const parts = new Map<number, string>();
-      const preview = () => options.onPreview?.({ conversationId: batch.conversationId, replyId, text: [...parts.entries()].sort(([a], [b]) => a-b).map(([,text]) => text).join("\n") });
+      const preview = () => {
+        const text = [...parts.entries()].sort(([a], [b]) => a-b).map(([,text]) => text).join("\n");
+        if (text.trim()) options.onPreview?.({ conversationId: batch.conversationId, replyId, text });
+      };
       function output(entry: EntryRecord): Promise<void> {
         if (entry.id < floor) return Promise.resolve();
         const pending = emitted.get(entry.id);
@@ -481,7 +508,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           if (event.type === "message_end") {
             const answer = event.entry.model?.find((message) => message.role === "assistant");
             if (answer) { answer.content.forEach((part,index) => { if (part.type === "text") parts.set(index,part.text); }); preview(); }
-            await output(event.entry); options.onPreview?.({ conversationId: batch.conversationId, replyId });
+            await output(event.entry);
           }
           if (event.type === "snapshot") for (const entry of event.entries) await output(entry);
           if (event.type === "auto_retry_start") await controls.emit({ conversationId: batch.conversationId, type: "text",
