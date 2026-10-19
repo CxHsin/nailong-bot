@@ -46,6 +46,10 @@ Conversation settings coordination follows [spec #251](https://github.com/CxHsin
 
 **SELF**: The current authoritative definition of the assistant's identity, persona, interaction principles and sourced relationship/expression understanding. Local configuration remains distinguishable from original user evidence. Current SELF and an actual generation's frozen snapshot are different facts.
 
+**Persona Expression**: The Personal Agent's nailong manner of speaking and interacting while remaining a reliable assistant. Work-status feedback reflects actual events; conversational expression may be chosen by the agent to suit the context.
+
+**Satiety**: The Personal Agent's playful state of fullness, used for feeding interactions and persona expression. It does not reduce work capability, accuracy or availability, and does not require feeding before work can continue.
+
 **Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
 
 **Memory Snapshot**: Actual resident memory material saved for one context generation. Ordinary changes append immediately; compaction or reset starts a new snapshot. Forgetting invalidates affected snapshots, recalled material and derived summaries immediately.
