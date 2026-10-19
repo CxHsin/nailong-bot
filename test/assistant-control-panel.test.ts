@@ -62,6 +62,44 @@ test("Telegram stop aborts a live request immediately, persists pause and ignore
   } finally {await f.close();}
 });
 
+test("resume with several paused goals asks for a target and later discussion retains pause and scope facts", async () => {
+  const entered = [gate(), gate()];
+  const f = await controlPanelFixture({provider: (_wire, response) => {
+    if (f.requests.length <= 2) entered[f.requests.length - 1]!.resolve();
+    else sendChatCompletion(response, "DISCUSSION_ONLY");
+  }});
+  try {
+    for (let index = 0; index < 2; index++) {
+      await f.bot.handleUpdate(command(2300 + index * 2, `DISCUSS_${index}`)); await entered[index]!.promise;
+      await f.bot.handleUpdate(command(2301 + index * 2, "/stop")); await f.flush();
+    }
+    await f.reopen();
+    await f.bot.handleUpdate(command(2304, "/resume")); await f.flush();
+    assert.match(latestPanel(f).text, /2 项暂停工作，尚未恢复任何工作/);
+    assert.equal(f.requests.length, 2);
+    assert.ok((await f.app.controlSnapshot("telegram:private:42")).works.every(work => work.status === "paused"));
+    await click(f, "DISCUSS_1"); await click(f, "继续此工作"); await f.flush();
+    assert.equal(f.requests.length, 3);
+    const resumed = JSON.stringify(f.requests[2]!.messages.at(-1));
+    assert.match(resumed, /原始历史输入/);
+    assert.match(resumed, /不代表用户批准了助手后来提出的实施方案/);
+    assert.match(resumed, /DISCUSS_1/);
+    const snapshot = await f.app.controlSnapshot("telegram:private:42");
+    assert.equal(snapshot.works.find(work => work.summary === "DISCUSS_0")?.status, "paused");
+    assert.equal(snapshot.works.find(work => work.summary === "DISCUSS_1")?.status, "completed");
+    await f.reopen();
+    await f.bot.handleUpdate(command(2305, "结合anthropic那篇evel来讲")); await f.flush();
+    assert.equal(f.requests.length, 4);
+    const discussion = JSON.stringify(f.requests[3]!.messages.at(-1));
+    assert.match(discussion, /已暂停的目标/);
+    assert.ok(discussion.includes(snapshot.works.find(work => work.summary === "DISCUSS_0")!.id));
+    assert.match(discussion, /本轮新消息不自动恢复这些目标/);
+    assert.match(discussion, /讨论、解释和方案建议不授权实施/);
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).works.find(work => work.summary === "DISCUSS_0")?.status, "paused");
+    assert.deepEqual(f.errors, []);
+  } finally {await f.close();}
+});
+
 test("home summarizes real settled usage and current context across tools, model switches, restart and reset", async () => {
   const f = await controlPanelFixture({models:[
     {id:"provider/A",context_window:1000000,max_output_tokens:16000},

@@ -341,9 +341,15 @@ export class PersistentAssistantQueue {
     });
   }
   resume(conversationId: string, batchId?: string) {
-    if (batchId) this.db.prepare("UPDATE batches SET status='preempted',retry_epoch=retry_epoch+1 WHERE id=? AND conversation=? AND status IN ('paused','needs_confirmation')").run(batchId, conversationId);
-    else this.db.prepare("UPDATE batches SET status='preempted',retry_epoch=retry_epoch+1 WHERE conversation=? AND status IN ('paused','needs_confirmation')").run(conversationId);
-    this.db.prepare("UPDATE works SET status='running' WHERE conversation=? AND status IN ('paused','needs_confirmation') AND batch_id IN (SELECT id FROM batches WHERE status='preempted')").run(conversationId);
+    return this.transaction(() => {
+      const candidates = this.db.prepare(`SELECT id FROM batches WHERE conversation=? AND status IN ('paused','needs_confirmation')${batchId ? " AND id=?" : ""}`)
+        .all(conversationId, ...(batchId ? [batchId] : [])) as Array<{id:string}>;
+      const selected = candidates[0];
+      if (!selected || candidates.length > 1) return {resumed:false,paused:candidates.length};
+      this.db.prepare("UPDATE batches SET status='preempted',retry_epoch=retry_epoch+1 WHERE id=?").run(selected.id);
+      this.db.prepare("UPDATE works SET status='running' WHERE batch_id=? AND status IN ('paused','needs_confirmation')").run(selected.id);
+      return {resumed:true,paused:1};
+    });
   }
   close() { this.db.close(); }
 }

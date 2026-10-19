@@ -132,7 +132,7 @@ export function registerTelegramPanel(options: {
         break;
     }
     if (failure) text += `\n${failure}`;
-    if (note && ["home", "cache", "session", "work"].includes(view.page)) text += `\n${note}`;
+    if (note && ["home", "cache", "session", "work", "works"].includes(view.page)) text += `\n${note}`;
     if (["cache", "session"].includes(view.page)) rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");

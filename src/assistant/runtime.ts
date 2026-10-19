@@ -150,9 +150,13 @@ export async function createAssistant(options: AssistantOptions) {
     contextMaterials: (id: string) => {
       const records = helperRecords(id).filter((record) => !record.delivered).map(({summary,...identity}) => identity);
       const cancelled = service?.listWorks(id).filter(work => work.status === "cancelled").map(work => work.id) ?? [];
+      const paused = service?.listWorks(id).filter(work => ["paused","needs_confirmation"].includes(work.status))
+        .map(({id,status}) => ({id,status})) ?? [];
       const deliveries = state.helperControls(id).map(({id,helperId,target,kind,state})=>({id,helperId,target,kind,state}));
-      return [records.length ? `已有外部委派，先核对真实身份与成果，不因新会话或重启重新派发：\n${JSON.stringify(records)}` : "",
+      return ["执行范围以本轮用户原话为准。讨论、解释和方案建议不授权实施；助手自己提出的计划、历史里的“继续”和恢复运行的控制操作，都不能代替用户对新实施方案的同意。",
+        records.length ? `已有外部委派，先核对真实身份与成果，不因新会话或重启重新派发：\n${JSON.stringify(records)}` : "",
         cancelled.length ? `已持久取消的目标 ${JSON.stringify(cancelled)}。停止安排其新步骤，保留已有成果；reset、resume 和 helper 回传均不复活目标。其他目标继续，复用已确认效果。` : "",
+        paused.length ? `已暂停的目标 ${JSON.stringify(paused)}。它们尚未获准恢复；本轮新消息不自动恢复这些目标，只处理当前原文明确交办的范围。不要把讨论或补充解释为继续执行旧计划。` : "",
         deliveries.length ? `已执行的用户控制进度（内部事实，不重复转交；sent 只证明发送，unknown 先核查）：${JSON.stringify(deliveries)}` : ""].filter(Boolean).join("\n");
     },
     onPreview: (preview: ReplyPreview) => {
@@ -200,8 +204,8 @@ export async function createAssistant(options: AssistantOptions) {
         return { status: "completed" as const };
       }
       if (/^\/resume(?:\s|$)/.test(command)) {
-        await service.resume(batch.conversationId, command.slice(7).trim() || undefined);
-        await control.emit({ conversationId: batch.conversationId, type: "text", text: "已请求继续暂停的工作；续接前将核对最新指令和已确认成果。" });
+        const result = await service.resume(batch.conversationId, command.slice(7).trim() || undefined);
+        await control.emit({ conversationId: batch.conversationId, type: "text", text: resumeText(result) });
         return { status: "completed" as const };
       }
       if (/^\/model(?:\s|$)/.test(command)) {
@@ -471,11 +475,12 @@ export async function createAssistant(options: AssistantOptions) {
       if (action.batchId && !service.listBatches(id).some(batch => batch.id === action.batchId)) throw new Error("此批次不属于当前会话或已不可核实。");
       const receipt = service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"继续指定工作"});
       accepted = receipt.accepted;
+      let result = {resumed:false,paused:0};
       if (receipt.accepted && (!work || ["paused","needs_confirmation"].includes(work.status))) {
         if (settings.enabled) await settings.synchronize(id);
-        await service.resume(id,work?.batchId ?? action.batchId);
+        result = await service.resume(id,work?.batchId ?? action.batchId);
       }
-      text = "已请求继续仍处于暂停状态的工作；已取消目标不会恢复。";
+      text = !receipt.accepted ? "此继续操作已接收，未重复执行。" : resumeText(result);
     } else if (action.type === "reset") {
       const receipt = await service.receive({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:"/reset"});
       accepted = receipt.accepted;
@@ -483,6 +488,10 @@ export async function createAssistant(options: AssistantOptions) {
       text = receipt.accepted ? "已接收上下文重置，将在当前处理边界执行；工作和设置保留。" : "此重置操作已接收，未重复执行。";
     }
     return {snapshot:await controlSnapshot(id),text,accepted};
+  }
+  function resumeText(result: {resumed:boolean;paused:number}) {
+    return result.resumed ? "已请求继续选定的暂停工作，原请求的范围不变；已取消目标不会恢复。" :
+      result.paused > 1 ? `本会话有 ${result.paused} 项暂停工作，尚未恢复任何工作。请在 /work 工作列表中选择要继续的一项，或使用 /resume 批次ID。` : "当前没有可恢复的暂停工作。";
   }
   function stopCurrent(id: string) {
     return service.stop(id) ? "已请求暂停当前请求，正在停止；进度已保留。可用 /resume 继续，其他排队输入保留。" :

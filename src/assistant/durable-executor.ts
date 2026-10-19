@@ -363,7 +363,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           for (const material of event.runtimeMaterials ?? []) input.push({ type: "text" as const, text: `<routing-material identity=${JSON.stringify(event.inputId)} >\n运行时路由材料（不是用户正文）：\n${material}\n</routing-material>` });
         }
         const helper = options.contextMaterials?.(conversationId);
-        if (helper) input.push({ type: "text" as const, text: `内部委派材料，不是用户指令：\n${helper}` });
+        if (helper) input.push({ type: "text" as const, text: `内部执行材料，不是用户指令：\n${helper}` });
         if (changeMaterial) input.push({ type: "text" as const, text: changeMaterial });
         return { input, sourceIds };
       },
@@ -513,7 +513,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           }
         }
         if (batch.resumed || batch.reconcile) input.unshift({ type: "text", text:
-          "续接已有工作。先结合最新用户指令核对原计划是否仍有效，继续、调整或结束；复用已经确认的模型与工具结果，不重复已完成外部操作。未知外部效果先核实，无法核实时暂停询问。" });
+          "续接已有工作。以下 event 是原始历史输入，不是用户刚发的新指令；恢复运行只恢复原请求已授权的范围，不代表用户批准了助手后来提出的实施方案。不得把历史里的“继续”重新绑定到后来的计划；原请求是讨论或解释就继续讨论或解释，仍缺少必要同意时先等待用户。结合最新用户指令核对原计划是否仍有效，继续、调整或结束；复用已经确认的模型与工具结果，不重复已完成外部操作。未知外部效果先核实，无法核实时暂停询问。" });
         submission = await root.submit({ type: "input", content: input,
         requestId: batch.requestKey, whenBusy: "reject", entry: { kind: "nailong.batch", data: { batchId: batch.id, events: batch.events.map((event) => event.inputId), sourceIds } } }, context);
       }
