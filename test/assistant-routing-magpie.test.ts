@@ -27,6 +27,7 @@ test("routing selection is global and persists independently of main selection, 
     await f.app.control(conversationId,{type:"thinking",level:"high"});
     const selected = await f.app.control(conversationId,{type:"routing_model",model:"router/A",operationId:"choose-router"});
     assert.equal(selected.snapshot.routing.selectedModel,"router/A");
+    assert.equal(f.app.routingStatus(conversationId).model,"router/A");
     assert.equal(selected.snapshot.selectedModel,"main");
     assert.equal(selected.snapshot.thinking,"high");
     assert.equal(JSON.parse(await readFile(f.magpieConfigPath,"utf8")).model,"magpie/main");
@@ -37,6 +38,9 @@ test("routing selection is global and persists independently of main selection, 
     const reopened = await f.app.controlSnapshot(conversationId);
     assert.equal(reopened.selectedModel,"router/B");
     assert.equal(reopened.routing.selectedModel,"router/A");
+    assert.equal(f.app.routingStatus(conversationId).model,"router/A");
+    await f.app.control("other",{type:"routing_model",model:"router/B"});
+    assert.equal(f.app.routingStatus(conversationId).model,"router/B");
     assert.deepEqual(reopened.routing.catalog.map(model=>model.id),["main","router/A","router/B"]);
   } finally {await f.close();}
 });

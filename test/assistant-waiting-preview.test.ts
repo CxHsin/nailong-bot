@@ -57,6 +57,34 @@ test("drafts off suppresses waiting previews and preserves the final answer", as
   } finally { await f.close(); }
 });
 
+test("a decorative reaction preserves the active body preview until formal delivery", async () => {
+  const waiting = gate(), body = gate(); let stage = 0;
+  const f = await telegramFixture(async (_wire, response) => {
+    if (++stage === 1) {
+      await waiting.promise;
+      sendChatCompletion(response, "", [{index:0,id:"reaction",type:"function",function:{name:"telegram_expression",arguments:JSON.stringify({kind:"reaction",inputId:"4301",messageId:4301,emoji:"👍",explicit:false})}}]);
+      return;
+    }
+    response.writeHead(200, {"content-type":"text/event-stream"});
+    response.write(`data: ${JSON.stringify({choices:[{index:0,delta:{role:"assistant",content:"BODY_AFTER_REACTION"},finish_reason:null}]})}\n\n`);
+    await body.promise;
+    response.end(`data: ${JSON.stringify({choices:[{index:0,delta:{},finish_reason:"stop"}]})}\n\ndata: [DONE]\n\n`);
+  }, undefined, undefined, undefined, (method, payload) => {
+    if (method === "sendRichMessageDraft") {
+      if (/正在.*处理/.test(String(payload))) waiting.resolve();
+      if (String(payload).includes("BODY_AFTER_REACTION")) body.resolve();
+    }
+  });
+  try {
+    await f.bot.handleUpdate(command(4301,"处理任务并回应一下"));
+    await within(body.promise); await f.flush();
+    assert.equal(f.sent.filter(item=>item.method === "setMessageReaction").length,1);
+    const drafts = f.sent.filter(item=>item.method === "sendRichMessageDraft").map(item=>JSON.parse(String(item.body)));
+    assert.equal(new Set(drafts.map(item=>item.draft_id)).size,1);
+    assert.ok(f.sent.some(item=>item.method === "sendRichMessage" && String(item.body).includes("BODY_AFTER_REACTION")));
+  } finally {waiting.resolve();body.resolve();await f.close();}
+});
+
 test("a failed waiting preview cannot block or repeat the formal answer", async () => {
   const previewAttempt = gate();
   const f = await telegramFixture(async (_wire, response) => {

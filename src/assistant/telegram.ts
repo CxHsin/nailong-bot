@@ -58,7 +58,7 @@ export async function connectTelegram(options: {
     const id = randomUUID();
     await record({ id, kind, ...identity, status: "sending" });
     try {
-      const result = identity?.startupId ? await action() : await drafts.withoutDrafts(action);
+      const result = kind === "text" || kind === "file" ? await drafts.withoutDrafts(action) : await action();
       await record({ id, status: "sent", messageId: result.message_id });
       if (identity?.outputId) app.recordReply(identity.conversationId,String(result.message_id),identity.outputId);
     } catch (error) {

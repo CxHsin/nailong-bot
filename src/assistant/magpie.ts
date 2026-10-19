@@ -224,6 +224,7 @@ export async function createMagpieControl(options: {
   return {
     snapshot,
     routingSnapshot,
+    routingModel() { return meta<string>("routing-model"); },
     async selectRoutingModel(modelId: string) {
       const state = await routingSnapshot();
       if (!state.connected) throw new Error(state.connectionError ?? "Magpie 未连接，请先在 Magpie 连接 Nailong。");

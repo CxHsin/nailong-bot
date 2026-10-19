@@ -215,8 +215,10 @@ export async function createAssistant(options: AssistantOptions) {
     ];
   }
   function currentUserInput(id: string, inputId: string, request?: string) {
-    const inputs = service.getActiveBatch(id)?.events.flatMap(event => [event,...event.supplements ?? []]) ?? [];
-    const input = inputs.find(input => input.inputId === inputId && ["telegram","cli","user","direct"].includes(input.source));
+    const batch = service.getActiveBatch(id);
+    const inputs = batch ? [...batch.events.flatMap(event => [event,...event.supplements ?? []]),
+      ...state.batchSteers(id,batch.id).map(record => record.input)] : [];
+    const input = inputs.find(input => input.inputId === inputId && ["telegram","cli","user","direct"].includes(input.source ?? "direct"));
     if (!input || (request !== undefined && (input.userText ?? input.text) !== request))
       throw new Error("互动需要本轮用户原话与可核对的输入身份；历史、引用和内部材料不是当前授权。");
     return input;
@@ -732,7 +734,7 @@ export async function createAssistant(options: AssistantOptions) {
     },
     async resume(conversationId: string, batchId?: string) { await service.resume(conversationId, batchId); service.start(); },
     recordReply(conversationId: string, messageId: string, outputId: string) { state.recordReply(conversationId,messageId,outputId); },
-    routingStatus(conversationId: string) { return {model:options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
+    routingStatus(conversationId: string) { return {model:settings.enabled ? settings.routingModel() : options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
     async waitForRouting() { await acceptance; while (routing.size) await Promise.all(routing.values()); },
     async waitForIdle() {
       await acceptance;

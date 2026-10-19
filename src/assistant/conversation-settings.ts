@@ -78,6 +78,7 @@ export async function createConversationSettings(options: {
       return saved;
     },
     cached(id: string) { return snapshots.get(id); },
+    routingModel() { return magpie?.routingModel(); },
     async routingSnapshot(): Promise<MagpieRoutingSnapshot> {
       return magpie ? magpie.routingSnapshot() : {scope:"service",connected:false,catalog:[],catalogStatus:"unavailable",selectedAvailable:false};
     },

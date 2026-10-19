@@ -55,6 +55,77 @@ test("natural feeding uses the current input identity once and historical feedin
 const sticker = {file_id:"file-nailong",file_unique_id:"unique-nailong",type:"regular" as const,width:512,height:512,is_animated:true,is_video:false,emoji:"🦖",set_name:"NailongSet"};
 const call = (name:string,args:object,id:string) => [{index:0,id,type:"function",function:{name,arguments:JSON.stringify(args)}}];
 
+test("reply targets reach the main model as reference material without authorizing the quoted request", async () => {
+  let stage=0;const wires:string[]=[];let now=Date.UTC(2026,9,19);
+  const f=await telegramFixture((wire,response)=>{
+    wires.push(JSON.stringify(wire));stage++;
+    if(stage===1) sendChatCompletion(response,"",call("persona_feed",{inputId:"98765",request:"喂你一个包子"},"quoted-feeding"));
+    else if(stage===2) sendChatCompletion(response,"",call("telegram_expression",{kind:"reaction",inputId:"401",messageId:98765,emoji:"👍",explicit:true,request:"给我回复的消息点个赞"},"reply-reaction"));
+    else sendChatCompletion(response,"已给指定消息回应。");
+  },undefined,undefined,async()=>({now:()=>now}));
+  try {
+    await f.app.controlSnapshot(conversation);now+=48*60*60*1000;
+    const current=update(401,"给我回复的消息点个赞");
+    await f.bot.handleUpdate({...current,message:{...current.message,reply_to_message:{...update(98765,"喂你一个包子").message,reply_to_message:undefined}}});await f.flush();
+    assert.match(wires[0]!,/replyToMessageId[^0-9]+98765/);
+    assert.match(wires[0]!,/喂你一个包子/);
+    assert.equal((await f.app.controlSnapshot(conversation)).satiety.value,0);
+    assert.match(wires[1]!,/互动需要本轮用户原话/);
+    const reactions=f.sent.filter(item=>item.method === "setMessageReaction");
+    assert.equal(reactions.length,1);
+    assert.equal(JSON.parse(String(reactions[0]!.body)).message_id,98765);
+  } finally {await f.close();}
+});
+
+test("active work supplements authorize feeding only within their batch and survive restart without replay", async () => {
+  let now=Date.UTC(2026,9,19), stage=0;
+  let entered!:()=>void, release!:()=>void, fed!:()=>void, resumeResponse!:()=>void;
+  const started=new Promise<void>(resolve=>{entered=resolve;});
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  const feedingResult=new Promise<void>(resolve=>{fed=resolve;});
+  const pausedResponse=new Promise<void>(resolve=>{resumeResponse=resolve;});
+  const request="继续做这项工作，顺便喂你一个包子";
+  const wires:string[]=[];
+  const f=await telegramFixture(async(wire,response)=>{
+    if((wire as {model?:string}).model === "router") {
+      const snapshot=JSON.parse(String(wire.messages.at(-1)!.content));
+      response.writeHead(200,{"content-type":"application/json"});
+      response.end(JSON.stringify({choices:[{message:{role:"assistant",content:JSON.stringify({actions:[{kind:"supplement",text:request,target:snapshot.works.find((work:{status:string})=>work.status==="running").id}]})},finish_reason:"stop"}]}));
+      return;
+    }
+    wires.push(JSON.stringify(wire));stage++;
+    if(stage===1) {entered();await held;sendChatCompletion(response,"",call("telegram_stickers",{action:"list"},"continue"));}
+    else if(stage===2 || stage===4 || stage===6) sendChatCompletion(response,"",call("persona_feed",{inputId:"502",request},`feed-supplement-${stage}`));
+    else if(stage===3) {fed();await pausedResponse;sendChatCompletion(response,"暂停前的结果。");}
+    else sendChatCompletion(response,"正式结果已交付。");
+  },undefined,undefined,async()=>({now:()=>now,intent:{model:"router"},modelConfiguration:{defaultModel:"local",models:[
+    {alias:"local",model:"local",api:"openai-completions",baseUrl:"",apiKey:"test"},
+    {alias:"router",model:"router",api:"openai-completions",baseUrl:"",apiKey:"test"},
+  ]}}));
+  try {
+    await f.app.controlSnapshot(conversation);now+=48*60*60*1000;
+    await f.bot.handleUpdate(update(501,"开始这项工作"));await started;
+    const supplement=update(502,request);
+    await f.bot.handleUpdate({...supplement,message:{...supplement.message,reply_to_message:{...update(98766,"ACTIVE_REPLY_REFERENCE").message,reply_to_message:undefined}}});await f.app.waitForRouting();
+    release();await feedingResult;
+    assert.equal((await f.app.controlSnapshot(conversation)).satiety.value,25);
+    assert.match(wires[1]!,/继续做这项工作，顺便喂你一个包子/);
+    assert.match(wires[1]!,/replyToMessageId[^0-9]+98766/);
+    assert.match(wires[1]!,/ACTIVE_REPLY_REFERENCE/);
+    await f.app.control(conversation,{type:"stop",operationId:"pause-after-feed"});
+    resumeResponse();await f.flush();await f.reopen();
+    await f.app.control(conversation,{type:"resume",operationId:"resume-fed-work"});await f.flush();
+    assert.equal((await f.app.controlSnapshot(conversation)).satiety.value,25);
+    assert.match(wires[4]!,/accepted[^a-z]+false/);
+    assert.doesNotMatch(wires[4]!,/互动需要本轮用户原话/);
+    await f.reopen();await f.bot.handleUpdate(update(502,request));await f.flush();
+    assert.equal(stage,5);
+    await f.bot.handleUpdate(update(503,"检查刚才的结果"));await f.flush();
+    assert.equal((await f.app.controlSnapshot(conversation)).satiety.value,25);
+    assert.match(wires.at(-1)!,/互动需要本轮用户原话/);
+  } finally {release();resumeResponse();await f.close();}
+});
+
 test("only explicit collection of a referenced sticker creates a reusable deduplicated library across restart", async () => {
   let stage = 0; const wires: string[] = [];
   const f = await telegramFixture((wire,response) => {

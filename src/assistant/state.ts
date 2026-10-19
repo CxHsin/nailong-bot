@@ -125,6 +125,10 @@ export class AssistantState {
       : this.db.prepare("SELECT payload FROM steers ORDER BY rowid").all();
     return (rows as Array<{payload:string}>).map((row) => JSON.parse(row.payload) as SteerRecord).filter((item) => item.state !== "handled");
   }
+  batchSteers(id: string, batchId: string) {
+    const rows = this.db.prepare("SELECT payload FROM steers WHERE conversation=? ORDER BY rowid").all(id) as Array<{payload:string}>;
+    return rows.map(row => JSON.parse(row.payload) as SteerRecord).filter(record => record.targetBatch === batchId);
+  }
   beginOutput(id: string) {
     return this.db.prepare("INSERT OR IGNORE INTO outputs VALUES(?,'sending')").run(id).changes > 0;
   }
