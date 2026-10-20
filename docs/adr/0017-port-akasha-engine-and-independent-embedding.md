@@ -25,3 +25,5 @@ Embedding 使用独立的本地服务与模型配置列表，Telegram 提供选�
 2026-10-20 已经正式 `assistantEnvironment` 在独立临时现役 namespace 使用阿里云 `text-embedding-v3` 生成真实 1024 维向量，并核对跨措辞召回的最终模型请求材料、来源角色/时间/身份及 reopen 复用；聊天响应来自受控 HTTP 端点。定向结果、完整集成检查及两轴审查，以及未执行的生产重启、Telegram 发信与手机观察，统一见[Akasha 接入验收](../akasha-integration-acceptance-20261020.md)。上述实现证据不把设计决定本身当作完成证明。
 
 同日实际召回诊断发现宿主先展开图来源再统一截取消息数，会挤掉已有直接证据。修复沿固定上游 `select_hits` 的两通道选择方式：限额按经历计算，直接通道最多五个，图通道去重后独立限额；选择完成后各通道按开始时间及 UTF-8 身份倒序展示。无闭合原文继续使用既有 SourceFeaturePool 的 dense/BM25 宿主适配，不声称其直接分数等同上游纯 dense Turn 排序。自动材料按实际剩余总字节为两通道保留正文，并优先呈现主命中，来源成员不争夺经历名额。旧输入已保存材料仍按原契约复用，遗忘过滤继续有效。诊断及新增失败回归见[验收补记](../akasha-integration-acceptance-20261020.md#召回通道修复补记)。
+
+用户随后授权补齐[档案维护 #278](https://github.com/CxHsin/nailong-bot/issues/278)及[显式图反馈 #279](https://github.com/CxHsin/nailong-bot/issues/279)。档案提炼以 SQLite 持久草稿、恢复任务和应用回执承载上游的重试、并发叠加、定期合并及容量维护职责；SELF 权威文件与身份保护继续有效。显式图反馈依据真实成功工具结果和闭合经历映射，后台维护不生成强化信号。此处扩展此前保持现役提炼的范围，机制差异和验证见[补齐验收](../akasha-memory-maintenance-acceptance-20261020.md)。

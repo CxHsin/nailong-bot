@@ -6,7 +6,7 @@ import {SourceFeaturePool} from "./akasha/sources.js";
 import {LEXICAL_VERSION} from "./akasha/lexical.js";
 import {tokenize} from "./akasha/lexical.js";
 import {MemoryCycle,serializeTicket,restoreTicket, type TicketSnapshot} from "./akasha/cycle.js";
-import {emptyFeedback, type Turn} from "./akasha/model.js";
+import {emptyFeedback, type Turn, type TurnFeedback} from "./akasha/model.js";
 import type {AkashaLearningFacts, AkashaLearningSample} from "./akasha-learning.js";
 
 type Prepared=ReturnType<EmbeddingService["prepare"]>;
@@ -132,6 +132,13 @@ export class AkashaMemory {
     const saved=row&&JSON.parse(row.payload) as {signatures:string[];snapshot:ReturnType<MemoryCycle["serialize"]>};
     const prefix=saved&&saved.signatures.length<=signatures.length&&saved.signatures.every((value,index)=>value===signatures[index]);
     const cycle=prefix?MemoryCycle.restore(saved.snapshot):new MemoryCycle();
+    const memberships=new Map<string,Set<number>>();
+    const addMembers=(sample:AkashaLearningSample,node:number)=>{
+      for(const id of [...sample.inputSourceIds,sample.responseSourceId]){
+        const nodes=memberships.get(id)??new Set<number>();nodes.add(node);memberships.set(id,nodes);
+      }
+    };
+    for(const [node,sample] of ready.slice(0,cycle.state_version).entries())addMembers(sample,node);
     let changed=!prefix;
     for(const sample of ready.slice(prefix?saved.signatures.length:0,(prefix?saved.signatures.length:0)+8)){
       const inputs=sample.inputSourceIds.map(id=>originals.get(id)!);const response=originals.get(sample.responseSourceId)!;
@@ -145,14 +152,14 @@ export class AkashaMemory {
         user_message_id:sample.inputSourceIds.join(","),assistant_message_id:sample.responseSourceId,started_at:started,committed_at:new Date(sample.endedAt).toISOString(),
         user_text:text,assistant_text:response.text,user_dense:norm?Float32Array.from(user,value=>value/norm):null,assistant_dense:Float32Array.from(this.cached(space,response.text)!),
         user_terms:tokenize(text),assistant_terms:tokenize(response.text),inter_gap_seconds:previous?.session_key===sample.conversationId?Math.max(0,(Date.parse(started)-Date.parse(previous.committed_at))/1000):null,
-        feedback:emptyFeedback()};
+        feedback:resolveFeedback(sample,cycle.state_version,memberships)};
       const query=sample.inputSourceIds.length===1?sample.inputs[0]?.query as {space?:string;scope?:string;ticket?:TicketSnapshot;graphBasis?:string}|undefined:undefined;
       // Only a matching actual single-input query can supply its frozen ticket.
-      // Historical/grouped evidence is recomputed by the core, without claiming
-      // a historical retrieve or feedback occurred in the retained facts.
+      // Historical/grouped retrieval is recomputed by the core; tool feedback
+      // comes only from the separate successful persisted receipts above.
       const basis=fingerprint(JSON.stringify(signatures.slice(0,cycle.state_version)));
       const ticket=query?.space===space.id&&query.scope===(project??"")&&query.graphBasis===basis&&query.ticket?restoreTicket(query.ticket):null;
-      cycle.commit(turn,ticket);changed=true;
+      cycle.commit(turn,ticket);addMembers(sample,turn.node_id);changed=true;
     }
     if(changed)this.db.prepare("INSERT OR REPLACE INTO akasha_graphs VALUES(?,?,?)").run(space.id,project??"",JSON.stringify({signatures:signatures.slice(0,cycle.turns.length),snapshot:cycle.serialize()}));
     return {cycle,samples:ready.slice(0,cycle.turns.length),basis:fingerprint(JSON.stringify(signatures.slice(0,cycle.turns.length))),pending:cycle.turns.length<ready.length};
@@ -277,4 +284,15 @@ export class AkashaMemory {
     if(this.stopped)return;this.stopped=true;if(this.timer)clearTimeout(this.timer);this.controller.abort();
     await Promise.allSettled([...(this.worker?[this.worker]:[]),...this.jobs.values()]);
   }
+}
+
+function resolveFeedback(sample:AkashaLearningSample,current:number,memberships:Map<string,Set<number>>):TurnFeedback{
+  const remember=new Set<number>(),forget=new Set<number>();
+  for(const receipt of sample.feedback??[])for(const target of receipt.targetSourceIds){
+    if(receipt.action==="remember"&&sample.inputSourceIds.includes(target))remember.add(current);
+    for(const node of memberships.get(target)??[])if(node<current)(receipt.action==="remember"?remember:forget).add(node);
+  }
+  // Source exclusion has priority over reinforcing an earlier receipt in this experience.
+  for(const node of forget)remember.delete(node);
+  return {remember_nodes:[...remember].sort((a,b)=>a-b),forget_nodes:[...forget].sort((a,b)=>a-b),remember_boost:remember.size?3:1};
 }

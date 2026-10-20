@@ -68,6 +68,8 @@ The extension in [conclusion #259](https://github.com/CxHsin/nailong-bot/issues/
 
 **Default Forgetting**: Retracts derived memories and excludes the corresponding original sources and their derivatives from automatic recall and learning. Unrelated work progress remains available. Original records remain; physical deletion is a separate request.
 
+**Profile Maintenance**: Persisted extraction ranges, validated drafts and apply receipts recover after failures without resuming main work. Consolidation merges existing sourced facts; capacity retirement preserves searchable originals and differs from Default Forgetting. Successful explicit memory-tool receipts alone provide graph feedback for closed experiences. See [maintenance acceptance](docs/akasha-memory-maintenance-acceptance-20261020.md).
+
 **Historical Host / Task / Attempt / Akasha / Plan**: Retired systems recorded in historical documentation and versioned source. Their implementations, offline tools and old helper import are retired under [ADR-0014](docs/adr/0014-retire-legacy-code-and-data.md). Production memory uses its own namespace and never imports their records. Proactive responsibilities and timers are deferred.
 
 ## Queue and workflow

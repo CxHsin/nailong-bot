@@ -19,6 +19,8 @@ import { AssistantMemory, type MemoryLimits } from "./memory.js";
 import type { EmbeddingService } from "./embedding.js";
 import { collectAkashaLearning, type AkashaLearningSteer } from "./akasha-learning.js";
 import type { StoredBatch } from "./queue.js";
+import { createProfileWorker } from "./memory-profile.js";
+import { recoverProfileJobs } from "./memory-profile-recovery.js";
 import { memoryRefinement } from "./memory-refinement.js";
 import { sanitizeMemoryContext } from "./memory-context.js";
 import { persistMedia, type MediaOptions } from "./media.js";
@@ -75,6 +77,7 @@ export type DurableExecutorOptions = { cwd?: string; dataDir: string; prompt?: s
   compaction?: Partial<CompactionPolicy>;
   onRequestMetrics?: (metric: RequestMetric) => void;
   beforeModelRequest?: (model: ModelConfig) => void;
+  prepareProfileRequest?: (conversationId: string) => Promise<{ model: ModelConfig; thinking?: string } | undefined>;
   onPreview?: (preview: { conversationId: string; replyId: string; text?: string }) => void;
   reportFailure?: (error: unknown) => void };
 
@@ -84,6 +87,23 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
   const rootDirectory = resolve(options.dataDir, "executions");
   await mkdir(rootDirectory, { recursive: true });
   const memory = new AssistantMemory(options.dataDir, options.memory, options.embedding);
+  try { await recoverProfileJobs(rootDirectory, id => memory.getSource(id), input => memory.enqueueProfile(input)); }
+  catch (error) { options.reportFailure?.(error); }
+  const profiles = createProfileWorker(memory, async (conversationId, system, input, signal) => {
+    const prepared = await options.prepareProfileRequest?.(conversationId);
+    if (options.prepareProfileRequest && !prepared) throw new Error("Profile model selection currently unavailable");
+    const profileCatalog = durableModels(prepared ? { defaultModel: prepared.model.alias, models: [prepared.model] } : options.modelConfiguration,
+      { conversationId, beforeRequest: options.beforeModelRequest,
+        record: metric => { if (metric.status !== "pending") options.onRequestMetrics?.(metric); } });
+    const model = profileCatalog.select().model;
+    const response = await profileCatalog.models.completeSimple(model, { messages: [
+      { role: "system", timestamp: Date.now(), content: system },
+      { role: "user", timestamp: Date.now(), content: JSON.stringify(input) },
+    ] }, { maxTokens: Math.min(model.maxTokens, 2048), maxRetries: 0, signal,
+      reasoning: (prepared?.thinking === "off" ? undefined : prepared?.thinking) as import("@earendil-works/pi-ai").ThinkingLevel | undefined });
+    if (response.stopReason === "error" || response.stopReason === "aborted") throw new Error(response.errorMessage ?? "Profile provider unavailable");
+    return response.content.filter(part => part.type === "text").map(part => part.text).join("\n");
+  }, error => options.reportFailure?.(error), () => options.clock?.().getTime() ?? Date.now());
   const conversations = new Map<string, ReturnType<typeof open>>();
   async function open(conversationId: string) {
     const cwd = resolve(options.workDir?.(conversationId) ?? options.cwd ?? process.cwd());
@@ -98,7 +118,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     const archive = createToolArchive({ directory: join(directory, "archives"), conversationId, limits: options.archive });
     let currentSources: string[] = [];
     let currentInputSources: string[] = [];
-    const refinement = memoryRefinement(memory, conversationId);
+    const refinement = memoryRefinement(memory, conversationId, profiles.run);
     const registry = createRegistry();
     const coding = createCodingTools();
     registry.install({ ...coding, tools: coding.tools?.map((tool) => tool.name === "read" ? { ...tool, replay: "safe" as const } : tool) });
@@ -437,6 +457,16 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         const facts = await collectAkashaLearning({batch,steers,
           submission: async id => (await factsStorage()).submission(Number(id) as SubmissionId, context),
           entry: async id => (await (await factsStorage()).entry(id as import("@earendil-works/pi-durable").EntryId,context))?.entry,
+          entries: async (conversationId, minEntryId, maxEntryId) => {
+            const result: EntryRecord[] = []; let cursor: import("@earendil-works/pi-durable").Cursor | undefined;
+            do {
+              const page = await (await factsStorage()).scanEntries({ conversationId: conversationId as import("@earendil-works/pi-durable").ConversationId,
+                minEntryId: minEntryId as import("@earendil-works/pi-durable").EntryId, maxEntryId: maxEntryId as import("@earendil-works/pi-durable").EntryId,
+                order: "ascending" }, 100, cursor, context);
+              result.push(...page.items); cursor = page.next;
+            } while (cursor);
+            return result;
+          },
           task: async id => (await factsStorage()).task(id as import("@earendil-works/pi-durable").TaskId,context),
           source: id => memory.getSource(id), current: id => memory.isSourceCurrent(id),
           query: id => memory.savedRecall(id),
@@ -675,7 +705,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         for (const id of Object.values(ranges?.tasks ?? {})) await harness.waitForTask(id as import("@earendil-works/pi-durable").TaskId, context);
       }));
     },
-    async close() { try { for (const pending of conversations.values()) await (await pending).harness.close(context); } finally { await memory.close(); } },
+    async close() { await profiles.close(); try { for (const pending of conversations.values()) await (await pending).harness.close(context); } finally { await memory.close(); } },
   };
 }
 export type DurableExecutor = Awaited<ReturnType<typeof createDurableExecutor>>;

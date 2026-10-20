@@ -58,7 +58,9 @@ test("native capacity compaction preserves recent input and resumes after reopen
   let summaries = 0;
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => {
-    if (JSON.stringify(wire.messages[0]).includes("context summarization assistant")) {
+    const system = JSON.stringify(wire.messages[0]);
+    if (system.includes("nailong-memory-refinement")) return sendChatCompletion(response, "[]");
+    if (system.includes("context summarization assistant")) {
       summaries++;
       sendChatCompletion(response, "## Goal\nContinue the garden plan.\n## Progress\n### Done\n- Selected lotus\n### In Progress\n- Plan watering\n### Blocked\n- none\n## Key Decisions\n- use rainwater\n## Next Steps\n1. Continue watering\n## Critical Context\n- garden.txt");
     } else { requests.push(wire); sendChatCompletion(response, "continue garden plan"); }
@@ -85,22 +87,30 @@ test("native capacity compaction preserves recent input and resumes after reopen
 test("native compaction refines its covered original user evidence into memory", { timeout: 30000 }, async () => {
   let refinements = 0;
   let summaries = 0;
+  let executionRequests = 0;
   const requests: Wire[] = [];
   const metrics: RequestMetric[] = [];
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);
     if (text.includes("nailong-memory-refinement")) {
       refinements++;
-      assert.doesNotMatch(text, /GLOBAL_ONLY_EVIDENCE/, "shared snapshot facts are not original evidence from this conversation");
-      const sourceId = text.match(/source:[a-f0-9]{64}/)?.[0];
-      sendChatCompletion(response, JSON.stringify([{ action: "add", kind: "MEMORY", content: "用户偏好荷花", quote: "我喜欢荷花", sourceId }]));
+      const input = JSON.parse(String(wire.messages.find(message => message.role === "user")!.content)) as {
+        originalSources: Array<{ id: string; text: string; conversationId: string; role: string }>;
+        currentProfiles: Array<{ content: string }>;
+      };
+      assert.doesNotMatch(JSON.stringify(input.originalSources), /GLOBAL_ONLY_EVIDENCE/, "shared snapshot facts are not original evidence from this conversation");
+      assert.ok(input.originalSources.every(source => source.conversationId === "one" && source.role === "user"));
+      assert.ok(input.currentProfiles.some(entry => entry.content === "GLOBAL_ONLY_EVIDENCE"), "refinement compares original evidence with the current shared archive");
+      const source = input.originalSources.find(source => source.text.includes("我喜欢荷花"));
+      sendChatCompletion(response, JSON.stringify(source ? [{ action: "add", kind: "MEMORY", content: "用户偏好荷花", quote: "我喜欢荷花", sourceId: source.id }] : []));
     } else if (text.includes("context summarization assistant")) {
       summaries++;
       sendChatCompletion(response, "## Goal\nContinue garden.\n## Progress\n### Done\n- started\n### In Progress\n- watering\n## Next Steps\n1. Continue");
     } else if (wire.messages.at(-1)?.role === "user" && text.includes("记住共享偏好GLOBAL_ONLY_EVIDENCE")) {
+      executionRequests++;
       sendChatCompletion(response, "", [{ index: 0, id: "global-evidence", type: "function", function: { name: "memory_write",
         arguments: JSON.stringify({ action: "add", kind: "MEMORY", content: "GLOBAL_ONLY_EVIDENCE", quote: "GLOBAL_ONLY_EVIDENCE", expectedVersion: 0 }) } }]);
-    } else { requests.push(wire); sendChatCompletion(response, "recorded garden conversation"); }
+    } else { executionRequests++; requests.push(wire); sendChatCompletion(response, "recorded garden conversation"); }
   }, async () => ({
     onRequestMetrics: metric => { metrics.push(metric); },
     modelConfiguration: { defaultModel: "local", models: [{ alias: "local", api: "openai-completions", model: "local", apiKey: "test", baseUrl: "", contextWindow: 7000, maxTokens: 1024 }] },
@@ -119,9 +129,13 @@ test("native compaction refines its covered original user evidence into memory",
     await f.app.receive({ conversationId: "one", inputId: "flowers", text: "我喜欢什么花？" });
     await f.app.waitForIdle();
     assert.match(JSON.stringify(requests.at(-1)), /用户偏好荷花/);
-    assert.equal(metrics.filter(metric => metric.purpose === "auxiliary").length, summaries + refinements);
-    assert.equal(metrics.filter(metric => metric.purpose === "execution").length, requests.length + 1);
-    assert.ok(metrics.every(metric => metric.batchId && metric.requestId));
+    const auxiliary = metrics.filter(metric => metric.purpose === "auxiliary");
+    const execution = metrics.filter(metric => metric.purpose === "execution");
+    assert.equal(auxiliary.length, summaries + refinements, "each actual auxiliary provider request emits one final metric");
+    assert.equal(execution.length, executionRequests);
+    assert.ok(execution.every(metric => metric.batchId && metric.requestId), "main requests retain their batch and request identities");
+    assert.ok(metrics.every(metric => metric.requestId && metric.status !== "pending"));
+    assert.equal(auxiliary.filter(metric => !metric.batchId).length, refinements, "independent refinement requests have no main execution batch");
   } finally { await f.close(); }
 });
 

@@ -13,6 +13,13 @@ export type AkashaLearningSample = {
   id:string; conversationId:string; batchId:string; answerEntryId:number; taskId:number;
   responseSourceId:string; inputSourceIds:string[]; inputs:AkashaLearningInput[];
   submissionIds:string[]; startedAt?:number; endedAt:number;
+  feedback?:AkashaToolFeedback[];
+};
+/** Successful persisted tool evidence, retained even when forgetting excludes its target. */
+export type AkashaToolFeedback = {
+  action:"remember"|"forget"; targetSourceIds:string[];
+  toolName:"memory_write"|"memory_forget"; toolCallId:string;
+  callEntryId:number; resultEntryId:number;
 };
 export type AkashaLearningSkip = {
   id:string; conversationId:string; batchId:string; sourceIds:string[];
@@ -30,6 +37,7 @@ export type AkashaLearningAccess = {
   source(id:string):MemorySource|undefined;
   current(id:string):boolean;
   query?(sourceId:string):unknown;
+  entries?(conversationId:number,minEntryId:number,maxEntryId:number):Promise<readonly EntryRecord[]>;
 };
 
 const identity=(parts:unknown[])=>createHash("sha256").update(JSON.stringify(parts)).digest("hex");
@@ -118,8 +126,35 @@ export async function collectAkashaLearning(access:AkashaLearningAccess):Promise
     sample.inputs.sort((a,b)=>a.entryId-b.entryId||a.sequence-b.sequence);
     sample.inputs=sample.inputs.filter((input,index,inputs)=>inputs.findIndex(other=>other.sourceId===input.sourceId&&other.targetId===input.targetId&&other.actionId===input.actionId)===index);
     sample.inputSourceIds=[...new Set(sample.inputs.map(input=>input.sourceId))];
+    if(access.entries){
+      const first=await access.entry(sample.inputs[0]!.entryId);
+      if(first)sample.feedback=collectFeedback(await access.entries(first.conversationId,first.id,sample.answerEntryId));
+    }
     result.samples.push(sample);
   }
   result.samples.sort((a,b)=>a.endedAt-b.endedAt||a.answerEntryId-b.answerEntryId);
   return result;
+}
+
+function collectFeedback(entries:readonly EntryRecord[]):AkashaToolFeedback[]{
+  const calls=new Map<string,{name:"memory_write"|"memory_forget";entryId:number}>();
+  const feedback:AkashaToolFeedback[]=[];
+  for(const entry of [...entries].sort((a,b)=>a.id-b.id))for(const message of entry.model??[]){
+    if(message.role==="assistant")for(const part of message.content){
+      if(part.type==="toolCall"&&(part.name==="memory_write"||part.name==="memory_forget"))calls.set(part.id,{name:part.name,entryId:entry.id});
+    }
+    if(message.role!=="toolResult")continue;
+    const call=calls.get(message.toolCallId);
+    if(!call||call.name!==message.toolName||call.entryId>=entry.id)continue;
+    calls.delete(message.toolCallId);
+    if(message.isError)continue;
+    const text=message.content.filter(part=>part.type==="text").map(part=>part.text).join("\n");
+    let value:unknown;try{value=JSON.parse(text);}catch{continue;}
+    const receipt=(value as {akashaFeedback?:{action?:unknown;targetSourceIds?:unknown}}|null)?.akashaFeedback;
+    const action=call.name==="memory_write"?"remember":"forget";
+    if(receipt?.action!==action||!Array.isArray(receipt.targetSourceIds)||!receipt.targetSourceIds.every(id=>typeof id==="string"))continue;
+    const targetSourceIds=[...new Set(receipt.targetSourceIds as string[])];
+    if(targetSourceIds.length)feedback.push({action,targetSourceIds,toolName:call.name,toolCallId:message.toolCallId,callEntryId:call.entryId,resultEntryId:entry.id});
+  }
+  return feedback;
 }

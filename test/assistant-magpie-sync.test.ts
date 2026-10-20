@@ -45,7 +45,9 @@ test("switching to a smaller catalog window uses native compaction and retains t
   let summaries = 0;
   const requests: Array<Wire & { model: string }> = [];
   const f = await assistantFixture((wire, response) => {
-    if (JSON.stringify(wire.messages[0]).includes("context summarization assistant")) {
+    const system = JSON.stringify(wire.messages[0]);
+    if (system.includes("nailong-memory-refinement")) return sendChatCompletion(response, "[]");
+    if (system.includes("context summarization assistant")) {
       summaries++;
       sendChatCompletion(response, "## Goal\nContinue ORIGINAL_GARDEN_GOAL.\n## Progress\nSelected lotus; confirmed garden plan.\n## Next Steps\nContinue watering.");
     } else { requests.push(wire as typeof requests[number]); sendChatCompletion(response, "garden acknowledged"); }

@@ -231,8 +231,10 @@ export async function createAssistant(options: AssistantOptions) {
 
   executor = await createDurableExecutor({
     ...options, dataDir, cwd, extraTools, workDir,
+    clock: options.now ? () => new Date(options.now!()) : undefined,
     embedding,
     modelConfiguration: settings.initialModelConfiguration,
+    prepareProfileRequest: id => settings.prepareMainRequest(id),
     beforeModelRequest: model => settings.assertRequestAllowed(model),
     contextMaterials: (id: string) => {
       const records = helperRecords(id).filter((record) => !record.delivered).map(({summary,...identity}) => identity);
