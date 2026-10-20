@@ -5,6 +5,7 @@ import { estimateInput } from "../context/input-budget.js";
 import type { QueueInput } from "./queue.js";
 
 export type IntentOptions = { model?: string; timeoutMs?: number; inputTokens?: number; outputTokens?: number; recentTurns?: number };
+export type IntentSelection = {model?:ModelConfig;thinking?:string;reason?:string};
 export type IntentAction = { kind: "request" | "supplement" | "cancel" | "clarify"; text: string; target?: string; candidates?: string[] };
 export type IntentWork = { id: string; summary: string; status: string; inputId?: string; helperId?: string; [key: string]: unknown };
 export type IntentRecent = { role: "user" | "assistant"; text: string; inputId: string; at?: string | number };
@@ -53,16 +54,17 @@ const decisionSchema = {
 };
 type ChatProtocol = { suffix: string; parameters: {
   response_format?: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming["response_format"];
-  chat_template_kwargs?: { enable_thinking: false }; reasoning_effort?: "low";
+  chat_template_kwargs?: { enable_thinking: false }; reasoning_effort?: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming["reasoning_effort"];
 } };
 
-function classificationProtocol(config: ModelConfig): ChatProtocol {
+function classificationProtocol(config: ModelConfig, selection?: IntentSelection): ChatProtocol {
   if (config.api !== "openai-completions") return { suffix: "", parameters: {} };
   const url = new URL(config.baseUrl);
   const cloudflare = url.origin === "https://api.cloudflare.com" && /^\/client\/v4\/accounts\/[^/]+\/ai\/v1\/?$/.test(url.pathname);
   const qwen = config.model === "@cf/qwen/qwen3-30b-a3b-fp8";
   const glm = config.model === "@cf/zai-org/glm-4.7-flash";
-  if (!cloudflare || (!qwen && !glm)) return { suffix: "", parameters: config.reasoning ? { reasoning_effort: "low" } : {} };
+  if (!cloudflare || (!qwen && !glm)) return { suffix: "", parameters: config.reasoning && (selection ? selection.thinking : "low") ?
+    { reasoning_effort: (selection ? selection.thinking : "low") as ChatProtocol["parameters"]["reasoning_effort"] } : {} };
   // Qwen's hard switch leaves content empty in Cloudflare's reasoning parser.
   // Its documented soft switch preserves the closing think tag and normal content.
   return { suffix: qwen ? "\n/no_think" : "", parameters: {
@@ -100,17 +102,23 @@ export function createIntentClassifier(configuration: ModelConfiguration, option
     const model = configuredModel(config);
     if (budgets.outputTokens > model.maxTokens || budgets.inputTokens + budgets.outputTokens > model.contextWindow) throw new Error("分类预算超过模型上下文或输出窗口");
   }
-  const protocol = config ? classificationProtocol(config) : { suffix: "", parameters: {} };
-  const protocolTokens = Math.ceil(Buffer.byteLength(JSON.stringify(protocol.parameters)) / 3);
   return {
-    async classify(request: IntentRequest): Promise<{ actions: IntentAction[]; reason?: string; snapshot: unknown }> {
+    async classify(request: IntentRequest, selection?: IntentSelection): Promise<{ actions: IntentAction[]; reason?: string; snapshot: unknown }> {
+      const selected = selection ? selection.model : config;
+      const protocol = selected ? classificationProtocol(selected,selection) : {suffix:"",parameters:{}};
+      const protocolTokens = Math.ceil(Buffer.byteLength(JSON.stringify(protocol.parameters)) / 3);
       const actualText = (request.input as QueueInput & { userText?: string }).userText ?? request.input.text;
-      const snapshot = { model: options.model, budgets, current: { conversationId: request.input.conversationId, inputId: request.input.inputId, text: actualText, hasImages: Boolean(request.input.images?.length),
+      const snapshot = { model: selection ? selected?.model : options.model, budgets, current: { conversationId: request.input.conversationId, inputId: request.input.inputId, text: actualText, hasImages: Boolean(request.input.images?.length),
         ...(request.input.replyToMessageId !== undefined ? { replyToMessageId: request.input.replyToMessageId } : {}),
         ...(request.input.replyToInputId !== undefined ? { replyToInputId: request.input.replyToInputId } : {}),
         ...(request.input.replyToMessage ? { replyToMessage: request.input.replyToMessage } : {}),
       }, replyTargets: request.replyTargets ?? [], works: [] as IntentWork[], recent: [] as IntentRecent[], incomplete: request.incomplete ?? false };
-      if (!config) return { actions: [], reason: "not_configured", snapshot };
+      if (!selected) return { actions: [], reason: selection?.reason ?? "not_configured", snapshot };
+      try {
+        const model = configuredModel(selected);
+        if (budgets.outputTokens > model.maxTokens || budgets.inputTokens + budgets.outputTokens > model.contextWindow)
+          return {actions:[],reason:"model_budget",snapshot};
+      } catch { return {actions:[],reason:"model_budget",snapshot}; }
       if (request.input.images?.length && !actualText.trim()) return { actions: [], reason: "needs_visual", snapshot };
       const fits = () => estimateInput({ systemPrompt: instructions, messages: [{ role: "user", content: JSON.stringify(snapshot) + protocol.suffix, timestamp: 0 }] }) + protocolTokens <= budgets.inputTokens;
       if (!fits()) return { actions: [], reason: "input_budget", snapshot };
@@ -139,7 +147,7 @@ export function createIntentClassifier(configuration: ModelConfiguration, option
       }
       const signal = AbortSignal.timeout(budgets.timeoutMs);
       try {
-        const text = await classifyText(config, JSON.stringify(snapshot), budgets.outputTokens, signal, protocol);
+        const text = await classifyText(selected, JSON.stringify(snapshot), budgets.outputTokens, signal, protocol);
         if (signal.aborted) return { actions: [], reason: "timeout", snapshot };
         let raw: unknown; try { raw = JSON.parse(text); } catch { return { actions: [], reason: "invalid_result", snapshot }; }
         const actions = validatedActions(raw, actualText, snapshot.works);

@@ -45,11 +45,17 @@ test('queued report receives CSV modification before first execution while unrel
     await f.app.receive({conversationId:'one',inputId:'a',text:'当前工作'}); await ready;
     await f.app.receive({conversationId:'one',inputId:'report',text:'生成报表'});
     await f.app.receive({conversationId:'one',inputId:'weather',text:'查询天气'});
-    await f.app.receive({conversationId:'one',inputId:'csv',text:'报表改为 CSV'});
+    await f.app.receive({conversationId:'one',inputId:'csv',source:'telegram',text:'报表改为 CSV',
+      replyToMessageId:'98765',replyToMessage:{role:'user',text:'ORIGINAL_REPORT_REFERENCE',hasImages:false},
+      runtimeMaterials:['Telegram 素材身份（未自动收录）：{"replySticker":{"file_unique_id":"queued-sticker-identity"}}']});
     release(); await f.app.waitForIdle();
     assert.equal(actual.length,2);
     assert.match(actual[1]!,/报表改为 CSV/);
     assert.ok(actual[1]!.indexOf('生成报表') < actual[1]!.indexOf('查询天气'));
     assert.match(actual[1]!,/identity=\\"csv\\"/);
+    assert.match(actual[1]!,/replyToMessageId[^0-9]+98765/);
+    assert.match(actual[1]!,/ORIGINAL_REPORT_REFERENCE/);
+    assert.match(actual[1]!,/queued-sticker-identity/);
+    assert.equal(f.app.routingStatus('one').model,'router','legacy fixture keeps its explicit alias');
   } finally {release();await f.close();}
 });

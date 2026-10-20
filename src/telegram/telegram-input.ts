@@ -51,8 +51,8 @@ export function registerTelegramInput(bot: Bot, options: {
 }) {
   const active = new Set<Promise<void>>();
   let acceptance = Promise.resolve();
-  bot.on(["message:text", "message:photo", "message:document"], async (ctx) => {
-    if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private") return;
+  bot.on(["message:text", "message:photo", "message:document", "message:sticker"], async (ctx) => {
+    if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private" || ctx.chat.id !== options.ownerId) return;
     let text = ctx.message.text ?? ctx.message.caption;
     if (text && options.botUsername) {
       let otherBot = false;
@@ -91,11 +91,15 @@ export function registerTelegramInput(bot: Bot, options: {
           return;
         }
       }
+      const stickerSets = [...(text ?? "").matchAll(/https?:\/\/(?:t\.me|telegram\.me)\/addstickers\/([a-zA-Z0-9_]+)/g)].map(match=>match[1]!);
+      const telegram = {sticker:ctx.message.sticker,replySticker:ctx.message.reply_to_message?.sticker,stickerSets};
+      if (telegram.sticker || telegram.replySticker || stickerSets.length)
+        runtimeMaterials = [...runtimeMaterials ?? [],`Telegram 素材身份（未自动收录；仅元数据，未理解动态画面）：${JSON.stringify(telegram)}`];
       let markStarted!: () => void;
       let hasStarted = false;
       const started = new Promise<void>((resolve) => { markStarted = resolve; });
       const completed = options.handle({ userId: ctx.from.id, chatType: ctx.chat.type,
-        text, images, runtimeMaterials, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id,
+        text, images, runtimeMaterials, telegram, messageId: ctx.message.message_id, replyToMessageId: ctx.message.reply_to_message?.message_id,
         ...(ctx.message.reply_to_message ? { replyToMessage: {
           role: ctx.message.reply_to_message.from?.id === ctx.me.id ? "assistant" as const : "user" as const,
           text: ctx.message.reply_to_message.text ?? ctx.message.reply_to_message.caption,

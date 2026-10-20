@@ -10,6 +10,8 @@ The Conversation Control Panel and Magpie Model Catalog follow [ADR-0016](docs/a
 
 Conversation settings coordination follows [spec #251](https://github.com/CxHsin/nailong-bot/issues/251). The [coordination module](src/assistant/conversation-settings.ts) owns settings snapshots, per-Conversation synchronization, global propagation, Durable configuration, run eligibility and synchronization lifetime. Runtime owns routing and queue scheduling. Control queries retain the wait for settings propagation across all registered Conversations; Magpie persistence and Durable request checkpoints retain their existing responsibilities.
 
+The extension in [conclusion #259](https://github.com/CxHsin/nailong-bot/issues/259) and [spec #260](https://github.com/CxHsin/nailong-bot/issues/260) adds a global Routing Model selector to the Conversation Control Panel, using Magpie's catalog independently of the main model. Its saved service-wide choice is frozen when each routing judgment starts; legacy production routing aliases are retired. Telegram Persona Expression and Satiety use the existing data directory, authenticated Channel and current input identities. Home controls provide feeding and cache details without generation; a separate auxiliary startup greeting tests the selected main model without creating work or resuming paused work. Implementation and external acceptance have separate evidence in the [acceptance record](docs/nailong-persona-acceptance-20261020.md). See the [design record](docs/research/nailong-persona-design-2026-10-19.md), [spec archive](docs/research/nailong-persona-spec-2026-10-19.md) and [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md).
+
 ## Language
 
 **Personal Agent**: The main assistant for ongoing conversation and work. Coding is one capability, delegated through the project herdr-workflow skill when appropriate.
@@ -25,6 +27,8 @@ Conversation settings coordination follows [spec #251](https://github.com/CxHsin
 **Conversation Control Panel**: A unified Telegram interface for viewing a Conversation's status, choosing the main assistant's model and thinking level, and accessing conversation operations.
 
 **Model Catalog**: The models offered for selection by a connected model service, together with their known capabilities. The Magpie catalog reflects the models the user has enabled there.
+
+**Routing Model**: The model that interprets an Input Event's relationship to existing work and proposes Routing Actions. Its selection is shared across the Assistant Service's Conversations and is independent of each Conversation's main model.
 
 **Work Directory**: Default directory for relative paths and project instructions. Reopening a conversation preserves it. It is separate from Session storage and is not a sandbox.
 
@@ -45,6 +49,10 @@ Conversation settings coordination follows [spec #251](https://github.com/CxHsin
 **Long-term Memory**: Shared sourced MEMORY facts/preferences, SELF identity/persona/relationship/expression, and global or Work Directory topics. Current user corrections replace old claims. Memory helps understanding; Durable Workflow and external evidence determine execution state.
 
 **SELF**: The current authoritative definition of the assistant's identity, persona, interaction principles and sourced relationship/expression understanding. Local configuration remains distinguishable from original user evidence. Current SELF and an actual generation's frozen snapshot are different facts.
+
+**Persona Expression**: The Personal Agent's nailong manner of speaking and interacting while remaining a reliable assistant. Work-status feedback reflects actual events; conversational expression may be chosen by the agent to suit the context.
+
+**Satiety**: The Personal Agent's playful state of fullness, used for feeding interactions and persona expression. It does not reduce work capability, accuracy or availability, and does not require feeding before work can continue.
 
 **Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
 

@@ -1,5 +1,6 @@
-import { mkdir, readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, appendFile } from "node:fs/promises";
+import { resolve, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
@@ -11,11 +12,12 @@ import { createIntentClassifier, type IntentOptions, type IntentWork } from "./i
 import { HelperControlDispatcher } from "./helper-control.js";
 import { createDurableExecutor } from "./durable-executor.js";
 import type { DurableExecutorOptions } from "./durable-executor.js";
-import { AssistantState, requireFreshNamespace, type SteerRecord } from "./state.js";
+import { AssistantState, requireFreshNamespace, type SteerRecord, type ExpressionFrequency } from "./state.js";
 import type { ReplyPreview } from "../telegram/draft-preview.js";
 import { cacheReport, conversationUsage } from "./cache-report.js";
-import type { MagpieSnapshot } from "./magpie.js";
+import type { MagpieSnapshot, MagpieRoutingSnapshot } from "./magpie.js";
 import { createConversationSettings } from "./conversation-settings.js";
+import type { TelegramInteractions, TelegramExpression } from "./persona.js";
 
 export type AssistantInput = QueueInput;
 export type AssistantOutput = { conversationId: string; outputId?: string } & (
@@ -40,9 +42,14 @@ export type AssistantOptions = {
   media?: DurableExecutorOptions["media"];
   compaction?: DurableExecutorOptions["compaction"];
   onRequestMetrics?: DurableExecutorOptions["onRequestMetrics"];
+  /** Local interaction clock; queue and preview scheduling retain their existing clocks. */
+  now?: () => number;
 };
 
 export type ControlSnapshot = MagpieSnapshot & {
+  routing: MagpieRoutingSnapshot;
+  expressionFrequency: ExpressionFrequency;
+  satiety: {value:number;label:string};
   conversationId: string; actual?: {model:string;thinking?:string}; pending:boolean;
   status: "idle" | "running" | "stopping" | "waiting_model" | "paused"; waiting:number;
   usage: Awaited<ReturnType<typeof conversationUsage>>;
@@ -50,11 +57,15 @@ export type ControlSnapshot = MagpieSnapshot & {
   works: Array<{id:string;summary:string;status:string;batchId?:string;helperId?:string;reason?:string}>;
 };
 export type ControlAction =
+  | {type:"expression";frequency:ExpressionFrequency;operationId?:string} | {type:"feed";operationId:string}
   | {type:"model";model:string;operationId?:string} | {type:"thinking";level:string;operationId?:string}
+  | {type:"routing_model";model:string;operationId?:string}
   | {type:"favorite";model:string;enabled:boolean;operationId?:string} | {type:"draft";enabled:boolean;operationId?:string}
   | {type:"cache"} | {type:"stop";operationId:string} | {type:"cancel";target:string;operationId:string}
   | {type:"resume";target?:string;batchId?:string;operationId:string} | {type:"reset";operationId:string};
 export type ControlResult = {snapshot:ControlSnapshot;text?:string;accepted?:boolean};
+export type StartupResult = { id: string; conversationId: string; status: "success" | "unavailable" | "failed" | "cancelled";
+  model?: string; thinking?: string; durationMs: number; text?: string; reason?: string };
 
 /** Persistent admission/scheduling, with Pi Durable responsible for model/tool execution. */
 export async function createAssistant(options: AssistantOptions) {
@@ -64,6 +75,8 @@ export async function createAssistant(options: AssistantOptions) {
   await mkdir(dataDir, { recursive: true });
   await requireFreshNamespace(dataDir);
   const state = new AssistantState(dataDir);
+  const now = options.now ?? Date.now;
+  const telegramChannels = new Map<string,TelegramInteractions>();
   const client = options.herdr ?? herdrClient;
   const report = options.reportFailure ?? console.error;
   const previews = new Set<(preview: ReplyPreview) => void>();
@@ -75,6 +88,8 @@ export async function createAssistant(options: AssistantOptions) {
   };
   const saveHelpers = async (id: string) => { state.saveHelpers(id, helperRecords(id)); };
   let closed = false;
+  const shutdown = new AbortController();
+  const startupRequests = new Set<Promise<StartupResult>>();
   let acceptance = Promise.resolve();
   let observing: Promise<void> | undefined;
   let service!: Awaited<ReturnType<typeof createQueuedAssistant>>;
@@ -121,6 +136,63 @@ export async function createAssistant(options: AssistantOptions) {
 
   function extraTools(id: string): ToolRegistration[] {
     return [
+      defineTool({name:"telegram_expression",description:"Send a collected sticker or react to an authorized Telegram message when context warrants it. Respect current frequency and serious/exact output requests. In quiet mode an explicit CURRENT user request, its inputId and exact original request are required. Do not invent sticker IDs or message targets. Failure or unknown decorative delivery must not replace or interrupt the formal answer; never retry unknown sends.",
+        parameters:Type.Object({kind:Type.Union([Type.Literal("sticker"),Type.Literal("reaction")]),inputId:Type.String(),stickerId:Type.Optional(Type.String()),messageId:Type.Optional(Type.Number()),emoji:Type.Optional(Type.String()),
+          explicit:Type.Boolean(),request:Type.Optional(Type.String())}),replay:"safe",
+        async execute(args) {
+          try {
+            currentUserInput(id,args.inputId,args.explicit ? args.request ?? "" : undefined);
+            if(state.personaSnapshot(id,now()).expressionFrequency === "quiet" && !args.explicit) throw new Error("安静档不主动发送贴纸或回应。");
+            const channel=telegramChannels.get(id);if(!channel) throw new Error("Telegram 通道尚未连接。");
+            const sticker = args.kind === "sticker" ? state.stickers(id).find(sticker=>sticker.id===args.stickerId) : undefined;
+            if(args.kind === "sticker" && !sticker) throw new Error("没有此已收录贴纸，请先查询或明确收录素材。");
+            if(args.kind === "reaction" && (!Number.isSafeInteger(args.messageId) || !state.telegramMessageKnown(id,String(args.messageId)))) throw new Error("目标消息不属于已核对的授权私聊。");
+            const signature=JSON.stringify(args.kind === "sticker" ? [args.kind,sticker!.id] : [args.kind,args.messageId,args.emoji]);
+            const operationId=`expression:${args.inputId}:${signature}`;
+            const prior=state.beginExpression(id,operationId,signature);
+            if(prior) return {output:[{type:"text",text:`互动动作已有回执：${prior}。未重复发送；sending/unknown 需核查，正式回复继续。`}]};
+            const shared={explicit:args.explicit,inputId:args.inputId,operationId};
+            const action:TelegramExpression = args.kind === "sticker" ? {...shared,kind:"sticker",sticker:sticker!} : {...shared,kind:"reaction",messageId:args.messageId!,emoji:args.emoji ?? ""};
+            try {
+              await channel.express(action);state.finishExpression(id,operationId,signature,"sent");
+              return {output:[{type:"text",text:"互动已发送；不据此判断工作完成。"}]};
+            } catch(error) {
+              const status=(error as {error_code?:number;rejected?:boolean}).error_code || (error as {rejected?:boolean}).rejected ? "rejected" : "unknown";
+              state.finishExpression(id,operationId,signature,status);
+              return {isError:true,output:[{type:"text",text:`装饰性互动发送 ${status}：${String(error)}。不自动重发，不中断主任务，继续交付正式结果。`}]};
+            }
+          } catch(error) {return {isError:true,output:[{type:"text",text:String(error)}]};}
+        }}),
+      defineTool({name:"telegram_stickers",description:"List collected Telegram sticker identities, or collect a current/replied sticker or an explicitly specified Telegram sticker set only at the current user's explicit request. Merely receiving stickers does not authorize collection. Missing references require asking the user. Never claim to understand animation from metadata.",
+        parameters:Type.Object({action:Type.Union([Type.Literal("list"),Type.Literal("collect")]),inputId:Type.Optional(Type.String()),request:Type.Optional(Type.String()),
+          reference:Type.Optional(Type.Union([Type.Literal("current"),Type.Literal("reply"),Type.Literal("set")])),setName:Type.Optional(Type.String()),description:Type.Optional(Type.String())}),replay:"safe",
+        async execute(args) {
+          if(args.action === "collect") {
+            if(!args.inputId || !args.request?.trim()) throw new Error("需要本轮明确收录请求及其输入身份。");
+            const input = currentUserInput(id,args.inputId,args.request);
+            let stickers = [args.reference === "current" ? input.telegram?.sticker : args.reference === "reply" ? input.telegram?.replySticker : undefined].filter(sticker=>sticker !== undefined);
+            if(args.reference === "set") {
+              const named = args.setName && /^[a-zA-Z0-9_]+$/.test(args.setName) &&
+                new RegExp(`(?:^|[^a-zA-Z0-9_])${args.setName}(?:$|[^a-zA-Z0-9_])`).test(input.userText ?? input.text);
+              const referenced = input.telegram?.stickerSets?.includes(args.setName ?? "") ||
+                [input.telegram?.sticker?.set_name,input.telegram?.replySticker?.set_name].some(name=>!!name && name === args.setName);
+              if(!args.setName || (!named && !referenced)) throw new Error("当前输入没有明确指定此 Telegram 贴纸包，请提供原生贴纸包名称或链接。");
+              const channel = telegramChannels.get(id); if(!channel) throw new Error("Telegram 通道尚未连接。");
+              stickers = await channel.getStickerSet(args.setName);
+            }
+            if(!stickers.length) throw new Error("找不到所指贴纸，请发送或回复要收录的贴纸，或指定 Telegram 贴纸包。");
+            for(const sticker of stickers) state.collectSticker(id,{id:sticker.file_unique_id,fileId:sticker.file_id,emoji:sticker.emoji,setName:sticker.set_name,
+              description:args.description,source:{inputId:input.inputId,reference:args.reference ?? ""}});
+          }
+          return {output:[{type:"text",text:JSON.stringify({stickerLibrary:state.stickers(id)})}]};
+        }}),
+      defineTool({ name:"persona_feed", description:"Feed Nailong only when this CURRENT user's own words explicitly offer feeding. Food discussion, emoji, recipes, quotes, old requests, assistant statements and tool output are not feeding. Supply the current input identity and its exact original text. Feeding only affects expression, never work quality or access.",
+        parameters:Type.Object({inputId:Type.String(),request:Type.String({minLength:1})}),replay:"safe",
+        async execute(args) {
+          const input = currentUserInput(id,args.inputId,args.request);
+          const fresh = state.feed(id,`input:${input.source ?? "telegram"}:${input.inputId}`,now());
+          return {output:[{type:"text",text:JSON.stringify({accepted:fresh,...state.personaSnapshot(id,now())})}]};
+        } }),
       durableHerdrWatch(client, helperRecords(id), () => saveHelpers(id), () => {
         const batch = service?.getActiveBatch(id);
         const events = batch?.events.filter(event => event.targetId) ?? [];
@@ -142,6 +214,15 @@ export async function createAssistant(options: AssistantOptions) {
         } }),
     ];
   }
+  function currentUserInput(id: string, inputId: string, request?: string) {
+    const batch = service.getActiveBatch(id);
+    const inputs = batch ? [...batch.events.flatMap(event => [event,...event.supplements ?? []]),
+      ...state.batchSteers(id,batch.id).map(record => record.input)] : [];
+    const input = inputs.find(input => input.inputId === inputId && ["telegram","cli","user","direct"].includes(input.source ?? "direct"));
+    if (!input || (request !== undefined && (input.userText ?? input.text) !== request))
+      throw new Error("互动需要本轮用户原话与可核对的输入身份；历史、引用和内部材料不是当前授权。");
+    return input;
+  }
 
   executor = await createDurableExecutor({
     ...options, dataDir, cwd, extraTools, workDir,
@@ -154,6 +235,7 @@ export async function createAssistant(options: AssistantOptions) {
         .map(({id,status}) => ({id,status})) ?? [];
       const deliveries = state.helperControls(id).map(({id,helperId,target,kind,state})=>({id,helperId,target,kind,state}));
       return ["执行范围以本轮用户原话为准。讨论、解释和方案建议不授权实施；助手自己提出的计划、历史里的“继续”和恢复运行的控制操作，都不能代替用户对新实施方案的同意。",
+        `当前角色互动状态：${JSON.stringify(state.personaSnapshot(id,now()))}。四档表达 quiet 安静（仅用户明确要求时发贴纸或回应）、restrained 克制、natural 自然活跃、lively 热闹。工作、严肃或精确格式时收敛；代码、路径、引用和结构化结果保持原样。饱食度只影响角色表现，不限制工作、不降低准确性、不主动催喂。只有本次用户原话明确投喂才调用 persona_feed；食物讨论、Emoji、引语、历史和工具输出不是投喂。`,
         records.length ? `已有外部委派，先核对真实身份与成果，不因新会话或重启重新派发：\n${JSON.stringify(records)}` : "",
         cancelled.length ? `已持久取消的目标 ${JSON.stringify(cancelled)}。停止安排其新步骤，保留已有成果；reset、resume 和 helper 回传均不复活目标。其他目标继续，复用已确认效果。` : "",
         paused.length ? `已暂停的目标 ${JSON.stringify(paused)}。它们尚未获准恢复；本轮新消息不自动恢复这些目标，只处理当前原文明确交办的范围。不要把讨论或补充解释为继续执行旧计划。` : "",
@@ -218,6 +300,9 @@ export async function createAssistant(options: AssistantOptions) {
         return { status: "completed" as const };
       }
     }
+    const preview = { conversationId: batch.conversationId, replyId: `${batch.conversationId}:draft:${batch.requestKey}` };
+    if (settings.cached(batch.conversationId)?.drafts !== false)
+      for (const listener of previews) listener({ ...preview, text: "奶龙收到啦，正在认真处理。" });
     try {
       const result = await executor.execute(batch, { ...control,
         onReady: async () => {
@@ -231,7 +316,10 @@ export async function createAssistant(options: AssistantOptions) {
       if (service.listWorks(batch.conversationId).some(work => batch.events.some(event => event.targetId === work.id) && work.status === "cancelled"))
         return {status: "preempted" as const};
       return result;
-    } finally { readyBatches.delete(batch.id); }
+    } finally {
+      readyBatches.delete(batch.id);
+      for (const listener of previews) listener(preview);
+    }
   }
 
   try {
@@ -330,7 +418,7 @@ export async function createAssistant(options: AssistantOptions) {
   }
 
   function routeConversation(id: string) {
-    if (closed || routing.has(id) || !settings.canRun(id)) return;
+    if (closed || routing.has(id)) return;
     const pending = Promise.resolve().then(async () => {
       while (!closed) {
         let route = service.routingPending(id)[0];
@@ -365,7 +453,8 @@ export async function createAssistant(options: AssistantOptions) {
               }
             }
             const result = await classifier.classify({input:route.input,works,recent:visible.recent,replyTargets,
-              incomplete:helperRecords(id).some(helper => !helper.delivered && !helper.targetIds?.length)});
+              incomplete:helperRecords(id).some(helper => !helper.delivered && !helper.targetIds?.length)},
+              options.intent?.model ? undefined : await settings.prepareRoutingRequest());
             const reason = result.reason ? `本条输入尚未自动执行补充或取消；路由未判定原因 ${result.reason}。主 Bot 应结合原话处理或澄清。` : undefined;
             route = service.decideRoute(route.eventId,{...result,reason,actions:result.actions.length ? result.actions : [{kind:"request",text:route.input.text}]});
           }
@@ -433,7 +522,7 @@ export async function createAssistant(options: AssistantOptions) {
     const waiting = new Set([...service.listPending(id).map(input => input.eventId),...service.routingPending(id).map(route => route.eventId)]).size;
     const usage = await conversationUsage(dataDir, id);
     const context = {tokens:await executor.contextUsage(id),window:saved.catalog.find(model => model.id === actual?.model)?.contextWindow};
-    return {...saved,conversationId:id,actual,
+    return {...saved,...state.personaSnapshot(id,now()),routing:await settings.routingSnapshot(),conversationId:id,actual,
       usage,context,
       pending:!!actual && (actual.model !== saved.selectedModel || actual.thinking !== ("thinking" in saved ? saved.thinking : undefined)),
       status:service.isStopping(id) ? "stopping" : service.getActiveBatch(id) ? "running" : !settings.canRun(id) ? "waiting_model" :
@@ -445,7 +534,12 @@ export async function createAssistant(options: AssistantOptions) {
     workDir(id);
     let text: string | undefined;
     let accepted: boolean | undefined;
-    if (action.type === "model" || action.type === "thinking" || action.type === "favorite" || action.type === "draft") {
+    if (action.type === "feed") {
+      accepted = state.feed(id,`control:${action.operationId}`,now());
+      text = accepted ? "投喂收到啦！" : "这次投喂已接收，未重复增加饱食度。";
+    } else if (action.type === "expression") {
+      accepted = state.setExpression(id,action.frequency,now(),action.operationId);
+    } else if (action.type === "model" || action.type === "routing_model" || action.type === "thinking" || action.type === "favorite" || action.type === "draft") {
       if (!settings.enabled) throw new Error("旧主模型配置已退役，请连接 Magpie 后从模型目录选择。");
       if ("operationId" in action && action.operationId) {
         const receipt = service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:action.type});
@@ -498,6 +592,51 @@ export async function createAssistant(options: AssistantOptions) {
       "当前没有正在执行的请求；已暂停工作和排队输入保持。";
   }
   return {
+    telegramMessageKnown(id:string,messageId:number) {return state.telegramMessageKnown(id,String(messageId));},
+    registerTelegramInteractions(id:string, channel:TelegramInteractions) {
+      telegramChannels.set(id,channel);
+      return () => {if(telegramChannels.get(id) === channel) telegramChannels.delete(id);};
+    },
+    startupGreeting(conversationId: string, controls: { signal?: AbortSignal; timeoutMs?: number } = {}) {
+      const timeout = AbortSignal.timeout(controls.timeoutMs ?? 30_000);
+      const signal = AbortSignal.any([shutdown.signal, timeout, ...(controls.signal ? [controls.signal] : [])]);
+      const started = Date.now();
+      const id = randomUUID();
+      const request = (async (): Promise<StartupResult> => {
+        let model: string | undefined, thinking: string | undefined;
+        let result: StartupResult;
+        // Race covers catalog/settings preparation as well as the actual model generation.
+        let abort!: () => void;
+        const aborted = new Promise<never>((_resolve, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+          if (signal.aborted) abort();
+        });
+        try {
+          const generate = (async () => {
+            signal.throwIfAborted();
+            const prepared = await settings.prepareMainRequest(conversationId);
+            signal.throwIfAborted();
+            if (!prepared) return undefined;
+            model = prepared.model.model; thinking = prepared.thinking;
+            return executor.generateStartup(conversationId, structuredClone(prepared), signal);
+          })();
+          const text = await Promise.race([generate, aborted]);
+          result = { id, conversationId, model, thinking, durationMs: Date.now() - started,
+            status: text === undefined ? "unavailable" : "success", text };
+        } catch (error) {
+          result = { id, conversationId, model, thinking, durationMs: Date.now() - started,
+            status: shutdown.signal.aborted || controls.signal?.aborted ? "cancelled" : "failed",
+            reason: timeout.aborted ? "启动模型测试超时" : error instanceof Error ? error.message : String(error) };
+        } finally { signal.removeEventListener("abort", abort); }
+        try { await appendFile(join(dataDir, "startup-tests.jsonl"), JSON.stringify(result) + "\n"); }
+        catch (error) { report(error); }
+        return result;
+      })();
+      startupRequests.add(request);
+      void request.finally(() => startupRequests.delete(request));
+      return request;
+    },
     controlSnapshot,
     control,
     subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
@@ -539,6 +678,18 @@ export async function createAssistant(options: AssistantOptions) {
       const accepted = acceptance.then(async () => {
         if (closed) throw new Error("助手服务已关闭");
         workDir(input.conversationId);
+        if(input.source === "telegram" && /^telegram:private:\d+$/.test(input.conversationId)) {
+          state.recordTelegramMessage(input.conversationId,input.inputId);
+          if(input.replyToMessageId) state.recordTelegramMessage(input.conversationId,input.replyToMessageId);
+        }
+        if (!input.images?.length && /^\/feed(?:\s|$)/.test(input.text.trim()) && (!input.kind || input.kind === "command")) {
+          const receipt = service.receiveQuery(input);
+          const valid = input.text.trim() === "/feed";
+          if (valid) state.feed(input.conversationId,`input:${input.source ?? "telegram"}:${input.inputId}`,now());
+          if (receipt.accepted) await emit({conversationId:input.conversationId,outputId:`query:${receipt.eventId}`,type:"text",
+            text:valid ? "投喂收到啦！" : "用法：/feed（投喂一次，饱食度增加 25）"},[]);
+          return receipt;
+        }
         if (!input.images?.length && /^\/stop(?:\s|$)/.test(input.text.trim()) && (!input.kind || input.kind === "command")) {
           const receipt = service.receiveQuery(input);
           if (receipt.accepted) await emit({conversationId:input.conversationId,outputId:`query:${receipt.eventId}`,type:"text",
@@ -583,7 +734,7 @@ export async function createAssistant(options: AssistantOptions) {
     },
     async resume(conversationId: string, batchId?: string) { await service.resume(conversationId, batchId); service.start(); },
     recordReply(conversationId: string, messageId: string, outputId: string) { state.recordReply(conversationId,messageId,outputId); },
-    routingStatus(conversationId: string) { return {model:options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
+    routingStatus(conversationId: string) { return {model:settings.enabled ? settings.routingModel() : options.intent?.model, pending:service.routingPending(conversationId), works:service.listWorks(conversationId)}; },
     async waitForRouting() { await acceptance; while (routing.size) await Promise.all(routing.values()); },
     async waitForIdle() {
       await acceptance;
@@ -598,6 +749,8 @@ export async function createAssistant(options: AssistantOptions) {
     async close() {
       if (closed) return;
       closed = true;
+      shutdown.abort(new Error("助手服务已关闭"));
+      await Promise.allSettled(startupRequests);
       settings.stop();
       clearInterval(timer);
       await observing;

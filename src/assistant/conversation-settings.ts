@@ -1,9 +1,10 @@
 import type { ModelConfig, ModelConfiguration } from "../agent/model-config.js";
 import type { createDurableExecutor } from "./durable-executor.js";
-import { createMagpieControl, type MagpieControl, type MagpieSnapshot } from "./magpie.js";
+import { createMagpieControl, type MagpieControl, type MagpieSnapshot, type MagpieRoutingSnapshot } from "./magpie.js";
 
 type SettingsAction =
   | {type:"model";model:string} | {type:"thinking";level:string}
+  | {type:"routing_model";model:string}
   | {type:"favorite";model:string;enabled:boolean} | {type:"draft";enabled:boolean};
 
 /** Coordinates saved Conversation settings with future Durable request preparation. */
@@ -77,9 +78,27 @@ export async function createConversationSettings(options: {
       return saved;
     },
     cached(id: string) { return snapshots.get(id); },
+    routingModel() { return magpie?.routingModel(); },
+    async routingSnapshot(): Promise<MagpieRoutingSnapshot> {
+      return magpie ? magpie.routingSnapshot() : {scope:"service",connected:false,catalog:[],catalogStatus:"unavailable",selectedAvailable:false};
+    },
+    async prepareRoutingRequest() {
+      return magpie ? magpie.prepareRoutingRequest() : {reason:"not_configured"};
+    },
+    async prepareMainRequest(id: string): Promise<{model:ModelConfig;thinking?:string}|undefined> {
+      if (!magpie) {
+        const model = options.modelConfiguration?.models.find(item=>item.alias===options.modelConfiguration?.defaultModel);
+        return model ? {model:{...model}} : undefined;
+      }
+      const current = await magpie.snapshot(id);
+      if (!current.connected || !current.selectedModel || !current.selectedAvailable) return undefined;
+      const prepared = await magpie.prepareRequest(id);
+      return {model:{...prepared.model},thinking:prepared.thinking};
+    },
     canRun(id: string) { return !magpie || runnable.has(id); },
     async update(id: string, action: SettingsAction) {
       if (!magpie) throw new Error("旧主模型配置已退役，请连接 Magpie 后从模型目录选择。");
+      if (action.type === "routing_model") { await magpie.selectRoutingModel(action.model); return; }
       if (action.type === "model") await magpie.selectModel(id,action.model);
       if (action.type === "thinking") await magpie.setThinking(id,action.level);
       if (action.type === "favorite") await magpie.setFavorite(id,action.model,action.enabled);

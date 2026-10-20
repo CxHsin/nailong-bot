@@ -20,6 +20,7 @@ export type MagpieSnapshot = {
   favorites: string[]; drafts: boolean;
 };
 export type MagpiePreparedRequest = { model: ModelConfig; availableModels: ModelConfig[]; thinking?: string; catalogModel: MagpieModel };
+export type MagpieRoutingSnapshot = Pick<MagpieSnapshot, "connected" | "connectionError" | "catalog" | "catalogStatus" | "catalogError" | "refreshedAt" | "selectedModel" | "selectedAvailable"> & {scope:"service"};
 type Preferences = { selectedModel?: string; thinking: Record<string, string>; thinkingAdjusted?: Record<string, boolean>; favorites: string[]; drafts: boolean };
 type Connection = { baseUrl: string; apiKey: string };
 type JsonObject = Record<string, unknown>;
@@ -200,6 +201,16 @@ export async function createMagpieControl(options: {
       ...thinking, favorites: [...prefs.favorites], drafts: prefs.drafts };
   }
 
+  async function routingSnapshot(refreshCatalog = false): Promise<MagpieRoutingSnapshot> {
+    reload();
+    if (refreshCatalog || needsRefresh) await refresh();
+    const selectedModel = meta<string>("routing-model");
+    return {scope:"service",connected:!!connection && !connectionError,connectionError,
+      catalog:structuredClone(catalog?.models ?? []),catalogStatus:!catalog ? "unavailable" : ready && catalog.endpoint === connection?.baseUrl ? "ready" : "stale",
+      catalogError,refreshedAt:catalog?.at,selectedModel,
+      selectedAvailable:!!selectedModel && catalog?.endpoint === connection?.baseUrl && !!catalog?.models.some(model=>model.id===selectedModel)};
+  }
+
   await snapshot(options.primaryConversationId ?? "", true);
   const timer = setInterval(() => {
     if (!closed) { reload(); if (needsRefresh) void refresh(); }
@@ -212,6 +223,29 @@ export async function createMagpieControl(options: {
   }
   return {
     snapshot,
+    routingSnapshot,
+    routingModel() { return meta<string>("routing-model"); },
+    async selectRoutingModel(modelId: string) {
+      const state = await routingSnapshot();
+      if (!state.connected) throw new Error(state.connectionError ?? "Magpie 未连接，请先在 Magpie 连接 Nailong。");
+      if (!state.catalog.some(model=>model.id===modelId) || catalog?.endpoint !== connection?.baseUrl)
+        throw new Error("模型已不在当前目录中，请刷新并重新选择。");
+      saveMeta("routing-model",modelId);
+    },
+    async prepareRoutingRequest() {
+      const state = await routingSnapshot();
+      if (!state.selectedModel) return {reason:"not_configured"};
+      if (!state.connected || !connection) return {reason:"connection_error"};
+      const model = state.catalog.find(item=>item.id===state.selectedModel);
+      if (!model || !state.selectedAvailable) return {reason:"model_unavailable"};
+      // Prefer the least reasoning the selected model actually advertises for fast intent decisions.
+      const order = ["off","none","minimal","low","medium","high","xhigh","max","ultra"];
+      const thinking = model.reasoning ? [...(model.reasoningLevels ?? [])].sort((a,b)=>{
+        const rank = (level:string)=>order.includes(level) ? order.indexOf(level) : order.length;
+        return rank(a)-rank(b);
+      })[0] : undefined;
+      return {model:modelConfig(model),thinking};
+    },
     /** Check immediately before dispatch, including tool continuations and pinned compaction requests. */
     assertRequestAllowed(model: ModelConfig) {
       reload();

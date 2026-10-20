@@ -297,6 +297,11 @@ export class AssistantMemory {
     }
     return lines.join("\n");
   }
+  /** Read current SELF for an independent generation without creating a Session snapshot. */
+  currentSelf(project?: string) {
+    if (this.selfNeedsRecovery) throw new Error("SELF persistence was interrupted; restart to reconcile the authoritative file");
+    return this.bounded(this.active(project).filter(entry => entry.kind === "SELF"), Math.floor(this.limits.residentBytes / 2), new Set());
+  }
   snapshotInfo(conversationId: string, generation: string | number, project?: string): MemorySnapshot {
     if (this.selfNeedsRecovery) throw new Error("SELF persistence was interrupted; restart to reconcile the authoritative file");
     const key = String(generation);

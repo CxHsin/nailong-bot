@@ -2,12 +2,13 @@ import { randomBytes } from "node:crypto";
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import type { Assistant, ControlSnapshot, ControlAction } from "./runtime.js";
 
-type Page = "home" | "models" | "thinking" | "works" | "work" | "cache" | "settings" | "session" | "reset" | "detail";
-type View = { page: Page; offset?: number; favorites?: boolean; details?: boolean; model?: string; target?: string };
+type Page = "home" | "models" | "thinking" | "works" | "work" | "cache" | "settings" | "session" | "reset" | "detail" | "satiety";
+type View = { page: Page; offset?: number; favorites?: boolean; details?: boolean; model?: string; target?: string; routing?: boolean };
 type ButtonAction = { view: View; action?: ControlAction; refresh?: boolean };
 type Button = { label: string; value: ButtonAction };
 const home: View = { page: "home" };
 const PAGE_SIZE = 6;
+const frequencyNames = { quiet: "安静", restrained: "克制", natural: "自然活跃", lively: "热闹" } as const;
 const statusNames: Record<string, string> = { idle: "空闲", running: "执行中", waiting_model: "等待选择可用模型", paused: "已暂停", queued: "排队中", pending: "排队中", completed: "本轮已结束（目标成果仍需核对）", cancelled: "已取消后续安排", stopping: "停止中", stopped: "已核实停止", unknown: "待核实", background: "后台 helper", helper: "后台 helper", needs_confirmation: "待核实" };
 const statusName = (value: string) => statusNames[value] ?? value;
 const html = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -48,27 +49,33 @@ export function registerTelegramPanel(options: {
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
         rows.push([{ label: `🤖 模型：${s.selectedModel ?? "未选择"}`, value: { view: { page: "models" }, refresh: true } }]);
         if (selected?.reasoning !== false && (selected?.reasoning || selected?.reasoningLevels?.length)) rows.push([button(`🧠 思考等级：${s.thinking ?? "能力未提供"}`, { page: "thinking" })]);
-        rows.push([button(`⏳ 工作列表：${s.waiting} 等待`, { page: "works" })], [button("⚙️ 设置", { page: "settings" })]);
+        rows.push([button("📊 缓存统计", { page: "cache" }, { type: "cache" })],
+          [button(`🍜 饱食：${s.satiety.label}`, { page: "satiety" }), button("投喂 +25", { page: "satiety" }, { type: "feed", operationId: randomBytes(12).toString("hex") })],
+          [{ label: `🧭 全局路由模型：${s.routing.selectedModel ?? "未选择"}`, value: { view: { page: "models", routing: true }, refresh: true } }],
+          [button(`⏳ 工作列表：${s.waiting} 等待`, { page: "works" })], [button("⚙️ 设置", { page: "settings" })]);
         break;
       case "models": {
-        const models = s.catalog.filter(model => !view.favorites || s.favorites.includes(model.id));
+        const catalog = view.routing ? s.routing : s;
+        const models = catalog.catalog.filter(model => !view.favorites || s.favorites.includes(model.id));
         const offset = Math.max(0, Math.min(view.offset ?? 0, Math.max(0, Math.ceil(models.length / PAGE_SIZE) - 1) * PAGE_SIZE));
-        text = `🤖 ${view.favorites ? "常用模型" : "选择模型"}\n\n当前：${selected?.displayName ?? s.selectedModel ?? "未选择"}\n${view.details ? "点击模型查看能力与管理收藏。" : "点击即切换 · ✓ 当前模型"}\n第 ${Math.floor(offset / PAGE_SIZE) + 1}/${Math.max(1, Math.ceil(models.length / PAGE_SIZE))} 页 · 共 ${models.length} 个`;
-        if (!s.connected || s.connectionError) text += `\n${connection}`;
+        text = `🤖 ${view.routing ? "全局路由模型 · 整个助手服务共用" : view.favorites ? "常用模型" : "选择模型"}\n\n当前：${models.find(model => model.id === catalog.selectedModel)?.displayName ?? catalog.selectedModel ?? "未选择"}\n${view.details ? "点击模型查看能力与管理收藏。" : "点击即切换 · ✓ 当前模型"}\n第 ${Math.floor(offset / PAGE_SIZE) + 1}/${Math.max(1, Math.ceil(models.length / PAGE_SIZE))} 页 · 共 ${models.length} 个`;
+        if (view.routing) text += "\n下一次路由判断生效；不改变主模型或当前工作。";
+        if (!catalog.connected || catalog.connectionError) text += `\n${connection}`;
+        if (catalog.selectedModel && !catalog.selectedAvailable) text += "\n已选模型不可用，保留原始消息交给主助手处理。";
         if (!models.length) text += view.favorites ? "\n暂无可用常用模型；到全部列表添加收藏。" : "\n目录为空；请在 Magpie 中启用模型后刷新。";
         for (const model of models.slice(offset, offset + PAGE_SIZE)) {
-          const current = model.id === s.selectedModel ? "✓ " : "";
+          const current = model.id === catalog.selectedModel ? "✓ " : "";
           const next = { ...view, offset };
           const label = `${current}${model.displayName} · ${model.id.includes("/") ? model.id.slice(0, model.id.lastIndexOf("/")) : model.ownedBy ?? model.id}`;
           rows.push([view.details
             ? button(label, { ...next, page: "detail", model: model.id })
-            : button(label, next, { type: "model", model: model.id })]);
+            : button(label, next, { type: view.routing ? "routing_model" : "model", model: model.id })]);
         }
         const navigation: Button[] = [];
         if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
         if (offset + PAGE_SIZE < models.length) navigation.push(button("下一页", { ...view, offset: offset + PAGE_SIZE }));
         if (navigation.length) rows.push(navigation);
-        rows.push([button(view.favorites ? "全部模型" : "常用模型", { page: "models", favorites: !view.favorites }),
+        rows.push([button(view.favorites ? "全部模型" : "常用模型", { ...view, page: "models", offset: 0, details: false, favorites: !view.favorites }),
           { label: "刷新目录", value: { view: { ...view, offset: 0 }, refresh: true } }]);
         rows.push([button(view.details ? "🤖 返回选择" : "ℹ️ 详情与收藏", { ...view, details: !view.details, offset })]);
         break;
@@ -78,7 +85,7 @@ export function registerTelegramPanel(options: {
         if (!model) { text = "此模型已不在当前目录中，请刷新并重新选择。"; }
         else {
           text = `ℹ️ ${model.displayName}\n\nID：${model.id}\n供应商：${model.ownedBy ?? "未知"}\n\n上下文窗口：${model.contextWindow ?? "未知"}\n最大输出：${model.maxOutputTokens ?? "未知"}\n模态：${model.modalities?.join("、") ?? "未知"}\n推理：${model.reasoning === false ? "不支持" : model.reasoning ? "支持" : "未知"}\n等级：${model.reasoningLevels?.join("、") ?? "能力未提供"}`;
-          rows.push([button("选择此模型", { ...view, page: "models", details: false }, { type: "model", model: model.id })],
+          rows.push([button("选择此模型", { ...view, page: "models", details: false }, { type: view.routing ? "routing_model" : "model", model: model.id })],
             [button(s.favorites.includes(model.id) ? "★ 移除常用" : "☆ 加入常用", view, { type: "favorite", model: model.id, enabled: !s.favorites.includes(model.id) })]);
         }
         rows.push([button("返回模型列表", { ...view, page: "models" })]);
@@ -117,10 +124,15 @@ export function registerTelegramPanel(options: {
         break;
       }
       case "cache": text = note ?? "缓存统计暂无数据。"; note = undefined; break;
+      case "satiety":
+        text = `🍜 饱食度\n\n${s.satiety.label} · ${Math.round(s.satiety.value)}/100\n48 小时从满值降至 0；每次投喂增加 25，最高 100。\n肚子饿也会认真办事，不需要投喂才能工作。`;
+        rows.push([button("投喂 +25", view, { type: "feed", operationId: randomBytes(12).toString("hex") })]);
+        break;
       case "settings":
-        text = "⚙️ 设置\n\n查看用量、调整预览或管理会话。";
-        rows.push([button("📊 缓存统计", { page: "cache" }, { type: "cache" })],
-          [button(`✍️ 草稿预览：${s.drafts ? "开" : "关"}`, view, { type: "draft", enabled: !s.drafts })],
+        text = `⚙️ 设置\n\n主动表达：${frequencyNames[s.expressionFrequency]}\n安静档不主动发贴纸或点表情，明确要求时仍可使用。\n调整预览或管理会话；缓存统计在首页。`;
+        for (const [frequency, label] of Object.entries(frequencyNames)) rows.push([button(`${s.expressionFrequency === frequency ? "✓ " : ""}${label}`, view,
+          { type: "expression", frequency: frequency as keyof typeof frequencyNames, operationId: randomBytes(12).toString("hex") })]);
+        rows.push([button(`✍️ 草稿预览：${s.drafts ? "开" : "关"}`, view, { type: "draft", enabled: !s.drafts })],
           [button("🗂 会话操作", { page: "session" })]);
         break;
       case "session":
@@ -134,8 +146,8 @@ export function registerTelegramPanel(options: {
         break;
     }
     if (failure) text += `\n${failure}`;
-    if (note && ["home", "cache", "session", "work", "works"].includes(view.page)) text += `\n${note}`;
-    if (["cache", "session"].includes(view.page)) rows.push([button("⚙️ 返回设置", { page: "settings" })]);
+    if (note && ["home", "cache", "session", "work", "works", "satiety"].includes(view.page)) text += `\n${note}`;
+    if (view.page === "session") rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");
     const actions: ButtonAction[] = [];
@@ -186,7 +198,7 @@ export function registerTelegramPanel(options: {
 
   bot.on("message:text", async (ctx, next) => {
     if (!validOwner(ctx)) return next();
-    const match = /^\/(start|model|thinking|work|kvcache|session|draft|reset|resume|stop)(?:@([\w]+))?(?:\s+([\s\S]*))?$/.exec(ctx.message.text.trim());
+    const match = /^\/(start|model|thinking|work|kvcache|session|draft|reset|resume|stop|feed)(?:@([\w]+))?(?:\s+([\s\S]*))?$/.exec(ctx.message.text.trim());
     if (!match) return next();
     if (match[2] && match[2].toLowerCase() !== bot.botInfo.username.toLowerCase()) return;
     const messageId = ctx.message.message_id;
@@ -198,6 +210,7 @@ export function registerTelegramPanel(options: {
       if (name === "model") { view = { page: "models" }; if (arg) action = { type: "model", model: arg }; else refresh = true; }
       if (name === "thinking") { view = { page: "thinking" }; if (arg) action = { type: "thinking", level: arg }; }
       if (name === "work") view = { page: "works" };
+      if (name === "feed") { if (arg) { await ctx.reply("用法：/feed（投喂一次，饱食度 +25）"); return; } view = { page: "satiety" }; action = { type: "feed", operationId: `telegram:${messageId}:feed` }; }
       if (name === "session") view = { page: "session" };
       if (name === "reset") view = { page: "reset" };
       if (name === "resume") { view = { page: "works" }; action = { type: "resume", ...(arg ? { batchId: arg } : {}), operationId: `telegram:${messageId}:resume` }; }
