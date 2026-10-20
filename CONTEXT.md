@@ -4,6 +4,8 @@ One personal assistant uses a nailong-owned persistent Queue System and Pi Durab
 
 Stable context and shared long-term memory follow [ADR-0012](docs/adr/0012-layered-memory-and-stable-context.md) and [spec #208](https://github.com/CxHsin/nailong-bot/issues/208). Budgets, storage and verification are in [operations](docs/personal-agent-operations.md) and [context acceptance](docs/context-management-acceptance-20261016.md).
 
+The accepted Akasha integration direction follows [ADR-0017](docs/adr/0017-port-akasha-engine-and-independent-embedding.md) and [conclusion #267](https://github.com/CxHsin/nailong-bot/issues/267): port the upstream engine to TypeScript and manage Embedding selection independently of Magpie. The settled scope is in the [design discussion](docs/research/akasha-integration-design-2026-10-20.md). This records design intent; the current recall implementation still uses local lexical matching until the integration is implemented and verified.
+
 System ordering and authoritative SELF follow [ADR-0015](docs/adr/0015-system-context-order-and-self-file.md) and [spec #234](https://github.com/CxHsin/nailong-bot/issues/234). Base instructions, skills, project instructions, SELF and MEMORY retain that effective order. Identity and core persona change only through the user's explicit current request; relationship and expression may evolve from sourced user evidence.
 
 The Conversation Control Panel and Magpie Model Catalog follow [ADR-0016](docs/adr/0016-magpie-catalog-and-conversation-settings.md), [conclusion #242](https://github.com/CxHsin/nailong-bot/issues/242) and [spec #244](https://github.com/CxHsin/nailong-bot/issues/244). The official Telegram/CLI entry uses Magpie's catalog; Conversation-owned choices, thinking preferences, favorites and drafts persist in the existing data directory. Native Telegram controls remain available during requests and tools, and the next prepared request adopts new settings. The Agent plugin shares only the owner's Telegram main Conversation model. Automated behavior and live integration evidence are recorded in [control acceptance](docs/conversation-control-acceptance-20261018.md); actual plugin menu echo and phone acceptance remain pending. Magpie-side thinking controls are deferred under [#243](https://github.com/CxHsin/nailong-bot/issues/243).
@@ -55,6 +57,10 @@ The extension in [conclusion #259](https://github.com/CxHsin/nailong-bot/issues/
 **Satiety**: The Personal Agent's playful state of fullness, used for feeding interactions and persona expression. It does not reduce work capability, accuracy or availability, and does not require feeding before work can continue.
 
 **Akasha Recall**: Bounded retrieval of original records using the current real user Input Event. Sources retain role, time and identity; historical records are evidence, not current instructions. Each input's automatic retrieval, including no matches, is saved and reused.
+
+**Akasha Engine**: The semantic retrieval, association and learning mechanism used to find relevant original experiences. It is distinct from resident MEMORY/SELF files and from the execution facts held by Durable Workflow.
+
+**Embedding Space**: A compatible semantic coordinate system in which text vectors can be compared. Vectors from different spaces do not share similarity or learned associations merely because their dimensions match.
 
 **Memory Snapshot**: Actual resident memory material saved for one context generation. Ordinary changes append immediately; compaction or reset starts a new snapshot. Forgetting invalidates affected snapshots, recalled material and derived summaries immediately.
 
