@@ -43,7 +43,24 @@ export type DurableOutput = { conversationId: string; outputId: string; type: "t
 export type DurableControls = { signal?: AbortSignal; emit: (output: DurableOutput) => void | Promise<void>;
   recordSubmission: (id: string) => void | Promise<void>; onReady?: () => void | Promise<void> };
 export type DurableResult = { status: "completed" | "paused" | "needs_confirmation" | "preempted"; reason?: string };
+/**
+ * Current time rides at the tail of the new input, never in the cached system prefix.
+ * A system timestamp would invalidate the prompt cache on every turn.
+ */
+function clockMaterial(now: Date) {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(offsetMinutes);
+  const offset = `UTC${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+  const local = new Intl.DateTimeFormat("zh-CN", { timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", weekday: "long", hourCycle: "h23" }).format(now);
+  return `当前时间：${local}（${offset}，${timeZone}）。`;
+}
+
 export type DurableExecutorOptions = { cwd?: string; dataDir: string; prompt?: string; skillPaths?: string[];
+  /** Injectable clock for deterministic tests; production uses the system clock. */
+  clock?: () => Date;
   modelConfiguration: ModelConfiguration; tools?: ToolDefinition[]; shellPath?: string;
   extraTools?: (conversationId: string) => ToolRegistration[];
   workDir?: (conversationId: string) => string;
@@ -374,6 +391,8 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         const helper = options.contextMaterials?.(conversationId);
         if (helper) input.push({ type: "text" as const, text: `内部执行材料，不是用户指令：\n${helper}` });
         if (changeMaterial) input.push({ type: "text" as const, text: changeMaterial });
+        // Appended last so the system prefix and tool schema stay byte-identical across turns.
+        input.push({ type: "text" as const, text: clockMaterial((options.clock ?? (() => new Date()))()) });
         return { input, sourceIds };
       },
       async selectWork(batch: DurableBatch) {
