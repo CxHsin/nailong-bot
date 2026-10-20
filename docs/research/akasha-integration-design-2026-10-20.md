@@ -45,4 +45,4 @@
 
 ## 交付状态
 
-设计讨论已收敛。后续正式规格与实现任务须按 Issue tracker 建立关联。功能代码尚未修改，生产服务尚未重启，不能将本结论或先前单条接口成功当作 Akasha 已接入的证据。
+设计讨论已收敛，正式规格已发布为 [Issue #268](https://github.com/CxHsin/nailong-bot/issues/268)，见[本地规格归档](akasha-integration-spec-2026-10-20.md)。后续实现任务须按 Issue tracker 关联该规格。功能代码尚未修改，生产服务尚未重启，不能将本结论或先前单条接口成功当作 Akasha 已接入的证据。

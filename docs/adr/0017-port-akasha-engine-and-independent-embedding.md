@@ -14,4 +14,4 @@ Embedding 使用独立的本地服务与模型配置列表，Telegram 提供选�
 
 首页模型按钮显示主模型简写，子菜单三项各自显示当前选择；思考等级进入主模型页面，Embedding 页面显示连接、历史处理状态及连接测试。`/model` 无参数进入三项菜单，原带参数的主模型切换用途保留。
 
-完整选择及移植验证边界见[讨论记录](../research/akasha-integration-design-2026-10-20.md)。本 ADR 记录已确认设计，尚未发布最终规格或完成代码接入。
+完整选择及移植验证边界见[讨论记录](../research/akasha-integration-design-2026-10-20.md)。正式规格为 [Issue #268](https://github.com/CxHsin/nailong-bot/issues/268)，见[本地规格归档](../research/akasha-integration-spec-2026-10-20.md)。本 ADR 和规格不代表代码接入已完成。
