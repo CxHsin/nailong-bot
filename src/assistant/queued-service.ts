@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { PersistentAssistantQueue, inputPriority, type QueueInput, type PersistedInput, type ProcessingBatch, type BatchStatus, type RoutingAction, type RoutingDecision } from "./queue.js";
+import { PersistentAssistantQueue, inputPriority, type QueueInput, type PersistedInput, type ProcessingBatch, type StoredBatch, type BatchStatus, type RoutingAction, type RoutingDecision } from "./queue.js";
 import type { AssistantOutput } from "./runtime.js";
 
 export type { QueueInput, ProcessingBatch } from "./queue.js";
@@ -12,6 +12,8 @@ export type QueueExecutionContext = {
 };
 export type QueueExecutor = {
   execute(batch: ProcessingBatch, context: QueueExecutionContext): Promise<{status: Exclude<BatchStatus, "running">; reason?: string}>;
+  /** Observe the final persisted Queue status; failure cannot undo completed execution. */
+  settled?: (batch: StoredBatch) => void | Promise<void>;
   close?: () => Promise<void>;
 };
 export type QueuedAssistantOptions = {
@@ -31,10 +33,19 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
   try { queue = new PersistentAssistantQueue(join(options.dataDir, "queue.sqlite")); }
   catch (error) { owner.close(); throw error; }
   const active = new Map<string, {promise: Promise<void>; batch: ProcessingBatch; controller: AbortController; stopping?: boolean}>();
+  const settling = new Set<Promise<void>>();
   const listeners = new Set<(output: AssistantOutput) => void | Promise<void>>();
   let closed = false;
   let started = false;
   const emit = async (output: AssistantOutput) => { for (const listener of listeners) await listener(output); };
+  const report = options.reportFailure ?? console.error;
+  async function notifySettled(batchId: string) {
+    const batch = queue.getBatch(batchId);
+    if (batch && options.executor.settled) {
+      try { await options.executor.settled(batch); }
+      catch (error) { report(error); }
+    }
+  }
   function pump(conversationId: string) {
     if (closed || !started || active.has(conversationId) || options.canRun?.(conversationId) === false) return;
     const batch = queue.claim(conversationId);
@@ -54,7 +65,14 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
           queue.settle(batch.id, "paused", error instanceof Error ? error.message : String(error));
           (options.reportFailure ?? console.error)(error);
         }
-      } finally { active.delete(conversationId); if (!closed) pump(conversationId); }
+      } finally {
+        // Completed execution must stop accepting controls while derived
+        // learning reads its facts. Keep shutdown/idle waiting for that work.
+        settling.add(promise);
+        active.delete(conversationId);
+        try { await notifySettled(batch.id); }
+        finally { settling.delete(promise); if (!closed) pump(conversationId); }
+      }
     });
     active.set(conversationId, {promise, batch, controller});
   }
@@ -100,6 +118,15 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
     getBatch(batchId: string) { return queue.getBatch(batchId); },
     recoverSteerTarget(batchId: string) { queue.recoverSteerTarget(batchId); },
     listBatches(conversationId?: string, statuses?: BatchStatus[]) { return queue.listBatches(conversationId,statuses); },
+    /** Reconcile retained execution facts after restart. */
+    async reconcileSettled() {
+      if (closed) throw new Error("Assistant is closed");
+      for (const batch of queue.listBatches()) {
+        if (closed) return;
+        await notifySettled(batch.id);
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+    },
     listPending(conversationId?: string) { return queue.listPending(conversationId); },
     listWorks(conversationId?: string) { return queue.listWorks(conversationId); },
     routingPending(conversationId?: string) { return queue.routingPending(conversationId); },
@@ -120,7 +147,7 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
     subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
       listeners.add(listener); return () => { listeners.delete(listener); };
     },
-    async waitForIdle() { while (active.size) await Promise.all([...active.values()].map((entry) => entry.promise)); },
+    async waitForIdle() { while (active.size || settling.size) await Promise.all([...active.values()].map((entry) => entry.promise).concat([...settling])); },
     async resume(conversationId: string, batchId?: string) {
       const running = active.get(conversationId);
       if (running?.stopping && (!batchId || running.batch.id === batchId)) await running.promise;
@@ -131,7 +158,7 @@ export async function createQueuedAssistant(options: QueuedAssistantOptions) {
       if (closed) return;
       closed = true;
       for (const entry of active.values()) entry.controller.abort("shutdown");
-      await Promise.all([...active.values()].map((entry) => entry.promise));
+      await service.waitForIdle();
       try { await options.executor.close?.(); }
       finally { queue.close(); owner.close(); }
     },

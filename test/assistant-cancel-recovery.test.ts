@@ -12,12 +12,13 @@ import { once } from "node:events";
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>((done)=>{resolve=done;});return {promise,resolve};}
 
-test("SIGKILL between persisted stop and native abort leaves the request paused until explicit resume", {timeout:25000}, async () => {
+for (const withHistory of [false,true]) test(`SIGKILL between persisted stop and native abort leaves the request paused until explicit resume${withHistory?" with a completed historical turn":""}`, {timeout:25000}, async () => {
   const directory = await mkdtemp(join(tmpdir(),"assistant-stop-window-"));
   const entered = deferred(); let recovering = false; let requests = 0;
   const server = createServer(async (request,response) => {
-    for await (const _part of request) { /* drain the real provider request */ }
+    let body="";for await (const part of request) body+=part;
     requests++;
+    if(body.includes("HISTORICAL_COMPLETED_GOAL")&&!body.includes("PERSISTED_STOP_GOAL")){sendChatCompletion(response,"HISTORY_COMPLETED");return;}
     if (!recovering) entered.resolve(); else sendChatCompletion(response,"RESUMED");
   });
   await new Promise<void>(done => server.listen(0,"127.0.0.1",done));
@@ -25,7 +26,7 @@ test("SIGKILL between persisted stop and native abort leaves the request paused 
   const options = {cwd:directory,dataDir:join(directory,"fresh"),modelConfiguration:{defaultModel:"local",models:[{
     alias:"local",model:"local",api:"openai-completions" as const,apiKey:"test",baseUrl:`http://127.0.0.1:${address.port}`}]}};
   await writeFile(join(directory,"options.json"),JSON.stringify(options));
-  const child = fork(resolve("test/fixtures/assistant-stop-window-child.ts"),[directory],{execArgv:["--import","tsx"],windowsHide:true,silent:true});
+  const child = fork(resolve("test/fixtures/assistant-stop-window-child.ts"),[directory,...(withHistory?["history"]:[])],{execArgv:["--import","tsx"],windowsHide:true,silent:true});
   let app: Awaited<ReturnType<typeof createAssistant>> | undefined;
   const exited = once(child,"exit");
   try {
@@ -35,13 +36,14 @@ test("SIGKILL between persisted stop and native abort leaves the request paused 
     server.closeAllConnections();recovering = true;
     app = await createAssistant(options);app.subscribe(() => {});
     const snapshot = await app.controlSnapshot("one");
-    await app.waitForIdle();assert.equal(requests,1,"opening native state cannot bypass a saved stop");
-    assert.equal(snapshot.works[0]?.status,"paused");
+    await app.waitForIdle();assert.equal(requests,withHistory?2:1,"opening native state cannot bypass a saved stop");
+    assert.equal(snapshot.works.filter(work=>work.status==="paused").length,1);
+    assert.equal(snapshot.works.filter(work=>work.status==="completed").length,withHistory?1:0);
     await app.receive({conversationId:"one",inputId:"stop",text:"/stop"});
-    assert.equal(requests,1,"replayed stop cannot enqueue a new command");
+    assert.equal(requests,withHistory?2:1,"replayed stop cannot enqueue a new command");
     await app.resume("one");await app.waitForIdle();
-    assert.equal(requests,2);
-    assert.equal((await app.controlSnapshot("one")).works[0]?.status,"completed");
+    assert.equal(requests,withHistory?3:2);
+    assert.ok((await app.controlSnapshot("one")).works.every(work=>work.status==="completed"));
   } finally {
     if (child.exitCode === null && child.signalCode === null) {child.kill("SIGKILL");await exited;}
     await app?.close();server.closeAllConnections();await new Promise<void>(done => server.close(() => done()));

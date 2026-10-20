@@ -30,7 +30,7 @@ const contextSchema = Type.Object({
     backgroundTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000_000 })) }, { additionalProperties: false })),
 }, { additionalProperties: false });
 
-/** Uses a fresh namespace; never runs legacy migrations or loads Akasha. */
+/** Composes the active Assistant namespace without importing retired Host data. */
 export async function assistantEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ) {

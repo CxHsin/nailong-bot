@@ -16,6 +16,9 @@ import type { QueueInput } from "./queue.js";
 import { durableModels, type RequestMetric } from "./durable-models.js";
 import { createToolArchive, type ToolArchiveLimits } from "./archive.js";
 import { AssistantMemory, type MemoryLimits } from "./memory.js";
+import type { EmbeddingService } from "./embedding.js";
+import { collectAkashaLearning, type AkashaLearningSteer } from "./akasha-learning.js";
+import type { StoredBatch } from "./queue.js";
 import { memoryRefinement } from "./memory-refinement.js";
 import { sanitizeMemoryContext } from "./memory-context.js";
 import { persistMedia, type MediaOptions } from "./media.js";
@@ -67,6 +70,7 @@ export type DurableExecutorOptions = { cwd?: string; dataDir: string; prompt?: s
   contextMaterials?: (conversationId: string) => string;
   archive?: Partial<ToolArchiveLimits>;
   memory?: Partial<MemoryLimits>;
+  embedding?: EmbeddingService;
   media?: MediaOptions;
   compaction?: Partial<CompactionPolicy>;
   onRequestMetrics?: (metric: RequestMetric) => void;
@@ -79,7 +83,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
   const cwd = resolve(options.cwd ?? process.cwd());
   const rootDirectory = resolve(options.dataDir, "executions");
   await mkdir(rootDirectory, { recursive: true });
-  const memory = new AssistantMemory(options.dataDir, options.memory);
+  const memory = new AssistantMemory(options.dataDir, options.memory, options.embedding);
   const conversations = new Map<string, ReturnType<typeof open>>();
   async function open(conversationId: string) {
     const cwd = resolve(options.workDir?.(conversationId) ?? options.cwd ?? process.cwd());
@@ -331,16 +335,17 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       const sources = events.map(event => memory.recordInput({ ...event, text: event.userText ?? event.text, project: cwd,
         role: !event.source || ["direct", "user", "telegram", "cli"].includes(event.source) ? "user" : event.source === "herdr" ? "helper" : "tool" }));
       const supplementSources = events.flatMap(event => (event.supplements ?? []).map(supplement => memory.recordInput({
-        ...supplement, conversationId, project: cwd, role: "user",
+        ...supplement, text: supplement.userText ?? supplement.text, conversationId, project: cwd, role: "user",
       })));
       currentInputSources = [...new Set([...sources, ...supplementSources])];
-      return { sources, sourceIds: currentInputSources };
+      return { sources, supplementSources, sourceIds: currentInputSources };
     }
     return { harness, root, rememberUncertain, catalog, directory,
       activateInputs,
+      resetMemorySources() { currentSources = []; currentInputSources = []; },
       async prepare(events: DurableEvent[]) {
         const present = (await root.context(context)).entries.flatMap((entry) => (entry.data as { sourceIds?: string[] } | undefined)?.sourceIds ?? []);
-        const { sources, sourceIds } = activateInputs(events);
+        const { sources, supplementSources, sourceIds } = activateInputs(events);
         currentSources = [...new Set([...currentSources, ...sourceIds])];
         const head = (await root.context(context)).head?.id ?? 0;
         const snapshotVersion = memory.snapshotInfo(conversationId, String(head), cwd).version;
@@ -357,11 +362,19 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           delivery.version = change.version;
         }, context);
         let remaining = Math.max(0, memory.limits.inputBytes - Buffer.byteLength(changeMaterial));
-        const materials = events.map((event, index) => {
-          const material = memory.prepareInput(conversationId, sources[index]!, cwd, Math.max(0, remaining), [...present, ...currentSources, ...sources]);
+        const materials = [];
+        let supplementIndex = 0;
+        for (const [index,event] of events.entries()) {
+          const material = await memory.prepareSemanticInput(conversationId, sources[index]!, cwd, Math.max(0, remaining), [...present, ...currentSources, ...sources]);
           remaining -= Buffer.byteLength(material);
-          return { ...event, material };
-        });
+          const supplements = [];
+          for (const supplement of event.supplements ?? []) {
+            const extra = await memory.prepareSemanticInput(conversationId, supplementSources[supplementIndex++]!, cwd, Math.max(0, remaining), [...present, ...currentSources, ...sourceIds]);
+            remaining -= Buffer.byteLength(extra);
+            supplements.push({ ...supplement, material: extra });
+          }
+          materials.push({ ...event, material, supplements });
+        }
         const input = [];
         const replyMaterial = (event: ReplyReference & {inputId:string}) => {
           if (event.replyToMessageId || event.replyToMessage) input.push({type:"text" as const,text:
@@ -383,6 +396,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
             input.push({ type: "text" as const,
               text: `<event identity=${JSON.stringify(supplement.inputId)} source=${JSON.stringify(supplement.source ?? "direct")} target=${JSON.stringify(event.targetId)} >\n${supplement.userText ?? supplement.text}\n</event>` });
             replyMaterial(supplement);
+            if (supplement.material) input.push({ type: "text" as const, text: supplement.material });
             if (supplement.actionText) input.push({type:"text" as const,text:`<routing-material identity=${JSON.stringify(supplement.inputId)} >\n此补充仅针对目标 ${event.targetId}，本轮只处理原文片段 ${JSON.stringify(supplement.actionText)}；同条输入其他动作由应用另行分发，不重复执行。\n</routing-material>`});
             for (const material of supplement.runtimeMaterials ?? []) input.push({type:"text" as const,text:`<routing-material identity=${JSON.stringify(supplement.inputId)} >\n运行时路由材料（不是用户正文）：\n${material}\n</routing-material>`});
           }
@@ -411,6 +425,25 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     return opening;
   }
   return {
+    refreshMemory() { memory.refreshAkasha(); },
+    async collectLearning(batch: StoredBatch, steers: readonly AkashaLearningSteer[] = []) {
+      if (!options.embedding) return;
+      // Read persisted facts without opening a Harness: opening it can resume a
+      // native request even when the Queue has durably paused that conversation.
+      let storage: Awaited<ReturnType<typeof openNodeSqliteStorage>> | undefined;
+      const factsStorage = async () => storage ??= await openNodeSqliteStorage(join(rootDirectory,
+        createHash("sha256").update(batch.conversationId).digest("hex"), "session.sqlite"));
+      try {
+        const facts = await collectAkashaLearning({batch,steers,
+          submission: async id => (await factsStorage()).submission(Number(id) as SubmissionId, context),
+          entry: async id => (await (await factsStorage()).entry(id as import("@earendil-works/pi-durable").EntryId,context))?.entry,
+          task: async id => (await factsStorage()).task(id as import("@earendil-works/pi-durable").TaskId,context),
+          source: id => memory.getSource(id), current: id => memory.isSourceCurrent(id),
+          query: id => memory.savedRecall(id),
+        });
+        memory.recordLearningFacts(facts);
+      } finally { await storage?.close(context); }
+    },
     async generateStartup(conversationId: string, prepared: { model: ModelConfig; thinking?: string }, signal: AbortSignal) {
       // A separate catalog shares the provider adapter and metrics, but never opens a Durable Conversation.
       const directory = join(rootDirectory, createHash("sha256").update(conversationId).digest("hex"));
@@ -617,7 +650,11 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
       const { harness, root } = await conversation(conversationId);
       return harness.abortSubmission(Number(id) as SubmissionId, context, root.id);
     },
-    async reset(conversationId: string) { await (await conversation(conversationId)).root.reset(undefined, context); },
+    async reset(conversationId: string) {
+      const opened = await conversation(conversationId);
+      await opened.root.reset(undefined, context);
+      opened.resetMemorySources();
+    },
     async model(conversationId: string, alias?: string) {
       const { root, catalog } = await conversation(conversationId);
       if (alias) {
@@ -638,7 +675,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
         for (const id of Object.values(ranges?.tasks ?? {})) await harness.waitForTask(id as import("@earendil-works/pi-durable").TaskId, context);
       }));
     },
-    async close() { try { for (const pending of conversations.values()) await (await pending).harness.close(context); } finally { memory.close(); } },
+    async close() { try { for (const pending of conversations.values()) await (await pending).harness.close(context); } finally { await memory.close(); } },
   };
 }
 export type DurableExecutor = Awaited<ReturnType<typeof createDurableExecutor>>;

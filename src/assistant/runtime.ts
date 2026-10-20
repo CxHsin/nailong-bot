@@ -231,6 +231,7 @@ export async function createAssistant(options: AssistantOptions) {
 
   executor = await createDurableExecutor({
     ...options, dataDir, cwd, extraTools, workDir,
+    embedding,
     modelConfiguration: settings.initialModelConfiguration,
     beforeModelRequest: model => settings.assertRequestAllowed(model),
     contextMaterials: (id: string) => {
@@ -327,11 +328,15 @@ export async function createAssistant(options: AssistantOptions) {
     }
   }
 
+  let learningRecovery = Promise.resolve();
   try {
     service = await createQueuedAssistant({ dataDir, startPaused: true, reportFailure: report,
       canRun: id => settings.canRun(id),
-      executor: { execute, close: () => executor.close() } });
+      executor: { execute,
+        settled: batch => executor.collectLearning(batch,state.batchSteers(batch.conversationId,batch.id)),
+        close: async () => { await learningRecovery; await executor.close(); } } });
     service.subscribe(emit);
+    learningRecovery = service.reconcileSettled().catch(report);
   } catch (error) {
     try { if (service) await service.close(); else await executor.close(); }
     finally { await embedding.close(); settings.close(); state.close(); }
@@ -508,6 +513,7 @@ export async function createAssistant(options: AssistantOptions) {
   timer.unref();
   async function controlSnapshot(id: string, query: {refresh?:boolean} = {}): Promise<ControlSnapshot> {
     workDir(id);
+    executor.refreshMemory();
     const saved = await settings.query(id, query.refresh);
     const actual = await executor.actualSettings(id) ?? (saved.connected && saved.selectedAvailable && saved.selectedModel ?
       {model:saved.selectedModel,thinking:"thinking" in saved ? saved.thinking : undefined} : undefined);

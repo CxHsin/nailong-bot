@@ -25,3 +25,7 @@ system 记忆快照在同一压缩代内固定，持久保存以便重启复用�
 遗忘/纠正沿来源关系使助手派生内容失效。受影响的压缩摘要从仍有效的原始材料和 Durable 工具记录定位重建并保存；后续原生压缩也使用清理后的材料。快照、自动召回和新追加材料的来源都纳入摘要范围，覆盖 reset 后通过长期记忆进入对话的事实。
 
 稳定 section 顺序与原生压缩遵循 SDK 编码器；有遗忘材料时通过 beforeCompact 提供清理后的摘要，普通压缩继续走原生实现。真实模型验证了偏好、SELF、项目主题、纠正、遗忘、原生压缩续接，以及同一 helper 的大资料和图片分析。[验收记录](../context-management-acceptance-20261016.md)说明受控测试、真实用量、失败修复与证据范围；默认预算及配置见[操作说明](../personal-agent-operations.md)。
+
+## 2026-10-20 的召回实现替换
+
+[ADR-0017](0017-port-akasha-engine-and-independent-embedding.md)及规格 [#268](https://github.com/CxHsin/nailong-bot/issues/268)已将上文的本地词项/中文相邻双字召回实现替换为固定上游核心的 TypeScript 移植，接入独立 Embedding、图关联与有闭合事实的经历学习；本地词项路径保留为故障降级。MEMORY/SELF、稳定快照、摘要失效、默认遗忘及 Durable 的执行事实职责继续适用。实际接口证据、固定对照的局限与生产状态见[Akasha 接入验收](../akasha-integration-acceptance-20261020.md)，上文 2026-10-16 的验收不用于证明本次新增能力。
