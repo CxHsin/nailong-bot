@@ -1,6 +1,6 @@
 # Akasha TypeScript、独立 Embedding 与模型菜单接入验收
 
-日期：2026-10-20（Asia/Shanghai）。正式规格 [#268](https://github.com/CxHsin/nailong-bot/issues/268)，设计 [ADR-0017](adr/0017-port-akasha-engine-and-independent-embedding.md)，集成验收任务 [#277](https://github.com/CxHsin/nailong-bot/issues/277)。基准为文档提交 `769e39e`；实现集成在 `development`，已包含独立配置提交 `ef0aa14` 与菜单提交 `71865fb`。本记录编写时核心、宿主及新增测试尚有未提交差异；最终受检提交、全仓检查和评审结论须在全部相关写入者停写后补入，当前不据本记录宣称整个规格已验收完成。
+日期：2026-10-20（Asia/Shanghai）。正式规格 [#268](https://github.com/CxHsin/nailong-bot/issues/268)，设计 [ADR-0017](adr/0017-port-akasha-engine-and-independent-embedding.md)，集成验收任务 [#277](https://github.com/CxHsin/nailong-bot/issues/277)。基准为文档提交 `769e39e`；实现集成在 `development`，包含独立配置提交 `ef0aa14`、菜单提交 `71865fb`、核心与宿主提交 `6099b36`。所有相关实现代理已停写；下文记录集成验证、两轴审查及独立临时空间的真实接口证据。交付后仍须另行授权推送与生产切换。
 
 ## 实现与行为入口
 
@@ -10,20 +10,20 @@
 
 | 规格用户故事 | 行为及证据入口 | 当前证据范围 |
 | --- | --- | --- |
-| 1–7 | [语义召回](../test/assistant-akasha.test.ts)、[图关联](../test/assistant-akasha-graph.test.ts)、既有原文读取与 Tool Archive 回归 | 跨措辞、实际注入、角色/时间/来源、主动搜索；图场景最终结果待集成汇总 |
-| 8–12 | [既有记忆](../test/assistant-memory.test.ts)、[语义召回](../test/assistant-akasha.test.ts)、[失效](../test/assistant-memory-invalidation.test.ts) | 档案、逐输入材料复用、空结果/故障区分、范围与预算；全仓回归待最终记录 |
-| 13–15 | [学习](../test/assistant-akasha-learning.test.ts)、[图关联](../test/assistant-akasha-graph.test.ts) | 7 项学习测试通过；未来关联的图场景待最终汇总 |
-| 16–18 | [图关联](../test/assistant-akasha-graph.test.ts)、[在途遗忘](../test/assistant-akasha-race.test.ts)、[既有失效](../test/assistant-memory-invalidation.test.ts) | 当前消费、派生来源、旧空间及后台提交的最终竞态结果待汇总 |
+| 1–7 | [语义召回](../test/assistant-akasha.test.ts)、[图关联](../test/assistant-akasha-graph.test.ts)、既有原文读取与 Tool Archive 回归 | 跨措辞、实际注入、角色/时间/来源、主动搜索，以及超出直接近邻的图联想 |
+| 8–12 | [既有记忆](../test/assistant-memory.test.ts)、[语义召回](../test/assistant-akasha.test.ts)、[失效](../test/assistant-memory-invalidation.test.ts) | 档案、逐输入材料复用、空结果/故障区分、范围与预算 |
+| 13–15 | [学习](../test/assistant-akasha-learning.test.ts)、[图关联](../test/assistant-akasha-graph.test.ts) | 7 项学习测试及未来关联图场景通过 |
+| 16–18 | [图关联](../test/assistant-akasha-graph.test.ts)、[在途遗忘](../test/assistant-akasha-race.test.ts)、[既有失效](../test/assistant-memory-invalidation.test.ts) | 当前消费、派生来源、旧空间及后台提交竞态 |
 | 19–25 | [学习](../test/assistant-akasha-learning.test.ts)、[空间与恢复](../test/assistant-akasha-space.test.ts) | 仅现役资料、有效原文与闭合资格区分、无新查询历史补齐、重启幂等、后台恢复与取消 |
-| 26–33 | [Embedding 控制](../test/assistant-embedding-control.test.ts)、[模型菜单](../test/assistant-model-menu.test.ts) | 本地列表/环境初始项、持久选择、脱敏、合成连接测试；最终组合结果待汇总 |
+| 26–33 | [Embedding 控制](../test/assistant-embedding-control.test.ts)、[模型菜单](../test/assistant-model-menu.test.ts) | 本地列表/环境初始项、持久选择、脱敏、合成连接测试 |
 | 34–36 | [Embedding 控制](../test/assistant-embedding-control.test.ts)、[语义召回](../test/assistant-akasha.test.ts)、[空间与恢复](../test/assistant-akasha-space.test.ts) | 未配置/错误/超时等继续聊天、降级保存、后台无查询恢复 |
 | 37–40 | [空间与恢复](../test/assistant-akasha-space.test.ts)、[模型菜单](../test/assistant-model-menu.test.ts) | 同维度不同服务隔离、维度变化、迟到结果、新选择重建及主/路由独立 |
 | 41–50 | [模型菜单](../test/assistant-model-menu.test.ts)、[原生控制面板](../test/assistant-control-panel.test.ts)、[模型控制](../test/assistant-model-control.test.ts) | 单入口三选择、思考位置、完整 ID、命令、忙时操作与暂停契约；手机观察未执行 |
-| 51 | [学习](../test/assistant-akasha-learning.test.ts)、[空间与恢复](../test/assistant-akasha-space.test.ts)、[既有失效](../test/assistant-memory-invalidation.test.ts) | reset/reopen 保留选择、派生状态与遗忘；最终回归待汇总 |
+| 51 | [学习](../test/assistant-akasha-learning.test.ts)、[空间与恢复](../test/assistant-akasha-space.test.ts)、[既有失效](../test/assistant-memory-invalidation.test.ts) | reset/reopen 保留选择、派生状态与遗忘 |
 | 52–53 | [原 Python 夹具](../test/fixtures/akasha/README.md)、[特征](../test/assistant-akasha-features.test.ts)、[核心](../test/assistant-akasha-engine.test.ts) | 核心 11/11 通过；Python 仅为开发对照，无生产 Python worker |
 | 54 | 下文真实接入与交付状态 | 区分自动化、真实接口、手机和生产，不以 HTTP 200 替代集成证明 |
 
-此表为覆盖导航，待汇总项不标作已通过。规格中的原生控制鉴权、过期/重复回调和既有记忆保证仍需最终完整项目测试覆盖。
+此表为覆盖导航。原生控制鉴权、过期/重复回调及既有记忆保证同时由完整项目测试覆盖；手机观察与生产状态按下文单独记录。
 
 ## 原 Python 对照及兼容范围
 
@@ -42,7 +42,39 @@ TypeScript 使用固定 `@node-rs/jieba@2.0.4` 搜索模式及 HMM，原 Python 
 - `assistant-akasha-space.test.ts`：**3/3 通过**；同维度不同服务、维度改变的迟到结果、无新查询恢复及关闭取消。
 - `assistant-akasha.test.ts`：**5/5 通过**；包含保存零命中/降级、原文注入、主动搜索、逐补充输入查询及助手改述的用户依据。
 
-图联想、遗忘竞态、原生模型菜单组合、最终 `npm run typecheck`、`npm test`、`npm run build`、`npm run docs:check` 和 code-review 结果尚待集成负责人更新。上列定向结果不替代这些完成条件。
+图联想 3/3、在途遗忘竞态 1/1 通过；图、竞态与语义召回联跑为 9/9。独立配置与菜单提交分别保留 36/36、50/50 的相关验证。最终受检状态及全仓检查见下文，上列定向结果不替代完整项目检查。
+
+## 集成回归修复
+
+完整项目运行发现并修复三条真实回归：SELF 中断存储后的后台错误处理再次读取失败来源；启动历史学习打开 Harness，绕过已持久暂停；最终 Queue 已完成但学习回调仍占据活动执行身份，使迟到路由补充投向已结束请求。修复分别使用最近安全进度、Durable 存储的事实读取接口，以及在学习核对前结束活动执行身份并继续等待学习关闭。
+
+现有 SELF 中断恢复、SIGKILL 停止窗口及路由迟到补充用例都曾在集成中失败，修复后通过；新增同会话历史完成对话与暂停 native 请求并存的 SIGKILL 用例，确认扫描旧完成事实也不会启动暂停请求。空间/Queue/路由修复后定向联跑为 26/26。针对维度迟到结果，移除 space head 的请求顺序更新约束后，用例实际失败于重复请求计数 `1 != 2`，恢复修复后通过。
+
+两处测试观察也做了校正：同文既是查询又是待索引来源，不能把后台合法重试当成工具续步重新查询，改为比较两次真实模型 wire 中完全一致的已保存降级材料；收到后台 HTTP 请求不代表向量已提交，改为等待实际准备状态。没有禁用后台恢复或放宽生产故障边界。
+
+## Standards
+
+以 `git diff 769e39e...6099b36` 及三个实现提交作只读审查。未发现可确认的硬规范违反。可选 Duplicated Code：学习资格模块与记忆模块重复“默认来源 + SHA-256 身份”规则；当前算法一致，保留为后续维护建议。固定上游的命名与数值结构为移植和对照所需，不机械认定为代码异味。
+
+## Spec
+
+独立只读审查核对 #268 的全部用户故事、20 项实现决定与 11 项测试决定：缺失/部分要求 0 项，未要求扩大 0 项，已实现但可确认逻辑错误 0 项。重点检查闭合事实、共享答案幂等、历史不造反馈、旧空间迟到结果、实际注入失效和合成测试边界。最终报告为 Standards 0 硬违反、1 可选维护建议；Spec 0 缺陷。
+
+## 最终完整项目验证
+
+受检源码为 `6099b36`，测试期间全部相关写入者停写，后续交付提交仅更新本文及领域导航的验收说明。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `npm run typecheck` | 通过 |
+| `node --import tsx --test --test-concurrency=1 test/*.test.ts` | **320/320 通过**，失败 0、跳过 0；503455.765 ms |
+| `npm run build` | 通过 |
+| `npm run docs:check` | 通过，115 份受跟踪文档、540 个本地链接 |
+| `git diff --cached --check` | 通过 |
+
+默认并发的 `npm test` 曾发现上述已修复的真实回归，同时在完整负载下出现既有子进程 10 秒启动边界超时及异步观察不稳定；未以定向成功替代全仓检查。通过 npm 在文件通配符后追加并发参数没有限制文件并发，随后改用上表中参数位置明确的 Node 命令完成整个套件。所有子进程外部效果、崩溃恢复、目录缩窗压缩、SELF 中断及新增 Akasha 用例在本次完整串行运行中均通过。没有修改既有子进程超时；该结果不宣称默认并发运行已稳定。
+
+执行机临时完整日志：`C:/Users/Cx/AppData/Local/Temp/nailong-268-full-test-bounded-20261020.log`、`nailong-268-typecheck-delivery-20261020.log`、`nailong-268-build-delivery-20261020.log`。原 Python 对照重新生成与仓库夹具字节一致，SHA-256 为 `8B82EB7A5EB98B2A7393A296624720DB56E78B0838C860940179CC920B6C5E65`。
 
 ## 真实 Embedding 与正式环境组合
 
@@ -64,6 +96,6 @@ TypeScript 使用固定 `@node-rs/jieba@2.0.4` 搜索模式及 HMM，原 Python 
 
 ## 交付与未执行项
 
-当前完成的是代码接线、上述定向测试及独立临时空间真实 Embedding 验收。最终稳定源码的全仓检查、评审修复、提交身份和完整规格完成结论由集成负责人补入本记录。生产现役历史的全量补齐、手机按钮观察及真实主模型响应质量不由这次合成验收证明。
+规格 #268 的代码实现、完整项目检查、两轴审查和独立临时空间真实 Embedding 验收已完成；实现任务 #269–#277 对应本地提交，关闭关联随后续获准推送和 PR 流程处理。生产现役历史的全量补齐、手机按钮观察及真实主模型响应质量不由这次合成验收证明。
 
 未执行生产进程重启、生产 Telegram 发送或 PR 合并。推送及 PR 状态按用户明确授权和实际动作记录，构建或提交不表示生产已经切换。配置、存储、后台恢复和故障处理见[操作说明](personal-agent-operations.md)。

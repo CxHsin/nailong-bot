@@ -22,4 +22,4 @@ Embedding 使用独立的本地服务与模型配置列表，Telegram 提供选�
 
 原 Python 对照包含 14 次 retrieve/commit、4 次探针、恢复与 6 组直接读出变体，核心 11 项测试通过。分词固定 `@node-rs/jieba@2.0.4`，原 Python 基准为 `jieba==0.42.1`；原生字典的字节顺序及一条重复行有差异，明确进入词法版本。有限样本、拓扑和数值容差对照不能证明任意输入的逐位等价，细节见[夹具说明](../../test/fixtures/akasha/README.md)。
 
-2026-10-20 已经正式 `assistantEnvironment` 在独立临时现役 namespace 使用阿里云 `text-embedding-v3` 生成真实 1024 维向量，并核对跨措辞召回的最终模型请求材料、来源角色/时间/身份及 reopen 复用；聊天响应来自受控 HTTP 端点。已通过的定向结果、尚待汇总的完整集成检查，以及未执行的生产重启、Telegram 发信与手机观察，统一见[Akasha 接入验收](../akasha-integration-acceptance-20261020.md)。上述实现证据不把设计决定本身当作完成证明。
+2026-10-20 已经正式 `assistantEnvironment` 在独立临时现役 namespace 使用阿里云 `text-embedding-v3` 生成真实 1024 维向量，并核对跨措辞召回的最终模型请求材料、来源角色/时间/身份及 reopen 复用；聊天响应来自受控 HTTP 端点。定向结果、完整集成检查及两轴审查，以及未执行的生产重启、Telegram 发信与手机观察，统一见[Akasha 接入验收](../akasha-integration-acceptance-20261020.md)。上述实现证据不把设计决定本身当作完成证明。
