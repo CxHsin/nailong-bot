@@ -38,6 +38,18 @@ Magpie 的模型字段仅绑定配置 owner 的 Telegram 主 Conversation。该�
 
 升级时保留原 `ASSISTANT_DATA_DIR`。`MODEL_NAMES`、`MODEL_DEFAULT`、`ASSISTANT_INTENT_MODEL` 和 `MODEL_<ALIAS>_*` 不再提供正式主助手或路由选择，旧凭据不会自动搬入 Magpie。全局路由初次未选择时显示「未选择」，原话交给主助手；在首页明确选择后启用。选择在现有数据目录内保存，不写入插件的主模型 `model` 字段，不改变各会话主模型和 thinking。真实插件安装、双向回显及手机验收与自动化模拟结果分别记录。
 
+## 独立 Embedding 配置与连接测试
+
+`ASSISTANT_EMBEDDING_CONFIG_FILE` 指向本机 JSON 文件，相对路径从启动工作目录解析。文件用 `models` 数组配置独立服务，服务控制入口使用稳定 `id` 选择；密钥通过 `apiKeyEnv` 引用启动环境变量，配置、连接地址和密钥不会送入聊天模型或控制快照。
+
+```json
+{"models":[{"id":"aliyun","displayName":"阿里云 text-embedding-v3","baseUrl":"https://example.com/v1","model":"text-embedding-v3","apiKeyEnv":"EMBEDDING_API_KEY","timeoutMs":3000,"maxInputChars":6000}]}
+```
+
+每项可额外提供服务声明的 `version`。显式列表优先；没有列表时，齐全的 `EMBEDDING_BASE_URL`、`EMBEDDING_MODEL`、`EMBEDDING_API_KEY` 构成稳定 ID 为 `environment` 的初始项，限制沿用 `EMBEDDING_TIMEOUT_MS` 和 `EMBEDDING_MAX_INPUT_CHARS`。默认总超时 3000 ms，每片 6000 Unicode code point。长文本按连续字符分片，每次最多发送 10 片，所有批次共用一次总超时；原文向量按各片字符数加权平均后做 L2 归一化。切片长度属于 Embedding Space 身份，更改后不能混用旧向量。
+
+选择服务级持久保存在现有数据目录，各 Conversation 共用，reset 和重启保留。刷新时重新读取本地列表；已保存选项被删除或失效时显示不可用，修正配置后可继续使用，不静默换到其他服务。控制入口只查看状态不会发起远程测试；显式连接测试使用固定合成文本，报告耗时、有效维度或脱敏故障原因，不生成聊天或写入用户记忆。首次未测试、测试成功、配置无效、认证失败、超时、断网及非法向量分别按真实结果呈现；准备进度来自实际后台提交，尚无准备任务时显示未开始和零提交。
+
 ## 奶龙互动与启动招呼
 
 设置页有安静、克制、自然活跃（默认）和热闹四档。它是主助手的当前偏好，Telegram 在实际发送前再检查安静档；明确要求的贴纸和回应仍可使用。任务状态、错误、最终文本和文件继续交付。表达频率与草稿开关分别保存，不会互相覆盖。

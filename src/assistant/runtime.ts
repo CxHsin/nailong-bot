@@ -18,6 +18,7 @@ import { cacheReport, conversationUsage } from "./cache-report.js";
 import type { MagpieSnapshot, MagpieRoutingSnapshot } from "./magpie.js";
 import { createConversationSettings } from "./conversation-settings.js";
 import type { TelegramInteractions, TelegramExpression } from "./persona.js";
+import { EmbeddingService, type EmbeddingOptions, type EmbeddingSnapshot } from "./embedding.js";
 
 export type AssistantInput = QueueInput;
 export type AssistantOutput = { conversationId: string; outputId?: string } & (
@@ -39,6 +40,7 @@ export type AssistantOptions = {
   shellPath?: string;
   archive?: DurableExecutorOptions["archive"];
   memory?: DurableExecutorOptions["memory"];
+  embedding?: EmbeddingOptions;
   media?: DurableExecutorOptions["media"];
   compaction?: DurableExecutorOptions["compaction"];
   onRequestMetrics?: DurableExecutorOptions["onRequestMetrics"];
@@ -47,6 +49,7 @@ export type AssistantOptions = {
 };
 
 export type ControlSnapshot = MagpieSnapshot & {
+  embedding: EmbeddingSnapshot;
   routing: MagpieRoutingSnapshot;
   expressionFrequency: ExpressionFrequency;
   satiety: {value:number;label:string};
@@ -57,6 +60,7 @@ export type ControlSnapshot = MagpieSnapshot & {
   works: Array<{id:string;summary:string;status:string;batchId?:string;helperId?:string;reason?:string}>;
 };
 export type ControlAction =
+  | {type:"embedding_model";id:string;operationId?:string} | {type:"embedding_test";operationId:string}
   | {type:"expression";frequency:ExpressionFrequency;operationId?:string} | {type:"feed";operationId:string}
   | {type:"model";model:string;operationId?:string} | {type:"thinking";level:string;operationId?:string}
   | {type:"routing_model";model:string;operationId?:string}
@@ -133,6 +137,7 @@ export async function createAssistant(options: AssistantOptions) {
     conversations: () => state.conversations(), reportFailure: report,
     onRunnable(id) { if (service && !closed) { routeConversation(id); service.start(); } },
   }).catch(error => {state.close(); throw error;});
+  const embedding = new EmbeddingService(dataDir,options.embedding);
 
   function extraTools(id: string): ToolRegistration[] {
     return [
@@ -245,7 +250,7 @@ export async function createAssistant(options: AssistantOptions) {
       if (settings.cached(preview.conversationId)?.drafts === false) return;
       for (const listener of previews) listener(preview);
     },
-  }).catch(error => { settings.close(); state.close(); throw error; });
+  }).catch(async error => { await embedding.close(); settings.close(); state.close(); throw error; });
   settings.attachExecutor(executor);
 
   async function submitSteer(record: SteerRecord) {
@@ -329,7 +334,7 @@ export async function createAssistant(options: AssistantOptions) {
     service.subscribe(emit);
   } catch (error) {
     try { if (service) await service.close(); else await executor.close(); }
-    finally { settings.close(); state.close(); }
+    finally { await embedding.close(); settings.close(); state.close(); }
     throw error;
   }
 
@@ -522,7 +527,7 @@ export async function createAssistant(options: AssistantOptions) {
     const waiting = new Set([...service.listPending(id).map(input => input.eventId),...service.routingPending(id).map(route => route.eventId)]).size;
     const usage = await conversationUsage(dataDir, id);
     const context = {tokens:await executor.contextUsage(id),window:saved.catalog.find(model => model.id === actual?.model)?.contextWindow};
-    return {...saved,...state.personaSnapshot(id,now()),routing:await settings.routingSnapshot(),conversationId:id,actual,
+    return {...saved,...state.personaSnapshot(id,now()),routing:await settings.routingSnapshot(),embedding:embedding.snapshot(),conversationId:id,actual,
       usage,context,
       pending:!!actual && (actual.model !== saved.selectedModel || actual.thinking !== ("thinking" in saved ? saved.thinking : undefined)),
       status:service.isStopping(id) ? "stopping" : service.getActiveBatch(id) ? "running" : !settings.canRun(id) ? "waiting_model" :
@@ -534,7 +539,15 @@ export async function createAssistant(options: AssistantOptions) {
     workDir(id);
     let text: string | undefined;
     let accepted: boolean | undefined;
-    if (action.type === "feed") {
+    if (action.type === "embedding_model" || action.type === "embedding_test") {
+      if (action.operationId) {
+        const receipt=service.receiveQuery({conversationId:id,inputId:`control:${action.operationId}`,source:"control",kind:"command",text:action.type});
+        if (!receipt.accepted) return {snapshot:await controlSnapshot(id),accepted:false,text:"此 Embedding 操作已接收，未重复执行。"};
+      }
+      if (action.type === "embedding_model") embedding.select(action.id);
+      else {const result=await embedding.test();text=result.status==="success" ? `Embedding 连接成功：${result.dimensions} 维，${result.durationMs} ms。` : result.reason;}
+      accepted=true;
+    } else if (action.type === "feed") {
       accepted = state.feed(id,`control:${action.operationId}`,now());
       text = accepted ? "投喂收到啦！" : "这次投喂已接收，未重复增加饱食度。";
     } else if (action.type === "expression") {
@@ -750,6 +763,7 @@ export async function createAssistant(options: AssistantOptions) {
       if (closed) return;
       closed = true;
       shutdown.abort(new Error("助手服务已关闭"));
+      await embedding.close();
       await Promise.allSettled(startupRequests);
       settings.stop();
       clearInterval(timer);

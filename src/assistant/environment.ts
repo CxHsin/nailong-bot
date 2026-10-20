@@ -58,6 +58,7 @@ export async function assistantEnvironment(
       ...contextConfig,
       dataDir,
       cwd,
+      embedding: {configPath:env.ASSISTANT_EMBEDDING_CONFIG_FILE?.trim(),env},
       magpie: {configPath:env.NAILONG_MAGPIE_CONFIG?.trim(),primaryConversationId:telegramOwner ? `telegram:private:${telegramOwner}` : undefined},
       intent,
       prompt,
