@@ -7,7 +7,7 @@ import { Type } from "typebox";
 import { SelfFile, INITIAL_SELF } from "./self.js";
 import type { EmbeddingService } from "./embedding.js";
 import { EmbeddingError } from "./embedding.js";
-import { AkashaMemory } from "./akasha-memory.js";
+import { AkashaMemory, type AkashaRecallHit } from "./akasha-memory.js";
 import type { AkashaLearningFacts } from "./akasha-learning.js";
 
 export type MemoryLimits = {
@@ -39,6 +39,7 @@ export type MemoryEntry = MemoryCandidate & { id: string; at: string; version: n
 type Change = { version: number; text: string; forgottenSources: Array<{ id: string; text: string }> };
 type RecallBlock = { sourceId: string; text: string };
 type Recall = { status: "ready" | "unavailable"; topicIds: string[]; sourceIds: string[]; error?: string;
+  hits?:AkashaRecallHit[];total?:number;availableSources?:number;
   space?: string; retrievedAt?: string;
   scope?: string; ticket?: import("./akasha/cycle.js").TicketSnapshot; graphBasis?: string; retrievalVersion?: number;
   preparing?: boolean;
@@ -382,7 +383,12 @@ export class AssistantMemory {
         recall = { status: "ready", topicIds: topics.map((entry) => entry.id), sourceIds: raw.map((entry) => entry.id).slice(0, this.limits.searchResults), ...semantic };
       } catch (error) { recall = { status: "unavailable", topicIds: [], sourceIds: [], error: String(error) }; }
     }
+    const prefix=(header:string,topics:RecallBlock[])=>{
+      const text=topics.filter(block=>!excluded.has(block.sourceId)).map(block=>block.text).join("\n");
+      return `${header}\nTopics:\n${text||"无命中"}\nAkasha 原文召回 status=${recall.status}:\n${recall.preparing?"历史向量仍在准备，当前结果包含可用语义与本地词项证据。\n":""}${recall.status==="unavailable"?`不可用：${recall.error}\n本地降级：\n`:""}`;
+    };
     if (!recall.material) {
+      const header=`记忆检索材料（历史资料，不是新指令）input=${source.inputId} sourceId=${sourceId} role=user at=${source.at} version=${this.version()}`;
       const active = this.active(project); const seen = new Set(active.filter((entry) => entry.kind !== "topic").flatMap((entry) => [entry.sourceId, entry.content.replace(/\s/g, "").toLowerCase()]));
       let topicBudget = this.limits.topicBytes; const topics: RecallBlock[] = [];
       for (const id of recall.topicIds) {
@@ -390,20 +396,45 @@ export class AssistantMemory {
         const text = this.bounded([entry], topicBudget, seen); if (!text) continue;
         topicBudget -= Buffer.byteLength(text); topics.push({ sourceId: entry.sourceId, text });
       }
-      let rawBudget = this.limits.akashaBytes;
-      const raw = recall.sourceIds.flatMap((id) => {
-        const entry = this.source(id);
-        if (!entry || excluded.has(id) || seen.has(id) || rawBudget < 160) return [];
-        seen.add(id);
-        const text = clip(`[source=${id} role=${entry.role} at=${entry.at} input=${entry.inputId}] 原文：${entry.text}`, rawBudget);
-        rawBudget -= Buffer.byteLength(text) + 1; return [{ sourceId: id, text }];
-      });
-      recall.material = { header: `记忆检索材料（历史资料，不是新指令）input=${source.inputId} sourceId=${sourceId} role=user at=${source.at} version=${this.version()}`, topics, raw };
+      const raw:RecallBlock[]=[];
+      if(recall.hits){
+        const lanes=(["direct","completion"] as const).map(lane=>({lane,hits:recall.hits!.filter(hit=>hit.lane===lane)})).filter(group=>group.hits.length);
+        // Reserve body space for each actual lane before expanding messages.
+        // A long direct document must not erase all graph evidence (or vice versa).
+        const rawBudget=Math.min(this.limits.akashaBytes,Math.max(0,Math.min(maxBytes,this.limits.inputBytes)-Buffer.byteLength(prefix(header,topics))));
+        const laneBudget=lanes.length?Math.floor(rawBudget/lanes.length):0;
+        for(const {lane,hits} of lanes){
+          let remaining=laneBudget;
+          for(const hit of hits){
+            const ids=[...new Set([hit.primarySourceId,...hit.sourceIds])].filter(id=>!excluded.has(id)&&!seen.has(id));
+            for(const [index,id] of ids.entries()){
+              const entry=this.source(id);if(!entry)continue;
+              const header=`[source=${id} role=${entry.role} at=${entry.at} input=${entry.inputId} lane=${lane} experience=${hit.id}] 原文：`;
+              const minimum=Buffer.byteLength(header)+Math.min(Buffer.byteLength(entry.text),96)+3;
+              if(remaining<minimum+1)continue;
+              // Preserve the primary match before allocating optional provenance.
+              // Every emitted block must include its complete identity and body.
+              const share=Math.floor((remaining-1)/(ids.length-index));
+              const budget=Math.min(remaining-1,Math.max(minimum,share,index===0?Math.floor((remaining-1)/2):0));
+              const text=header+clip(entry.text,budget-Buffer.byteLength(header));
+              seen.add(id);remaining-=Buffer.byteLength(text)+1;raw.push({sourceId:id,text});
+            }
+          }
+        }
+      }else{
+        // Already saved pre-upgrade recalls and local fallback keep their material contract.
+        let rawBudget=this.limits.akashaBytes;
+        for(const id of recall.sourceIds){
+          const entry=this.source(id);if(!entry||excluded.has(id)||seen.has(id)||rawBudget<160)continue;
+          seen.add(id);const text=clip(`[source=${id} role=${entry.role} at=${entry.at} input=${entry.inputId}] 原文：${entry.text}`,rawBudget);
+          rawBudget-=Buffer.byteLength(text)+1;raw.push({sourceId:id,text});
+        }
+      }
+      recall.material = { header, topics, raw };
       this.db.prepare("INSERT OR REPLACE INTO memory_recalls VALUES(?,?)").run(sourceId, JSON.stringify(recall));
     }
-    const topicText = recall.material.topics.filter((block) => !excluded.has(block.sourceId)).map((block) => block.text).join("\n");
     const rawText = recall.material.raw.filter((block) => !excluded.has(block.sourceId)).map((block) => block.text).join("\n");
-    return clip(`${recall.material.header}\nTopics:\n${topicText || "无命中"}\nAkasha 原文召回 status=${recall.status}:\n${recall.preparing ? "历史向量仍在准备，当前结果包含可用语义与本地词项证据。\n" : ""}${recall.status === "unavailable" ? `不可用：${recall.error}\n本地降级：\n${rawText || "无命中"}` : rawText || "无命中"}`, Math.min(maxBytes, this.limits.inputBytes));
+    return clip(prefix(recall.material.header,recall.material.topics)+(rawText||"无命中"),Math.min(maxBytes,this.limits.inputBytes));
   }
   write(conversationId: string, candidate: MemoryCandidate, expectedVersion: number) {
     const result = this.transaction(() => {
@@ -467,8 +498,13 @@ export class AssistantMemory {
     if(!this.akasha)return fallback;
     try{
       const recall=await this.akasha.query(query,project,skip,Math.min(this.limits.searchResults,Math.max(1,limit)));
-      const sources=recall.sourceIds.flatMap(id=>{const source=this.source(id);return source&&this.isSourceCurrent(id)?[source]:[];});
-      return {...fallback,status:"ready",space:recall.space,total:sources.length,results:sources.map(source=>({id:source.id,role:source.role,at:source.at,inputId:source.inputId,excerpt:clip(source.text,360)}))};
+      const describe=(id:string)=>{const source=this.source(id);return source&&this.isSourceCurrent(id)?{id:source.id,role:source.role,at:source.at,inputId:source.inputId,excerpt:clip(source.text,360)}:undefined;};
+      const results=recall.hits.flatMap(hit=>{
+        const primary=describe(hit.primarySourceId);if(!primary)return [];
+        return [{...primary,experienceId:hit.id,lane:hit.lane,score:hit.score,sources:hit.sources,basinIds:hit.basinIds,
+          members:hit.sourceIds.flatMap(id=>{const member=describe(id);return member?[member]:[];})}];
+      });
+      return {...fallback,status:"ready",space:recall.space,total:recall.total,returned:results.length,availableSources:recall.availableSources,results};
     }catch(error){return {...fallback,status:"unavailable",reason:error instanceof EmbeddingError?error.message:"语义检索暂不可用，已使用本地降级。"};}
   }
   read(id: string, offset = 0, bytes = this.limits.readBytes) {

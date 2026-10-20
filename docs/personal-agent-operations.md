@@ -141,6 +141,10 @@ cron、邮件、Slack、herdr 内部步骤恢复和服务器部署仍在范围�
 
 每条真实用户输入，包括排队和执行中的补充输入，分别准备主题和 Akasha 原文召回，合批共享总预算。当前 TypeScript 引擎组合 Embedding、BM25、时间/上下文证据与经历图联想，按来源、项目范围、去重和预算生成材料；原文保留角色、时间及稳定身份，标明历史证据。自动召回和主动 `memory_search` 使用同一个服务及过滤边界；已知来源用 `memory_read` 分页，工具全文继续经 Tool Archive 定位。固定上游与数值对照的范围见[Akasha 验收](akasha-integration-acceptance-20261020.md)，不能据有限样本承诺任意中文输入的检索质量。
 
+召回按经历保留 `direct` 与 `completion` 两条通道：先选最多 `min(5, limit)` 个直接命中经历，图通道排除这些经历后另取最多 `limit` 个，再在各通道按经历开始时间倒序展示。合批的多条输入及真实回答是同一经历的来源成员，不分别占命中名额；没有闭合资格的有效原文仍可独立命中。主动搜索返回 `experienceId`、`lane`、分数、证据来源、图 basin 及 `members`，顶层 `id` 仍可供 `memory_read` 使用；`total` 是唯一候选经历数，`returned` 是实际返回经历数，`availableSources` 是范围内有效来源数。自动正文在扣除头部、主题和合批已用字节后的剩余预算内，为实际非空通道各留份额，再优先展开各经历的主命中，最后展开其他来源。
+
+MEMORY/SELF/topics 的档案条目数不等于可召回原文数，也不等于闭合经历数。检查召回不足时，应结合来源、向量、学习进度与最终请求材料判断，不能仅凭档案只有几条就认定历史未保存或提炼失败。
+
 逐输入的实际召回结果持久保存，成功零命中与检索失败分别记录；工具续步和 reopen 复用同一输入已用过的材料，不在服务恢复后偷偷替换。未配置、认证失败、超时或非法向量时继续聊天并显示安全原因，使用本地词项降级；后续新输入和主动查询可使用恢复后的语义能力。遗忘和纠正仍在实际消费时过滤已保存材料。
 
 现役有效原文在后台按有界批次补齐向量，处理批次之间让出执行，不等待全库完成才接受新输入。状态中的 `completed/total` 是当前空间已提交来源数/有效来源总数，`failed` 是当前失败批次的来源数，`learned` 是当前空间各可用项目范围的图学习提交数，不等于消息数。准备中只使用已有语义和本地证据；后台失败会退避重试，恢复不依赖新查询。关闭会停止调度并取消或排空在途工作，重启复用已提交向量和学习状态。
@@ -170,7 +174,7 @@ Telegram document 附件保存在 `<dataDir>/media/telegram/<消息 ID>-<内容�
 | archive.readLines / maxReadLines | 100 / 500 | 每页行数；硬上限 500 |
 | archive.searchLimit / maxSearchLimit / searchBytes | 10 / 50 / 8192 | 候选硬上限 50，响应预算最高 16384 字节 |
 | memory.residentBytes / topicBytes / akashaBytes | 6000 / 3000 / 4000 | SELF/MEMORY 合计常驻上限；SELF 至多占一半，其余给 MEMORY；主题/原文另计 |
-| memory.inputBytes / searchResults / readBytes | 8000 / 8 / 6000 | 每批自动材料总预算、显式搜索数、原文每页 |
+| memory.inputBytes / searchResults / readBytes | 8000 / 8 / 6000 | 每批自动材料总预算、召回每通道经历限额（直接通道最多 5；本地降级按来源计数）、原文每页 |
 | media.batchImages / maxInlineBytes | 3 / 524288 | 达到图片数或超过字节阈值时转 manifest |
 | compaction | Pi Durable 1.2.0 默认策略 | 可覆盖 enabled、reserveTokens、keepRecentTokens、backgroundTokens |
 

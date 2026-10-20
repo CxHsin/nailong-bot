@@ -14,6 +14,10 @@ type Vector={dense:number[];space:EmbeddingSpace};
 type Row={payload:string};
 const fingerprint=(text:string)=>createHash("sha256").update(text).digest("hex");
 
+/** A learned experience owns its message members; a raw source can stand alone. */
+export type AkashaRecallHit={id:string;lane:"direct"|"completion";primarySourceId:string;sourceIds:string[];
+  score:number;sources:string[];basinIds:string[]};
+
 /** Derived semantic state belongs to the current memory namespace, never to execution facts. */
 export class AkashaMemory {
   private readonly controller=new AbortController();
@@ -218,28 +222,55 @@ export class AkashaMemory {
     try{
       const [cue]=await Promise.race([this.vectors(prepared,[text]),new Promise<never>((_,reject)=>{timeout=setTimeout(()=>reject(new EmbeddingError("timeout","记忆检索超时，当前使用本地降级。")),prepared.timeoutMs);})]);
       if(this.stopped)throw new EmbeddingError("cancelled","记忆服务正在关闭。");
-      const sources=this.originals().filter(source=>(!source.project||source.project===project)&&!skip.includes(source.id));
+      const sources=this.originals().filter(source=>(!source.project||source.project===project)&&!skip.includes(source.id)&&this.current(source.id));
       const documents=sources.map(source=>({id:source.id,text:source.text,dense:this.cached(cue!.space,source.text)??null}));
-      const hits=new SourceFeaturePool(documents).query(text,cue!.dense,limit).filter(hit=>this.current(hit.id));
+      const directSources=new SourceFeaturePool(documents).query(text,cue!.dense,documents.length);
       const {cycle,samples,basis}=this.graph(cue!.space,project);
       const started=identity?.at??new Date().toISOString();const previous=cycle.turns.at(-1);
       const ticket=cycle.retrieve({node_id:cycle.state_version,turn_id:identity?.inputId??"active-query",session_key:identity?.conversationId??"active-query",user_seq:cycle.state_version,user_message_id:identity?.inputId??"active-query",assistant_message_id:"",started_at:started,committed_at:"",
         user_text:text,assistant_text:"",user_dense:Float32Array.from(cue!.dense),assistant_dense:null,user_terms:tokenize(text),assistant_terms:[],
         inter_gap_seconds:identity&&previous?.session_key===identity.conversationId?Math.max(0,(Date.parse(started)-Date.parse(previous.committed_at))/1000):null,feedback:emptyFeedback()});
-      const associations=(ticket.completion?.items??[]).flatMap(item=>{
-        const sample=samples[item.node_id];return sample?[...sample.inputSourceIds,sample.responseSourceId]:[];
-      }).filter(id=>!skip.includes(id)&&this.current(id));
       const available=new Map(sources.map(source=>[source.id,source]));
-      const direct=hits.flatMap(hit=>{
+      const memberSamples=new Map<string,AkashaLearningSample[]>();
+      for(const sample of samples)for(const id of [...sample.inputSourceIds,sample.responseSourceId]){
+        const memberships=memberSamples.get(id)??[];memberships.push(sample);memberSamples.set(id,memberships);
+      }
+      const members=(ids:string[])=>[...new Set(ids)].filter(id=>available.has(id));
+      const direct=new Map<string,AkashaRecallHit>();
+      for(const hit of directSources){
         const source=available.get(hit.id)!;
-        // An assistant paraphrase is evidence with provenance. Keep its valid
-        // user originals accessible even when calibration ranks the paraphrase first.
-        const parents=(source.parents??[]).filter(id=>available.get(id)?.role==="user"&&this.current(id));
-        return [hit.id,...parents];
-      });
+        const memberships=memberSamples.get(hit.id)??[];
+        if(memberships.length){
+          for(const sample of memberships)if(!direct.has(sample.id))direct.set(sample.id,{id:sample.id,lane:"direct",primarySourceId:hit.id,
+            sourceIds:members([hit.id,...sample.inputSourceIds,sample.responseSourceId]),score:hit.score,sources:["direct_feature"],basinIds:[]});
+        }else{
+          const parents=(source.parents??[]).filter(id=>available.get(id)?.role==="user");
+          direct.set(hit.id,{id:hit.id,lane:"direct",primarySourceId:hit.id,sourceIds:members([hit.id,...parents]),score:hit.score,sources:["direct_feature"],basinIds:[]});
+        }
+      }
+      const completion:AkashaRecallHit[]=[];
+      for(const item of ticket.completion.items){
+        const sample=samples[item.node_id];if(!sample)continue;
+        const sourceIds=members([...sample.inputSourceIds,sample.responseSourceId]);if(!sourceIds.length)continue;
+        completion.push({id:sample.id,lane:"completion",primarySourceId:available.has(sample.responseSourceId)?sample.responseSourceId:sourceIds[0]!,
+          sourceIds,score:item.score,sources:item.sources,basinIds:item.basin_ids});
+      }
+      // Match the upstream host's two-lane contract. Limits count experiences,
+      // not individual input/answer messages; neither lane can consume the other.
+      const maximum=Math.max(0,Math.floor(limit));
+      const selectedDirect=[...direct.values()].slice(0,Math.min(5,maximum));
+      const directIds=new Set(selectedDirect.map(hit=>hit.id));
+      const displayOrder=new Map(samples.map((sample,index)=>[sample.id,{at:cycle.turns[index]!.started_at,id:cycle.turns[index]!.turn_id}]));
+      const newest=(a:AkashaRecallHit,b:AkashaRecallHit)=>{
+        const first=displayOrder.get(a.id)??{at:available.get(a.primarySourceId)!.at,id:available.get(a.primarySourceId)!.inputId};
+        const second=displayOrder.get(b.id)??{at:available.get(b.primarySourceId)!.at,id:available.get(b.primarySourceId)!.inputId};
+        return Date.parse(second.at)-Date.parse(first.at)||Buffer.compare(Buffer.from(second.id),Buffer.from(first.id));
+      };
+      const hits=[...selectedDirect.sort(newest),...completion.filter(hit=>!directIds.has(hit.id)).slice(0,maximum).sort(newest)];
+      const total=new Set([...direct.keys(),...completion.map(hit=>hit.id)]).size;
       this.wake();
       return {space:cue!.space.id,scope:project??"",ticket:serializeTicket(ticket),graphBasis:basis,retrievalVersion:cycle.state_version,preparing:documents.some(document=>document.dense===null),
-        sourceIds:[...new Set([...associations,...direct])].slice(0,limit),status:"ready" as const};
+        hits,total,availableSources:sources.length,sourceIds:[...new Set(hits.flatMap(hit=>hit.sourceIds))],status:"ready" as const};
     }finally{if(timeout)clearTimeout(timeout);}
   }
   async close(){

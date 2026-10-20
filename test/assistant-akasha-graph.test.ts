@@ -58,6 +58,105 @@ test("completed service experiences recall an orthogonal original through graph 
   } finally {await f.close();await remote.close();}
 });
 
+test("direct original evidence survives a full graph lane in active search and the final automatic recall", {timeout:20000}, async () => {
+  const directOriginal="数据库事务隔离凭据：雪松计划采用可串行化隔离。";
+  const query=databaseQuery;
+  const vectors=vectorsForHistory();vectors.set(directOriginal,[0,1,0]);vectors.set(query,[0,1,0]);
+  const remote=await embeddingFixture(text=>vectors.get(text)??[0,0,1]);
+  const wires:Wire[]=[];let reply="已核对。",truncated=false,search=false;
+  let searchResult="";
+  const f=await assistantFixture((wire,response)=>{
+    wires.push(wire);
+    if(truncated){response.writeHead(200,{"content-type":"text/event-stream"});response.end(`data: ${JSON.stringify({choices:[{index:0,delta:{content:"这段回答尚未完成"},finish_reason:"length"}]})}\n\ndata: [DONE]\n\n`);return;}
+    if(search&&wire.messages.at(-1)?.role!=="tool"){
+      sendChatCompletion(response,"",[{index:0,id:"ranked-search",type:"function",function:{name:"memory_search",arguments:JSON.stringify({query,limit:2})}}]);return;
+    }
+    if(search)searchResult=toolText(wire);
+    sendChatCompletion(response,reply);
+  },async()=>({memory:{searchResults:2},embedding:{env:{KEY:"ranking-fixture"},configs:[{id:"ranking",displayName:"Ranking",baseUrl:remote.baseUrl,model:"ranking",apiKeyEnv:"KEY"}]}}));
+  try{
+    for(const [index,turn] of historical.entries()){
+      reply=turn.assistant_text;
+      await f.app.receive({conversationId:turn.session_key,inputId:`rank-history-${index}`,text:turn.user_text});
+      await f.app.waitForIdle();await waitForLearning(f,index+1);
+    }
+    // A valid raw input without a closed answer is searchable but cannot enter
+    // the learned graph. Its query-specific evidence must survive graph recall.
+    truncated=true;
+    await f.app.receive({conversationId:"raw-record",inputId:"direct-original",text:directOriginal});await f.app.waitForIdle();
+    const deadline=Date.now()+4000;while((await f.app.controlSnapshot("probe")).embedding.progress.status!=="ready"&&Date.now()<deadline)await delay(15);
+    truncated=false;search=true;
+    await f.app.receive({conversationId:"active-probe",inputId:"active-probe",text:"主动核查隔离凭据"});await f.app.waitForIdle();
+    assert.ok(searchResult.includes(directOriginal),"the direct semantic original must not be removed by unrelated graph members");
+    const result=JSON.parse(searchResult);
+    assert.equal(result.returned,result.results.length);
+    assert.ok(result.total>=result.returned);assert.ok(result.availableSources>result.returned);
+    assert.ok(result.results.some((hit:{lane:string})=>hit.lane==="direct"));
+    assert.ok(result.results.some((hit:{lane:string;members:unknown[]})=>hit.lane==="completion"&&hit.members.length>=2),"graph inputs and answers belong to one experience result");
+    assert.equal(new Set(result.results.map((hit:{experienceId:string})=>hit.experienceId)).size,result.results.length,"an experience selected directly is not repeated in the completion lane");
+    search=false;reply="已核对隔离凭据。";
+    await f.app.receive({conversationId:"automatic-probe",inputId:"automatic-probe",text:query});await f.app.waitForIdle();
+    assert.ok(material(wires.at(-1)!).includes(`原文：${directOriginal}`),"the direct original must reach the final model HTTP material");
+  }finally{await f.close();await remote.close();}
+});
+
+for(const inputBytes of [8000,1800])test(`a full direct lane cannot consume the graph lane with ${inputBytes} automatic bytes`, {timeout:25000}, async()=>{
+  const query="账目审计";const originals=Array.from({length:6},(_,index)=>`账目审计证据 ${index}：独立核对余额。${"有效载荷".repeat(220)}`);
+  const vectors=vectorsForHistory();vectors.set(query,[0,1,0]);for(const text of originals)vectors.set(text,[0,1,0]);
+  const remote=await embeddingFixture(text=>vectors.get(text)??[0,0,1]);
+  const wires:Wire[]=[];let reply="已核对。",truncated=false,search=false;let searchResult="";
+  const f=await assistantFixture((wire,response)=>{
+    wires.push(wire);
+    if(truncated){response.writeHead(200,{"content-type":"text/event-stream"});response.end(`data: ${JSON.stringify({choices:[{index:0,delta:{content:"未闭合的审计回答"},finish_reason:"length"}]})}\n\ndata: [DONE]\n\n`);return;}
+    if(search&&wire.messages.at(-1)?.role!=="tool"){sendChatCompletion(response,"",[{index:0,id:"both-lanes",type:"function",function:{name:"memory_search",arguments:JSON.stringify({query,limit:2})}}]);return;}
+    if(search)searchResult=toolText(wire);sendChatCompletion(response,reply);
+  },async()=>({memory:{inputBytes},embedding:{env:{KEY:"full-lane-fixture"},configs:[{id:"full",displayName:"Full",baseUrl:remote.baseUrl,model:"full",apiKeyEnv:"KEY"}]}}));
+  try{
+    for(const [index,turn] of historical.entries()){
+      reply=turn.assistant_text;await f.app.receive({conversationId:turn.session_key,inputId:`full-history-${index}`,text:turn.user_text});
+      await f.app.waitForIdle();await waitForLearning(f,index+1);
+    }
+    truncated=true;
+    for(const [index,text] of originals.entries()){await f.app.receive({conversationId:`raw-${index}`,inputId:`raw-${index}`,text});await f.app.waitForIdle();}
+    const deadline=Date.now()+4000;while((await f.app.controlSnapshot("probe")).embedding.progress.status!=="ready"&&Date.now()<deadline)await delay(15);
+    truncated=false;search=true;
+    await f.app.receive({conversationId:"full-active",inputId:"full-active",text:"主动核查审计记录"});await f.app.waitForIdle();
+    const result=JSON.parse(searchResult);
+    assert.equal(result.results.filter((hit:{lane:string})=>hit.lane==="direct").length,2);
+    assert.deepEqual(result.results.filter((hit:{lane:string})=>hit.lane==="direct").map((hit:{inputId:string})=>hit.inputId),["raw-1","raw-0"],"select the strongest candidates before presenting each lane newest first");
+    assert.ok(result.results.some((hit:{lane:string})=>hit.lane==="completion"),"direct hits cannot consume the other lane's experience limit");
+    assert.ok(result.results.length>2,"the limit counts experiences per lane, not flattened member messages");
+    search=false;reply="审计核查已完成。";
+    await f.app.receive({conversationId:"full-automatic",inputId:"full-automatic",text:query});await f.app.waitForIdle();
+    const final=material(wires.at(-1)!);
+    assert.match(final,/lane=direct[^]*原文：账目审计证据/);
+    assert.match(final,/lane=completion[^]*原文：/);
+    const newUser=wires.at(-1)!.messages.filter(message=>message.role==="user").at(-1)!;
+    assert.ok(Buffer.byteLength(JSON.stringify(newUser.content))<10_000,"expanding experience provenance still obeys the automatic material budget");
+  }finally{await f.close();await remote.close();}
+});
+
+test("a recalled batch keeps its primary evidence body ahead of its many provenance members", {timeout:20000}, async()=>{
+  const answer="雪松校验主证据：对账采用双人复核。",query="雪松核对凭据";
+  const remote=await embeddingFixture(text=>text===answer||text===query?[0,1,0]:[0,0,1]);
+  let enter!:()=>void,release!:()=>void;
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),released=new Promise<void>(resolve=>{release=resolve;});
+  const wires:Wire[]=[];
+  const f=await assistantFixture(async(wire,response)=>{
+    wires.push(wire);
+    if(wires.length===1){enter();await released;sendChatCompletion(response,"前项处理完成。");}
+    else sendChatCompletion(response,answer);
+  },async()=>({embedding:{env:{KEY:"batch-provenance"},configs:[{id:"batch",displayName:"Batch",baseUrl:remote.baseUrl,model:"batch",apiKeyEnv:"KEY"}]}}));
+  try{
+    await f.app.receive({conversationId:"batch",inputId:"initial",text:"先处理前项。"});await entered;
+    for(let index=0;index<20;index++)await f.app.receive({conversationId:"batch",inputId:`member-${index}`,text:`合批材料第 ${index} 项。`});
+    await f.app.waitForRouting();release();await f.app.waitForIdle();await waitForLearning(f,2);
+    assert.equal(wires.length,2,"twenty queued originals share one actual final answer");
+    await f.app.receive({conversationId:"batch-probe",inputId:"batch-probe",text:query});await f.app.waitForIdle();
+    assert.ok(material(wires.at(-1)!).includes(`原文：${answer}`),"expanding provenance cannot displace the primary evidence body");
+  }finally{release();await f.close();await remote.close();}
+});
+
 test("native forgetting removes graph-associated originals and assistant derivatives from old spaces, active tools and reopen", {timeout:25000}, async () => {
   const vectors = vectorsForHistory();
   const remote = await embeddingFixture(text => vectors.get(text) ?? [0,0,1]);
