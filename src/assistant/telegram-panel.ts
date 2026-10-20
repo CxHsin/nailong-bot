@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { InlineKeyboard, type Bot, type Context } from "grammy";
 import type { Assistant, ControlSnapshot, ControlAction } from "./runtime.js";
 
-type Page = "home" | "models" | "thinking" | "works" | "work" | "cache" | "settings" | "session" | "reset" | "detail" | "satiety";
+type Page = "home" | "model_menu" | "models" | "embedding" | "embedding_detail" | "thinking" | "works" | "work" | "cache" | "settings" | "session" | "reset" | "detail" | "satiety";
 type View = { page: Page; offset?: number; favorites?: boolean; details?: boolean; model?: string; target?: string; routing?: boolean };
 type ButtonAction = { view: View; action?: ControlAction; refresh?: boolean };
 type Button = { label: string; value: ButtonAction };
@@ -14,6 +14,11 @@ const statusName = (value: string) => statusNames[value] ?? value;
 const html = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const count = (value: number | null | undefined) => value == null ? "未知" :
   value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 1000 ? `${Number((value / 1000).toFixed(1))}k` : String(value);
+const shortName = (id?: string, displayName?: string) => {
+  const name = displayName?.trim() && displayName !== id ? displayName.trim() : id?.split("/").at(-1) || id || "未选择";
+  const characters = Array.from(name);
+  return characters.length > 48 ? `${characters.slice(0, 47).join("")}…` : name;
+};
 
 /** Native controls use the authenticated Conversation service boundary, never natural-language routing. */
 export function registerTelegramPanel(options: {
@@ -47,13 +52,56 @@ export function registerTelegramPanel(options: {
         if (s.status === "waiting_model") text += "\n等待选择可用模型；已接收输入保留。";
         if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
-        rows.push([{ label: `🤖 模型：${s.selectedModel ?? "未选择"}`, value: { view: { page: "models" }, refresh: true } }]);
-        if (selected?.reasoning !== false && (selected?.reasoning || selected?.reasoningLevels?.length)) rows.push([button(`🧠 思考等级：${s.thinking ?? "能力未提供"}`, { page: "thinking" })]);
+        rows.push([button(`🤖 模型：${shortName(s.selectedModel, selected?.displayName)}`, { page: "model_menu" })]);
         rows.push([button("📊 缓存统计", { page: "cache" }, { type: "cache" })],
           [button(`🍜 饱食：${s.satiety.label}`, { page: "satiety" }), button("投喂 +25", { page: "satiety" }, { type: "feed", operationId: randomBytes(12).toString("hex") })],
-          [{ label: `🧭 全局路由模型：${s.routing.selectedModel ?? "未选择"}`, value: { view: { page: "models", routing: true }, refresh: true } }],
           [button(`⏳ 工作列表：${s.waiting} 等待`, { page: "works" })], [button("⚙️ 设置", { page: "settings" })]);
         break;
+      case "model_menu": {
+        const routing = s.routing.catalog.find(model => model.id === s.routing.selectedModel);
+        const embedding = s.embedding.catalog.find(model => model.id === s.embedding.selectedId);
+        text = "🤖 模型\n\n主模型用于当前会话；路由与 Embedding 由整个助手服务共用。";
+        rows.push([{ label: `🤖 主模型：${shortName(s.selectedModel, selected?.displayName)}`, value: { view: { page: "models" }, refresh: true } }],
+          [{ label: `🧭 路由模型：${shortName(s.routing.selectedModel, routing?.displayName)}`, value: { view: { page: "models", routing: true }, refresh: true } }],
+          [button(`🔎 Embedding 模型：${shortName(embedding?.model || s.embedding.selectedId, embedding?.displayName === embedding?.id ? undefined : embedding?.displayName)}`, { page: "embedding" })]);
+        break;
+      }
+      case "embedding": {
+        const embedding = s.embedding;
+        const current = embedding.catalog.find(model => model.id === embedding.selectedId);
+        const connectionNames = { not_configured: "未配置", invalid_config: "配置无效", untested: "未测试", ready: "可用", unavailable: "不可用" };
+        const progressNames = { not_started: "未开始", preparing: "准备中", ready: "已就绪", degraded: "降级" };
+        const progress = embedding.progress;
+        const offset = Math.max(0, Math.min(view.offset ?? 0, Math.max(0, Math.ceil(embedding.catalog.length / PAGE_SIZE) - 1) * PAGE_SIZE));
+        text = `🔎 Embedding 模型 · 整个助手服务共用\n\n独立本地配置\n当前：${current?.displayName ?? embedding.selectedId ?? "未选择"}\nID：${embedding.selectedId ?? "未选择"}\n模型：${current?.model || "未知"}\n选择：${embedding.selectedAvailable ? "配置可用" : "不可用"}\n连接：${connectionNames[embedding.connectionStatus]}${embedding.reason ? `\n${embedding.reason}` : ""}\n\n准备：${progressNames[progress.status]}\n已提交 ${progress.completed}/${progress.total} · 失败 ${progress.failed}${progress.learned === undefined ? "" : ` · 已学习 ${progress.learned}`}${progress.reason ? `\n${progress.reason}` : ""}`;
+        if (embedding.test) {
+          const result = embedding.test;
+          text += `\n\n连接测试：${result.status === "success" ? `成功 · ${result.dimensions} 维` : `失败 · ${result.reason ?? "原因未知"}`} · ${result.durationMs} ms\n测试时间：${result.at}`;
+        }
+        text += `\n\n${view.details ? "点击配置查看完整身份。" : "点击即选择 · ✓ 当前选择"}\n第 ${Math.floor(offset / PAGE_SIZE) + 1}/${Math.max(1, Math.ceil(embedding.catalog.length / PAGE_SIZE))} 页 · 共 ${embedding.catalog.length} 个`;
+        if (!embedding.catalog.length) text += "\n没有本地 Embedding 配置，请在本机配置后刷新。";
+        for (const model of embedding.catalog.slice(offset, offset + PAGE_SIZE)) {
+          const label = `${model.id === embedding.selectedId ? "✓ " : ""}${shortName(model.model, model.displayName === model.id ? undefined : model.displayName)} · ${model.id}${model.available ? "" : " · 不可用"}`;
+          rows.push([view.details ? button(label, { ...view, page: "embedding_detail", model: model.id, offset }) :
+            button(label, { ...view, offset }, { type: "embedding_model", id: model.id, operationId: randomBytes(12).toString("hex") })]);
+        }
+        const navigation: Button[] = [];
+        if (offset > 0) navigation.push(button("上一页", { ...view, offset: offset - PAGE_SIZE }));
+        if (offset + PAGE_SIZE < embedding.catalog.length) navigation.push(button("下一页", { ...view, offset: offset + PAGE_SIZE }));
+        if (navigation.length) rows.push(navigation);
+        rows.push([button("刷新状态与本地列表", { ...view, offset }),
+          button(view.details ? "返回选择" : "ℹ️ 配置详情", { ...view, offset, details: !view.details })],
+          [button("测试连接", { ...view, offset }, { type: "embedding_test", operationId: randomBytes(12).toString("hex") })],
+          [button("返回模型菜单", { page: "model_menu" })]);
+        break;
+      }
+      case "embedding_detail": {
+        const model = s.embedding.catalog.find(item => item.id === view.model);
+        text = model ? `ℹ️ ${model.displayName}\n\nID：${model.id}\n模型：${model.model || "未知"}\n范围：整个助手服务共用\n配置：${model.available ? "可用" : "不可用"}${model.error ? `\n${model.error}` : ""}` : `此 Embedding 配置已不可用。\nID：${view.model ?? "未知"}\n请刷新本地列表。`;
+        if (model) rows.push([button("选择此配置", { ...view, page: "embedding", details: false }, { type: "embedding_model", id: model.id, operationId: randomBytes(12).toString("hex") })]);
+        rows.push([button("返回 Embedding 列表", { ...view, page: "embedding" })]);
+        break;
+      }
       case "models": {
         const catalog = view.routing ? s.routing : s;
         const models = catalog.catalog.filter(model => !view.favorites || s.favorites.includes(model.id));
@@ -78,10 +126,12 @@ export function registerTelegramPanel(options: {
         rows.push([button(view.favorites ? "全部模型" : "常用模型", { ...view, page: "models", offset: 0, details: false, favorites: !view.favorites }),
           { label: "刷新目录", value: { view: { ...view, offset: 0 }, refresh: true } }]);
         rows.push([button(view.details ? "🤖 返回选择" : "ℹ️ 详情与收藏", { ...view, details: !view.details, offset })]);
+        if (!view.routing && selected?.reasoning !== false && (selected?.reasoning || selected?.reasoningLevels?.length)) rows.push([button(`🧠 思考等级：${s.thinking ?? "能力未提供"}`, { page: "thinking" })]);
+        rows.push([button("返回模型菜单", { page: "model_menu" })]);
         break;
       }
       case "detail": {
-        const model = s.catalog.find(item => item.id === view.model);
+        const model = (view.routing ? s.routing.catalog : s.catalog).find(item => item.id === view.model);
         if (!model) { text = "此模型已不在当前目录中，请刷新并重新选择。"; }
         else {
           text = `ℹ️ ${model.displayName}\n\nID：${model.id}\n供应商：${model.ownedBy ?? "未知"}\n\n上下文窗口：${model.contextWindow ?? "未知"}\n最大输出：${model.maxOutputTokens ?? "未知"}\n模态：${model.modalities?.join("、") ?? "未知"}\n推理：${model.reasoning === false ? "不支持" : model.reasoning ? "支持" : "未知"}\n等级：${model.reasoningLevels?.join("、") ?? "能力未提供"}`;
@@ -98,6 +148,7 @@ export function registerTelegramPanel(options: {
         else if (!selected.reasoningLevels?.length) text += "\n目录未提供可调等级，不发送猜测的 effort。";
         else for (let index = 0; index < selected.reasoningLevels.length; index += 2) rows.push(selected.reasoningLevels.slice(index, index + 2).map(level => button(`${s.thinking === level ? "✓ " : ""}${level}`, view, { type: "thinking", level })));
         if (s.thinkingAdjusted) text += "\n能力已更新，原偏好不再支持，已调整为支持的等级。";
+        rows.push([button("返回主模型", { page: "models" })]);
         break;
       case "works": {
         // Queue order is oldest first; show recent work before paginating.
@@ -145,8 +196,8 @@ export function registerTelegramPanel(options: {
         rows.push([button("确认重置", { page: "session" }, { type: "reset", operationId: randomBytes(12).toString("hex") }), button("取消", { page: "session" })]);
         break;
     }
-    if (failure) text += `\n${failure}`;
-    if (note && ["home", "cache", "session", "work", "works", "satiety"].includes(view.page)) text += `\n${note}`;
+    if (failure && !["embedding", "embedding_detail"].includes(view.page)) text += `\n${failure}`;
+    if (note && ["home", "cache", "session", "work", "works", "satiety", "embedding"].includes(view.page)) text += `\n${note}`;
     if (view.page === "session") rows.push([button("⚙️ 返回设置", { page: "settings" })]);
     if (view.page !== "home") rows.push([button("返回首页", home)]);
     const token = randomBytes(9).toString("base64url");
@@ -207,7 +258,7 @@ export function registerTelegramPanel(options: {
     const work = (async () => {
       const name = match[1]; const arg = match[3]?.trim();
       let view: View = home; let action: ControlAction | undefined; let refresh = false;
-      if (name === "model") { view = { page: "models" }; if (arg) action = { type: "model", model: arg }; else refresh = true; }
+      if (name === "model") { view = { page: arg ? "models" : "model_menu" }; if (arg) action = { type: "model", model: arg }; else refresh = true; }
       if (name === "thinking") { view = { page: "thinking" }; if (arg) action = { type: "thinking", level: arg }; }
       if (name === "work") view = { page: "works" };
       if (name === "feed") { if (arg) { await ctx.reply("用法：/feed（投喂一次，饱食度 +25）"); return; } view = { page: "satiety" }; action = { type: "feed", operationId: `telegram:${messageId}:feed` }; }
