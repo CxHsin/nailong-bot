@@ -11,7 +11,11 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -21,12 +25,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run docs:check
-      - name: Install file tool dependencies
+      - name: Install file tool dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes fd-find ripgrep
           fdfind --version
           rg --version
+      - name: Install file tool dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install fd ripgrep --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          fd --version
+          rg --version
       - run: npm run typecheck
-      - run: npm test
+      - run: node --import tsx --test --test-concurrency=4 test/*.test.ts
       - run: npm run build
