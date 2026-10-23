@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0011-durable-main-agent-and-conversation-queue.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 个人助手触发器扩展讨论
 
 开始日期：2026-10-17。更新日期：2026-10-18。状态：访谈进行中，仅以下明确列出的范围决定已确认；尚无完整规格或实现承诺。讨论完成并确认后，按 [Issue 约定](../agents/issue-tracker.md)发布结论。
@@ -37,7 +39,7 @@
 
 ## 当前基线
 
-- [CONTEXT.md](../../CONTEXT.md)区分 Input Event、Channel、Conversation 和 Queue System。
+- [GLOSSARY.md](../../GLOSSARY.md)区分 Input Event、Channel、Conversation 和 Queue System。
 - [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)已有直接用户输入高于后台输入、同级 FIFO、已有输入合批和持久执行恢复的设计。
 - [ADR-0013](../adr/0013-contextual-input-routing.md)定义现役上下文意图路由；用户补充不依赖已退役的 `/steer` 入口。
 - 当前队列已支持同一 Conversation 内的优先级抢占，不能将其描述为跨会话全局抢占或外部工具立即停止。Telegram 当前仅接收主人私聊；cron、邮件和 QQ 尚无现役连接器。

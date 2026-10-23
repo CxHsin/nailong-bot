@@ -51,7 +51,7 @@ test("global routing menu shares catalog and capabilities while preserving the C
   const f = await controlPanelFixture();
   try {
     await f.bot.handleUpdate(command(3101, "/start"));
-    await click(f, "全局路由模型");
+    await click(f, "模型"); await click(f, "路由模型");
     assert.match(panel(f).text, /整个助手服务共用/);
     assert.match(panel(f).text, /当前：未选择/);
     await click(f, "Beta");
@@ -66,7 +66,8 @@ test("global routing menu shares catalog and capabilities while preserving the C
     assert.equal(snapshot.thinking, "medium");
     assert.equal((await f.app.controlSnapshot("cli:other")).routing.selectedModel, "route/team/C");
     await f.reopen(); await f.bot.handleUpdate(command(3102, "/start"));
-    assert.ok(panel(f).buttons.some(item => item.text.includes("全局路由模型：route/team/C")));
+    await click(f, "模型");
+    assert.ok(panel(f).buttons.some(item => item.text === "🧭 路由模型：Gamma"));
     assert.equal(f.requests.length, 0);
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }

@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0012-layered-memory-and-stable-context.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 持久化工作流与记忆系统讨论
 
 > 本文保留讨论时基线与尚未收敛的记忆问题。已确认的持久队列规格为 [#201](https://github.com/CxHsin/nailong-bot/issues/201)，后续入口状态见 [当前验收](../durable-assistant-acceptance-20261015.md)。

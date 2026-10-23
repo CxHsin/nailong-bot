@@ -68,10 +68,11 @@ test("consecutive turns keep the system prefix byte-identical so prompt cache st
   const f = await fixture((body, response) => { requests.push(body); sendChatCompletion(response, `回答${++turn}`); });
   // Two different clocks: a naive system timestamp would break the prefix here.
   const times = [new Date("2026-10-20T01:54:00Z"), new Date("2026-10-20T06:20:00Z")];
-  let index = 0;
-  const executor = await createDurableExecutor({ ...f.options, clock: () => times[index++]! });
+  let currentTime = times[0]!;
+  const executor = await createDurableExecutor({ ...f.options, clock: () => currentTime });
   try {
     await executor.execute(batch("b1", "第一句"), { emit: async () => {}, recordSubmission() {} });
+    currentTime = times[1]!;
     await executor.execute(batch("b2", "第二句"), { emit: async () => {}, recordSubmission() {} });
     assert.equal(requests.length, 2);
     assert.equal(systemOf(requests[0]), systemOf(requests[1]), "system prefix changed between turns and would void the cache");

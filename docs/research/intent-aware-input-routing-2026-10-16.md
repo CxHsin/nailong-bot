@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 输入意图路由讨论
 
 2026-10-16，用户通过 grill-with-docs 重新讨论 Telegram 输入路由，并逐轮确认以下行为及保证。设计结论已发布为 [Issue #214](https://github.com/CxHsin/nailong-bot/issues/214)，架构决定见 [ADR-0013](../adr/0013-contextual-input-routing.md)，后续 to-spec 已发布[正式规格 #215](https://github.com/CxHsin/nailong-bot/issues/215)并保留[本地归档](contextual-input-routing-spec-2026-10-16.md)。本文件保留讨论过程；运行代码未修改，实施验收尚未完成。
@@ -56,4 +58,4 @@
 
 本轮行为设计已达成共同理解。规格 #215 已综合模型与配置、上下文轮数及长度预算、超时数值与降级说明、动作结构、目标关联、helper 快速控制路径与发送/采纳核实、路由持久化及恢复协议，并按上述行为建立验收场景。用户另行确认了主要测试边界：Assistant Service 的完整输入、执行、交付和恢复链路，配合受控模型及 herdr 响应，另做少量真实链路验收。
 
-结论 Issue 是规格的依据；后续实现任务按规格另建并关联，本轮没有创建实现任务或执行代码迁移。术语见 [CONTEXT](../../CONTEXT.md)。
+结论 Issue 是规格的依据；后续实现任务按规格另建并关联，本轮没有创建实现任务或执行代码迁移。术语见 [GLOSSARY](../../GLOSSARY.md)。

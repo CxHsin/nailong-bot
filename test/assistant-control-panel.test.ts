@@ -28,8 +28,7 @@ test("Telegram /start opens owner conversation controls without a model request"
     assert.match(labels, /缓存统计/);
     assert.match(labels, /饱食/);
     assert.match(labels, /投喂/);
-    assert.match(labels, /全局路由模型/);
-    assert.doesNotMatch(labels, /思考等级/, "non-reasoning models hide the thinking row");
+    assert.doesNotMatch(labels, /全局路由模型|思考等级/, "home exposes a single model menu entry");
     assert.equal(requests, 0);
   } finally { await f.close(); }
 });
@@ -185,7 +184,7 @@ test("catalog output limits equal to context windows do not block other models, 
     await f.flush();
     await f.reopen();
     await f.bot.handleUpdate(command(503, "/start"));
-    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /provider\/equal-limits/);
+    assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /模型：equal-limits/);
     await f.bot.handleUpdate(command(504, "SECOND_GOAL"));
     await f.flush();
     assert.deepEqual(f.requests.map(request => request.model), ["provider/A", "provider/equal-limits"]);
@@ -228,6 +227,7 @@ test("panel buttons navigate and change settings in one Telegram message without
     assert.equal(f.sent.filter(s => s.method === "sendMessage").length, 1, "cache navigation must reuse the original panel");
     await click(f, "返回首页");
     await click(f, "模型");
+    await click(f, "主模型");
     await click(f, "下一页"); assert.match(latestPanel(f).text, /第 2\/2 页/);
     await click(f, "详情与收藏"); await click(f, "Model 6"); assert.match(latestPanel(f).text, /provider\/model-6/);
     await click(f, "加入常用");
@@ -235,6 +235,7 @@ test("panel buttons navigate and change settings in one Telegram message without
     await click(f, "常用模型"); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /✓ Model 6/);
     await click(f, "刷新目录");
     await click(f, "返回首页");
+    await click(f, "模型"); await click(f, "主模型");
     await click(f, "思考等级"); await click(f, "high"); assert.match(latestPanel(f).text, /当前：high/);
     await click(f, "返回首页");
     await click(f, "设置");
@@ -261,6 +262,7 @@ test("a failed panel action displays the error in the same message and expires i
   const f = await controlPanelFixture();
   try {
     await f.bot.handleUpdate(command(2101, "/model"));
+    await click(f, "主模型");
     const original = latestPanel(f);
     const config = JSON.parse(await readFile(f.configPath, "utf8"));
     await writeFile(f.configPath, JSON.stringify({ ...config, baseUrl: "", apiKey: "" }));
@@ -280,6 +282,7 @@ test("native model pagination, detail and favorites preserve opaque catalog IDs 
   const f = await controlPanelFixture({ models });
   try {
     await f.bot.handleUpdate(command(1, "/model"));
+    await click(f, "主模型");
     let panel = latestPanel(f); assert.match(panel.buttons.map(b => b.text).join(" "), /✓ Model 0/);
     for (const button of panel.buttons) assert.ok(Buffer.byteLength(button.callback_data, "utf8") <= 64);
     const reads = f.catalogReads;
@@ -305,6 +308,7 @@ test("busy model controls acknowledge immediately and only the last selected set
   try {
     await f.bot.handleUpdate(command(1, "hold A")); await entered.promise;
     await f.bot.handleUpdate(command(2, "/model"));
+    await click(f, "主模型");
     await click(f, "Beta"); await click(f, "Gamma");
     await f.bot.handleUpdate(command(3, "/thinking high"));
     await f.bot.handleUpdate(command(4, "/start"));
@@ -314,7 +318,7 @@ test("busy model controls acknowledge immediately and only the last selected set
     assert.equal(f.requests.length, 1);
     assert.ok(f.sent.some(s => s.method === "answerCallbackQuery"));
     await click(f, "缓存统计"); assert.match(latestPanel(f).text, /胃囊报表/);
-    await f.bot.handleUpdate(command(5, "/model")); await click(f, "详情与收藏"); await click(f, "Alpha"); await click(f, "加入常用"); await click(f, "返回模型列表"); await click(f, "常用模型");
+    await f.bot.handleUpdate(command(5, "/model")); await click(f, "主模型"); await click(f, "详情与收藏"); await click(f, "Alpha"); await click(f, "加入常用"); await click(f, "返回模型列表"); await click(f, "常用模型");
     assert.equal(f.requests.length, 1);
     release.resolve(); await f.flush();
     await f.bot.handleUpdate(command(6, "next C")); await f.flush();
@@ -373,7 +377,7 @@ test("reset asks for confirmation, cancelling preserves history, and duplicate c
 test("catalog failure retains snapshot, successful removal invalidates old choices and refresh never sends a generation", async () => {
   const f = await controlPanelFixture();
   try {
-    await f.bot.handleUpdate(command(1, "/model")); const old = latestPanel(f);
+    await f.bot.handleUpdate(command(1, "/model")); await click(f, "主模型"); const old = latestPanel(f);
     f.setCatalogFailure(true); await click(f, "刷新目录");
     assert.match(latestPanel(f).text, /刷新失败/); assert.match(latestPanel(f).buttons.map(b => b.text).join(" "), /Beta/);
     f.setCatalogFailure(false); f.setModels([{ id: "route/new/D", display_name: "Delta", reasoning: false }]);
@@ -498,7 +502,7 @@ test("Telegram without a model keeps ordinary inputs across channel restart unti
     assert.equal(f.requests.length, 0);
     await f.reopen(); await f.bot.handleUpdate(command(4, "/start"));
     assert.match(latestPanel(f).text, /等待选择/); assert.equal(f.requests.length, 0);
-    await f.bot.handleUpdate(command(5, "/model")); await click(f, "Beta"); await f.flush();
+    await f.bot.handleUpdate(command(5, "/model")); await click(f, "主模型"); await click(f, "Beta"); await f.flush();
     assert.ok(f.requests.length > 0); assert.equal(f.requests[0]?.model, "provider/B");
     const messages = JSON.stringify(f.requests.map(r => r.messages));
     assert.ok(messages.indexOf("WAIT_FIRST") < messages.indexOf("WAIT_SECOND"));

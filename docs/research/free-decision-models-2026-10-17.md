@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 可免费使用的 Jev 同类决策模型
 
 核对日期：2026-10-17。仅查一手公开文档，没有注册、使用密钥或实际推理。本次不重查已经试过的 Cloudflare。

@@ -11,6 +11,7 @@ export async function controlPanelFixture(options: {
   models?: CatalogEntry[]; selected?: string; noSelection?: boolean;
   onApi?: (method: string, body: unknown) => void;
   tools?: AssistantOptions["tools"];
+  embedding?: AssistantOptions["embedding"];
   provider?: (wire: Wire & { model: string; reasoning_effort?: string }, response: ServerResponse) => void | Promise<void>;
 } = {}) {
   let models = options.models ?? [{ id: "provider/A", display_name: "Alpha", reasoning: true, supported_reasoning_levels: ["low", "medium", "high"] },
@@ -37,7 +38,7 @@ export async function controlPanelFixture(options: {
     async directory => {
       configPath = join(directory, "magpie.json");
       await writeFile(configPath, JSON.stringify({ baseUrl, apiKey: "fixture-secret", ...(options.noSelection ? {} : { model: `magpie/${options.selected ?? models[0]?.id}` }), unrelated: "keep" }));
-      return { tools: options.tools, magpie: { configPath, primaryConversationId: "telegram:private:42", catalogTimeoutMs: 500 } };
+      return { tools: options.tools, embedding: options.embedding, magpie: { configPath, primaryConversationId: "telegram:private:42", catalogTimeoutMs: 500 } };
     }, options.onApi);
   return { ...f, get app() { return f.app; }, get bot() { return f.bot; }, get channel() { return f.channel; }, requests, configPath,
     setModels(value: CatalogEntry[]) { models = value; }, setCatalogFailure(value: boolean) { catalogFailure = value; }, get catalogReads() { return catalogReads; },

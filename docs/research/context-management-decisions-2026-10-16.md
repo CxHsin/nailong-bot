@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0012-layered-memory-and-stable-context.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 上下文管理与分层记忆讨论
 
 日期：2026-10-16。状态：设计方向已确认；下列结论不是完整实现规格，也不表示已实现。当前生产基线为 `7224023`，主执行器使用 Pi Durable 1.2.0，见 [ADR-0011](../adr/0011-durable-main-agent-and-conversation-queue.md)。架构取舍见 [ADR-0012](../adr/0012-layered-memory-and-stable-context.md)。

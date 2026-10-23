@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0016-magpie-catalog-and-conversation-settings.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Telegram 奶龙交互与模型控制设计结论
 
 2026-10-19，用户通过 `grill-with-docs` 逐轮确认以下产品方向，结论发布为 [Issue #259](https://github.com/CxHsin/nailong-bot/issues/259)。本文记录讨论结论，尚未实现或验证运行行为；后续规格与实施任务以 GitHub Issues 关联。
@@ -70,7 +72,7 @@
 
 ## 现有接入依据
 
-- [CONTEXT.md](../../CONTEXT.md) 已记录 Persona Expression 和 Satiety 的定义。
+- [GLOSSARY.md](../../GLOSSARY.md) 已记录 Persona Expression 和 Satiety 的定义。
 - [ADR-0015](../adr/0015-system-context-order-and-self-file.md) 与 [默认 SELF](../../src/assistant/self.ts) 已规定奶龙基础人设及 SELF 权威来源。本项沿用该边界。
 - [Telegram 出口](../../src/assistant/telegram.ts) 已有文本、文件、发送回执与草稿预览接入；贴纸和消息表情回应属于新增能力。
 - [控制面板](../../src/assistant/telegram-panel.ts) 已有首页、设置页、缓存详情和回调鉴权，可移动缓存按钮并扩展设置与投喂操作。

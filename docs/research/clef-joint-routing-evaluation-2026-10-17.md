@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Clef 完整动作路由的实现与真实 API 验收
 
 历史记录：本次实现后来按用户要求退役，专用适配器、配置及验收脚本均已删除。以下描述保留当时的状态与证据；[原适配器](https://github.com/CxHsin/nailong-bot/blob/d090d92979a7fbe471ca2c074de5d48291c787f2/src/assistant/intent-clef.ts)、[原脚本](https://github.com/CxHsin/nailong-bot/blob/d090d92979a7fbe471ca2c074de5d48291c787f2/scripts/acceptance/clef-routing-live.ts)。当前入口见[操作说明](../personal-agent-operations.md)。

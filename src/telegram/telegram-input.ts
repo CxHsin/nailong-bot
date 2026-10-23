@@ -48,11 +48,21 @@ export function registerTelegramInput(bot: Bot, options: {
   document?: (fileId: string, name: string, messageId: number) => Promise<string>;
   handle: (input: Update, onStarted: () => void) => Promise<void>;
   reportFailure: (error?: unknown) => void;
+  /** Diagnostics for normal traffic. Kept separate from reportFailure so logging never looks like an error. */
+  log?: (line: string) => void;
 }) {
   const active = new Set<Promise<void>>();
   let acceptance = Promise.resolve();
   bot.on(["message:text", "message:photo", "message:document", "message:sticker"], async (ctx) => {
-    if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private" || ctx.chat.id !== options.ownerId) return;
+    // Receiving had no trace at all: a dropped update left no evidence anywhere.
+    // One line per update makes "Telegram delivered it but the bot never queued it" visible.
+    const kind = ctx.message.document ? "document" : ctx.message.photo ? "photo" : ctx.message.sticker ? "sticker" : "text";
+    const body = ctx.message.text ?? ctx.message.caption ?? "";
+    options.log?.(`[telegram-input] received message_id=${ctx.message.message_id} kind=${kind} chars=${body.length} document=${ctx.message.document ? `${ctx.message.document.file_name ?? "?"} ${ctx.message.document.file_size ?? "?"}B` : "none"}`);
+    if (ctx.from.id !== options.ownerId || ctx.chat.type !== "private" || ctx.chat.id !== options.ownerId) {
+      options.log?.(`[telegram-input] ignored message_id=${ctx.message.message_id}: from=${ctx.from.id} chat=${ctx.chat.id} type=${ctx.chat.type} owner=${options.ownerId}`);
+      return;
+    }
     let text = ctx.message.text ?? ctx.message.caption;
     if (text && options.botUsername) {
       let otherBot = false;
@@ -80,6 +90,7 @@ export function registerTelegramInput(bot: Bot, options: {
           runtimeMaterials = [await options.document(ctx.message.document.file_id, ctx.message.document.file_name ?? "attachment", ctx.message.message_id)];
         } catch (error) {
           const detail = error instanceof Error && /^(附件超过|PDF 正文提取失败)/.test(error.message) ? error.message : "附件读取失败";
+          options.reportFailure(`[telegram-input] document failed message_id=${ctx.message.message_id}: ${error instanceof Error ? error.message : String(error)}`);
           await ctx.reply(`${detail}；这条消息尚未开始处理，请检查文件后重新发送。`);
           return;
         }
@@ -109,10 +120,15 @@ export function registerTelegramInput(bot: Bot, options: {
       active.add(completed);
       void completed.then(() => { active.delete(completed); }, (error) => {
         active.delete(completed);
-        if (hasStarted) options.reportFailure(error);
+        // receive() can fail after persisting input, before started() is called.
+        // A missing callback does not prove rejection; resending could duplicate work.
+        options.reportFailure(`[telegram-input] handle failed message_id=${ctx.message.message_id} started=${hasStarted}: ${error instanceof Error ? error.message : String(error)}`);
+        if (!hasStarted) void ctx.reply("接收这条消息时发生异常，暂时无法确认处理状态；请先查看 /work，避免重复发送。").catch(() => {});
       });
       const accepted = Promise.race([started, completed]);
-      await accepted;
+      // A rejection here is already reported and answered by the handler above; letting it
+      // escape would surface the same failure twice (grammy logs it again).
+      await accepted.catch(() => {});
     } finally { releaseAcceptance(); }
   });
   return { accepted: () => acceptance, async finish() { await Promise.allSettled(active); } };

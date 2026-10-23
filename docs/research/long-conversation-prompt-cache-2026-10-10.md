@@ -1,4 +1,4 @@
-> 历史/离线说明：记录基准 d03422048b6a22502e8ac1952ae3d3a434612bc1 的旧实现与验收；2026-10-12 生产入口已由 [Personal Host](../personal-agent-operations.md) 取代。旧离线工具与数据实现已于 2026-10-17 按 [ADR-0014](../adr/0014-retire-legacy-code-and-data.md)退役；以下旧命令、在线行为和测试结果仅保留历史依据，不能作为新入口的验收证据。
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0012-layered-memory-and-stable-context.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。 原核对源码基准：`d03422048b6a22502e8ac1952ae3d3a434612bc1`。
 
 # 长期连续对话：上下文压缩、投影稳定性与 Prompt Cache
 

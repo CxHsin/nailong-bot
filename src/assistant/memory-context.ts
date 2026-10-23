@@ -22,6 +22,19 @@ export async function sanitizeMemoryContext(messages: readonly Message[], memory
         ...(message.sections.self ? { self: `<self>\n${snapshot.self ?? ""}\n</self>` } : {}) } };
     }
     if (message.role === "toolResult" && message.toolName.startsWith("memory_") && containsExcluded(JSON.stringify(message.content))) {
+      if (message.toolName === "memory_forget" && !message.isError) {
+        try {
+          const receipt = JSON.parse(message.content.filter(part => part.type === "text").map(part => part.text).join("\n"));
+          if (Number.isSafeInteger(receipt?.version) && Number.isSafeInteger(receipt?.count) && receipt.count >= 0) {
+            // Keep the effect receipt in model context. Durable retains feedback identities;
+            // they are not recalled content and need not expose excluded sources again.
+            return { ...message, content: [{ type: "text" as const, text: JSON.stringify({
+              version: receipt.version, count: receipt.count,
+              text: `已忘记 ${receipt.count} 个来源的派生记忆；原始记录保留，自动召回与后台学习已排除这些来源。`,
+            }) }] };
+          }
+        } catch { /* Malformed historical results follow the normal invalidation path. */ }
+      }
       return { ...message, content: [{ type: "text" as const, text: "此历史记忆结果因用户遗忘已失效。使用当前记忆工具获取仍有效的材料。" }] };
     }
     if (message.role === "assistant") {

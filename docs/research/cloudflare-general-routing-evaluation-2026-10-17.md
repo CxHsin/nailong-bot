@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Cloudflare 通用小模型路由评测及 Clef 退役
 
 本篇保留修复前基准。后续思考控制与 JSON Schema 调用修复及同组重测见[调用修复评测](cloudflare-routing-controls-evaluation-2026-10-17.md)。

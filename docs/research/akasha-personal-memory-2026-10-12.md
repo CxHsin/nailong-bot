@@ -1,6 +1,4 @@
-> 2026-10-17 退役补注：旧源码链接已固定到核对过的历史提交；旧实现与离线工具按 [ADR-0014](../adr/0014-retire-legacy-code-and-data.md)退役。本文保留当时结论，现役行为见[操作说明](../personal-agent-operations.md)。
-
-> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0017-port-akasha-engine-and-independent-embedding.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。 原核对源码基准：`727a294293463332e55558fa3e5ba518719d6890`。
 
 # Akasha 与 personal agent 记忆调研
 
@@ -88,7 +86,7 @@ Drift 手册另描述用户写技能定义的空闲后台工作，以及只属�
 
 ## 对 Nailong 的适用判断
 
-本地现有 [CONTEXT.md](../../CONTEXT.md) 已定义 Akasha 为原始来源召回、图关联、排除与已送达轮次学习，并明确无稳定偏好档案。本地记录链路保留用户与已送达助手原话，由 memory_search 展示材料参与图学习；本地没有采用上游 Markdown 用户档案。这是本地对照，不是上游保证。参见 [src/personal/memory.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/memory.ts)、[src/memory/graph.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/memory/graph.ts)、[src/memory/recall.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/memory/recall.ts)。
+本地现有 [CONTEXT.md](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/CONTEXT.md) 已定义 Akasha 为原始来源召回、图关联、排除与已送达轮次学习，并明确无稳定偏好档案。本地记录链路保留用户与已送达助手原话，由 memory_search 展示材料参与图学习；本地没有采用上游 Markdown 用户档案。这是本地对照，不是上游保证。参见 [src/personal/memory.ts](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/memory.ts)、[src/memory/graph.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/memory/graph.ts)、[src/memory/recall.ts](https://github.com/CxHsin/nailong-bot/blob/c316227fb5519b186ddbb8a388f07ecf0bea0f54/src/memory/recall.ts)。
 
 本地同样没有先挑“重要片段”再存入：`recordDeliveredTurn` 记录整轮原始文本，已展示的召回片段用出处范围校验后参与最多 8 项学习。当前本地通过模型调用 `memory_search` 取得材料；上游还在模型调用前依据当前用户输入自动准备背景。是否增加自动召回是独立产品与上下文预算决策，不是恢复稳定偏好档案的理由。[本地记录与展示学习](https://github.com/CxHsin/nailong-bot/blob/727a294293463332e55558fa3e5ba518719d6890/src/personal/memory.ts)、[上游自动材料](https://github.com/kachofugetsu09/akashic-agent/blob/556a14d311eb124ad7b0b522ba27a13898e5fe09/plugins/akasha/runtime.py#L121-L189)
 

@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0011-durable-main-agent-and-conversation-queue.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 事件队列系统与持久工作流讨论
 
 > 以下记录规格形成时的基线与确认过程。后续实现与迁移的实际状态见 [当前验收](../durable-assistant-acceptance-20261015.md)，日常使用见 [操作说明](../personal-agent-operations.md)。

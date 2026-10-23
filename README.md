@@ -166,7 +166,7 @@ Assistant Service
 
 队列决定哪些输入等待、补充或取消哪些工作；Durable 与外部证据确定执行进度；记忆和上下文帮助助手理解目标与历史。主助手可在派发后结束当前处理轮次，接收后续输入，再接回帮手结果。
 
-从 [CONTEXT.md](CONTEXT.md) 了解领域术语，设计依据见[持久执行 ADR](docs/adr/0011-durable-main-agent-and-conversation-queue.md)、[输入路由 ADR](docs/adr/0013-contextual-input-routing.md)与[记忆 ADR](docs/adr/0012-layered-memory-and-stable-context.md)。
+从 [GLOSSARY.md](GLOSSARY.md) 了解领域术语，设计依据见[持久执行 ADR](docs/adr/0011-durable-main-agent-and-conversation-queue.md)、[输入路由 ADR](docs/adr/0013-contextual-input-routing.md)与[记忆 ADR](docs/adr/0012-layered-memory-and-stable-context.md)。
 
 ## 仓库结构
 
@@ -179,7 +179,7 @@ test/                   自动化测试，当前接入回归为 assistant-*.test
 scripts/                构建、文档检查与 Git hooks 等维护脚本
 docs/adr/               架构决策
 docs/                   操作说明、验收记录与研究材料
-CONTEXT.md              领域术语与当前设计入口
+GLOSSARY.md             领域术语
 .env.example            Magpie 连接路径、路由预算、基础指令与运行配置示例
 ```
 
@@ -228,7 +228,7 @@ git diff --check
 | --- | --- |
 | 配置、日常操作、附件、恢复与预算 | [主助手操作说明](docs/personal-agent-operations.md) |
 | 模型、skills、MCP 与编码委派 | [能力配置](docs/capabilities.md) |
-| 领域术语与架构决策 | [CONTEXT.md](CONTEXT.md) · [ADRs](docs/adr/) |
+| 领域术语与架构决策 | [GLOSSARY.md](GLOSSARY.md) · [ADR 索引](docs/adr/README.md) |
 | 持久执行的受控验收与真实链路 | [切换验收](docs/durable-assistant-acceptance-20261015.md) · [真实链路测评](docs/durable-assistant-live-20261016.md) |
 | 自然语言补充、取消与队列路由 | [路由验收](docs/contextual-input-routing-acceptance-20261016.md) |
 | 上下文、长期记忆与工具原件 | [上下文验收](docs/context-management-acceptance-20261016.md) |

@@ -16,7 +16,7 @@
 
 ### Domain docs
 
-采用 single-context 布局：根目录 `CONTEXT.md` 和 `docs/adr/`。See `docs/agents/domain.md`.
+领域术语见根目录 `GLOSSARY.md`；按任务从 [ADR 索引](docs/adr/README.md)选择现役决策。文档读取与更新遵循 [domain.md](docs/agents/domain.md)。
 
 修改上下文恢复、压缩或记忆注入时，先读取 `docs/adr/0012-layered-memory-and-stable-context.md`，核对现役记忆、快照与 Durable 的职责。研究旧实现时再读取 `docs/adr/0003-recent-turn-context.md` 和 `docs/context-diagnostics.md`；旧离线工具已按 ADR-0014 退役。
 
