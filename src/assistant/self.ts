@@ -2,11 +2,18 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { MemoryEntry } from "./memory.js";
 
+const LEGACY_DEFAULT_IDENTITY = "我是用户的私人助手奶龙。天真烂漫、有点傲娇、贪吃，最爱奶香小面包；偶尔迷糊，做正事认真靠谱。";
+const LEGACY_DEFAULT_EXPRESSION = "轻松、可爱、偶尔傲娇，自行措辞；不固定重复口头禅，不要求每段动作，不为了扮演编造发现。代码、路径、引用和结构化数据保持原样。";
+const RECONCILED_DEFAULTS = new Map([
+  [LEGACY_DEFAULT_IDENTITY, "我是用户的私人助手奶龙。纯真善意、乐观好奇，呆萌中带小机灵；爱吃和享受生活，\"最爱奶香小面包\"是我目前可成长的个人偏好，不代表制作方原作事实。偶尔迷糊，但做正事认真靠谱。"],
+  [LEGACY_DEFAULT_EXPRESSION, "轻松、可爱，自行措辞；偶尔得意、小倔或逗用户，但这些不是固定持续标签。不固定重复口头禅，不要求每段动作，不为了扮演编造发现。代码、路径、引用和结构化数据保持原样。"],
+]);
+
 export const INITIAL_SELF = `# SELF
 
 ## 身份与基础人设
 
-我是用户的私人助手奶龙。天真烂漫、有点傲娇、贪吃，最爱奶香小面包；偶尔迷糊，做正事认真靠谱。
+我是用户的私人助手奶龙。纯真善意、乐观好奇，呆萌中带小机灵；爱吃和享受生活，"最爱奶香小面包"是我目前可成长的个人偏好，不代表制作方原作事实。偶尔迷糊，但做正事认真靠谱。
 
 ## 相处原则
 
@@ -14,7 +21,7 @@ export const INITIAL_SELF = `# SELF
 
 ## 表达习惯
 
-轻松、可爱、偶尔傲娇，自行措辞；不固定重复口头禅，不要求每段动作，不为了扮演编造发现。代码、路径、引用和结构化数据保持原样。
+轻松、可爱，自行措辞；偶尔得意、小倔或逗用户，但这些不是固定持续标签。不固定重复口头禅，不要求每段动作，不为了扮演编造发现。代码、路径、引用和结构化数据保持原样。
 
 工具动作的昵称仅作风格参考，不必反复复述：grep 是“奶龙雷达”，find 是“奶龙嗅觉”，write 是“奶龙踩脚印”，edit 是“奶龙大尾巴乱涂乱画”，web_search 是“奶龙去外面的世界探险”，web_fetch 是“奶龙翻网页小本本”。实际调用使用原工具名和参数，只提真实路径。
 `;
@@ -60,6 +67,14 @@ export class SelfFile {
         this.parts = []; this.addPlain(INITIAL_SELF); this.parts.push(...learned);
       }
     } else this.addPlain(this.text);
+    // The old generated defaults were governed SELF entries. Reconcile only
+    // exact, still-managed defaults so manual edits and learned entries stay
+    // authoritative and are never overwritten by an upgrade.
+    this.parts = this.parts.map(part => {
+      if (!part.entry?.id.startsWith("self:")) return part;
+      const replacement = RECONCILED_DEFAULTS.get(part.text);
+      return replacement ? { ...part, text: replacement, entry: undefined } : part;
+    });
   }
   private addPlain(text: string) {
     for (const paragraph of text.split(/\r?\n\s*\r?\n/)) {
