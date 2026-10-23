@@ -76,3 +76,46 @@ test("public mood update requires the active Processing Turn input", async () =>
     assert.equal((await f.app.controlSnapshot("one")).mood.state, "curious");
   } finally { release(); await f.close(); }
 });
+
+ test("two persona mood updates in one Processing Turn let a correction replace the initial mood", async () => {
+  let stage = 0;
+  const f = await assistantFixture((_wire, response) => {
+    stage++;
+    if (stage === 1) sendChatCompletion(response, "", moodCall("turn", "你不是开心，是有点累", "happy", "mood-first"));
+    else if (stage === 2) sendChatCompletion(response, "", moodCall("turn", "你不是开心，是有点累", "tired", "mood-correction", { source: "correction" }));
+    else sendChatCompletion(response, "已按纠正记录。");
+  });
+  try {
+    await f.app.receive({ conversationId: "one", inputId: "turn", text: "你不是开心，是有点累" });
+    await f.app.waitForIdle();
+    assert.equal((await f.app.controlSnapshot("one")).mood.state, "tired");
+    assert.equal((await f.app.controlSnapshot("one")).mood.source?.kind, "correction");
+  } finally { await f.close(); }
+});
+
+test("verified_work mood updates require a work in the current Processing Turn", async () => {
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  let calls = 0;
+  const f = await assistantFixture(async (_wire, response) => {
+    calls++;
+    if (calls === 1) sendChatCompletion(response, "历史工作已完成。");
+    else { entered(); await held; sendChatCompletion(response, "当前工作已核对。"); }
+  });
+  try {
+    await f.app.receive({ conversationId: "one", inputId: "historical", text: "先完成历史工作" });
+    await f.app.waitForIdle();
+    const historical = f.app.routingStatus("one").works.find(work => work.inputId === "historical")!;
+    await f.app.receive({ conversationId: "one", inputId: "current", text: "核对当前工作结果" });
+    await started;
+    assert.throws(() => f.app.updateMood("one", { mood: "happy", source: { kind: "verified_work", inputId: "current", workId: historical.id } }), /当前|核验/);
+    const current = f.app.routingStatus("one").works.find(work => work.inputId === "current")!;
+    const accepted = f.app.updateMood("one", { mood: "curious", source: { kind: "verified_work", inputId: "current", workId: current.id } });
+    assert.equal(accepted.accepted, true);
+    assert.equal(accepted.snapshot.state, "curious");
+    release();
+    await f.app.waitForIdle();
+  } finally { release(); await f.close(); }
+});

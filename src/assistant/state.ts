@@ -102,7 +102,11 @@ export class AssistantState {
       throw new Error("未知情绪状态");
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const operation = update.operationId ?? `${update.source.kind}:${update.source.inputId}`;
+      // A Processing Turn may contain more than one mood call for the same
+      // input (for example, an initial inference followed by a correction).
+      // The durable call identity is supplied by the public tool seam; the
+      // fallback still scopes retries to the complete source identity.
+      const operation = update.operationId ?? `${update.source.kind}:${update.source.inputId}:${update.source.workId ?? ""}:${update.source.ref ?? ""}`;
       const fresh = this.db.prepare("INSERT OR IGNORE INTO persona_actions VALUES(?,?,?)").run(id,`mood:${operation}`,JSON.stringify(update)).changes > 0;
       const saved = this.persona(id,now);
       if (fresh) {
