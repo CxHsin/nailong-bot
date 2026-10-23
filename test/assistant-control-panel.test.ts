@@ -193,6 +193,48 @@ test("catalog output limits equal to context windows do not block other models, 
     assert.deepEqual(f.errors, []);
   } finally { await f.close(); }
 });
+
+test("Telegram /start renders a calm fallback and a persisted source-backed mood without doing work", async () => {
+  const moodCall = (inputId: string, request: string, mood: string, id: string) => [{
+    index: 0,
+    id,
+    type: "function",
+    function: { name: "persona_mood", arguments: JSON.stringify({ inputId, request, mood }) },
+  }];
+  const f = await controlPanelFixture({ provider: (_wire, response) => {
+    if (f.requests.length === 1) sendChatCompletion(response, "", moodCall("6002", "MOOD_GOAL", "happy", "mood-happy"));
+    else sendChatCompletion(response, "已记录。");
+  }});
+  try {
+    await f.bot.handleUpdate(command(6001, "/start"));
+    const calm = latestPanel(f);
+    assert.match(calm.text, /情绪：平稳/);
+    assert.match(calm.text, /暂无特别变化/);
+    assert.equal(f.requests.length, 0, "opening /start does not call the model");
+    assert.equal(f.outputs.length, 0, "opening /start does not enqueue or produce an assistant output");
+    const before = await f.app.controlSnapshot("telegram:private:42");
+
+    await f.bot.handleUpdate(command(6002, "MOOD_GOAL"));
+    await f.flush();
+    assert.equal(f.requests.length, 2, "the user input and its tool follow-up are the only model requests");
+    await f.bot.handleUpdate(command(6003, "/start"));
+    assert.match(latestPanel(f).text, /情绪：开心/);
+    const active = await f.app.controlSnapshot("telegram:private:42");
+    assert.equal(active.mood.state, "happy");
+    assert.equal(active.mood.source?.inputId, "6002");
+    assert.equal(f.requests.length, 2, "reading the active mood does not call the model");
+    assert.equal(f.outputs.length, 1, "reading the active mood does not create another assistant output");
+
+    await f.reopen();
+    await f.bot.handleUpdate(command(6004, "/start"));
+    assert.match(latestPanel(f).text, /情绪：开心/);
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).mood.state, "happy");
+    assert.equal(f.requests.length, 2, "reopening and rendering the panel do not call the model");
+    assert.equal(f.outputs.length, 1, "reopening the panel does not enqueue or produce an assistant output");
+    assert.equal((await f.app.controlSnapshot("telegram:private:42")).expressionFrequency, before.expressionFrequency);
+    assert.deepEqual(f.errors, []);
+  } finally { await f.close(); }
+});
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { controlPanelFixture } from "./fixtures/control-panel.js";

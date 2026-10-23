@@ -19,6 +19,9 @@ const shortName = (id?: string, displayName?: string) => {
   const characters = Array.from(name);
   return characters.length > 48 ? `${characters.slice(0, 47).join("")}…` : name;
 };
+const moodLine = (mood: ControlSnapshot["mood"]) =>
+  mood.status === "active" ? `情绪：${mood.label}` :
+    mood.status === "cleared" ? "情绪：平稳（已恢复平稳）" : "情绪：平稳（暂无特别变化）";
 
 /** Native controls use the authenticated Conversation service boundary, never natural-language routing. */
 export function registerTelegramPanel(options: {
@@ -48,7 +51,7 @@ export function registerTelegramPanel(options: {
       count(s.usage[field]) + (s.usage[field] !== null && s.usage.missing[field] > 0 ? "*" : "");
     switch (view.page) {
       case "home":
-        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${usageCount("input")} ↓${usageCount("output")}\nCache: R${usageCount("cacheRead")} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}${s.usage.missing.requests ? `\n* 仅已知用量 · ${s.usage.missing.requests} 条缺失` : ""}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
+        text = `🦖 Nailong Bot\n\nStatus: ${s.status}\nTokens: ↑${usageCount("input")} ↓${usageCount("output")}\nCache: R${usageCount("cacheRead")} CH${s.usage.cacheHit == null ? "未知" : `${s.usage.cacheHit.toFixed(1)}%`}\nContext: ${s.context.tokens === undefined || !s.context.window ? "未知" : `~${(s.context.tokens / s.context.window * 100).toFixed(1)}%`}/${count(s.context.window)}${s.usage.missing.requests ? `\n* 仅已知用量 · ${s.usage.missing.requests} 条缺失` : ""}\n${moodLine(s.mood)}\n\n/model — 选择模型\n/stop — 暂停当前请求\n/resume — 继续暂停工作\n\n${s.connected && !s.connectionError ? "🟢" : "🔴"} ${connection}`;
         if (s.status === "waiting_model") text += "\n等待选择可用模型；已接收输入保留。";
         if (s.pending) text += `\n\n实际请求：${setting(s.actual?.model, s.actual?.thinking)}\n待生效：${setting(s.selectedModel, s.thinking)}\n下一次准备请求使用最新选择。`;
         if (s.selectedModel && !s.selectedAvailable) text += "\n当前选择不可用，请重新选择；上下文与工作保留。";
