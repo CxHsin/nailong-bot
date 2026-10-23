@@ -60,6 +60,24 @@ test("an invalid action invalidates the whole decision before any control is exp
   }
 });
 
+test("historical candidates cannot consume current identities or their goal summaries", async () => {
+  const f = await provider((_wire, response) => complete(response, { actions: [{ kind: "supplement", target: "current", text: "change current goal" }] }));
+  try {
+    const result = await createIntentClassifier(f.configuration, { model: "fast", inputTokens: 2200 }).classify({
+      input: { conversationId: "one", inputId: "new", text: "change current goal" },
+      works: [
+        ...Array.from({ length: 180 }, (_, index) => ({ id: `history-${index}`, summary: "historical goal ".repeat(80), status: "helper_result", historical: true })),
+        { id: "current", summary: "current goal", status: "helper" },
+      ], recent: [],
+    });
+    assert.equal(result.actions[0]?.target, "current");
+    const sent = JSON.parse(f.requests[0]!.messages[1].content);
+    assert.equal(sent.works[0].id, "current");
+    assert.equal(sent.works[0].summary, "current goal");
+    assert.equal(sent.incomplete, true, "omitted relevant candidates still prevent global uniqueness assumptions");
+  } finally { await f.close(); }
+});
+
 test("Cloudflare routing sends model-specific thinking controls and strict action shapes on the actual wire", async () => {
   const f = await provider((_wire, response) => complete(response, { actions: [{ kind: "request", text: "hello" }], reason: "" }));
   const originalFetch = globalThis.fetch;

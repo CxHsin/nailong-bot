@@ -530,10 +530,13 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
     async intentContext(conversationId: string) {
       const {root} = await conversation(conversationId);
       const entries = (await root.context(context)).entries;
-      const recent: Array<{role: "user" | "assistant"; text: string; inputId: string; at?: string}> = [];
+      const recent: Array<{role: "user" | "assistant"; text: string; inputId: string; at?: string; relatedInputIds?: string[]}> = [];
+      let relatedInputIds: string[] = [];
       for (const entry of entries) {
         const ids = (entry.data as {sourceIds?: string[]} | undefined)?.sourceIds ?? [];
-        for (const source of memory.sources(ids)) {
+        const sources = memory.sources(ids).filter(source => source.conversationId === conversationId && memory.isSourceCurrent(source.id));
+        if (ids.length) relatedInputIds = sources.map(source => source.inputId);
+        for (const source of sources) {
           if (source.conversationId === conversationId && source.role === "user" && memory.isSourceCurrent(source.id))
             recent.push({role: "user", text: source.text, inputId: source.inputId, at: source.at});
         }
@@ -541,7 +544,7 @@ export async function createDurableExecutor(options: DurableExecutorOptions) {
           if (message.role !== "assistant" || !["stop","length","toolUse"].includes(message.stopReason)) continue;
           const text = message.content.filter(part => part.type === "text").map(part => part.text).join("\n");
           if (text && !memory.invalidatedSources().some(source => source.text === text))
-            recent.push({role: "assistant", text, inputId: `assistant:${entry.id}`});
+            recent.push({role: "assistant", text, inputId: `assistant:${entry.id}`, relatedInputIds});
         }
       }
       return {recent, version: memory.version(), excluded: memory.invalidatedSources().flatMap(source => {

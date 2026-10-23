@@ -7,7 +7,7 @@ import type { QueueInput } from "./queue.js";
 export type IntentOptions = { model?: string; timeoutMs?: number; inputTokens?: number; outputTokens?: number; recentTurns?: number };
 export type IntentSelection = {model?:ModelConfig;thinking?:string;reason?:string};
 export type IntentAction = { kind: "request" | "supplement" | "cancel" | "clarify"; text: string; target?: string; candidates?: string[] };
-export type IntentWork = { id: string; summary: string; status: string; inputId?: string; helperId?: string; [key: string]: unknown };
+export type IntentWork = { id: string; summary: string; status: string; inputId?: string; helperId?: string; historical?: boolean; [key: string]: unknown };
 export type IntentRecent = { role: "user" | "assistant"; text: string; inputId: string; at?: string | number };
 export type IntentRequest = { input: QueueInput; works: IntentWork[]; recent: IntentRecent[]; replyTargets?: string[]; incomplete?: boolean };
 
@@ -122,21 +122,31 @@ export function createIntentClassifier(configuration: ModelConfiguration, option
       if (request.input.images?.length && !actualText.trim()) return { actions: [], reason: "needs_visual", snapshot };
       const fits = () => estimateInput({ systemPrompt: instructions, messages: [{ role: "user", content: JSON.stringify(snapshot) + protocol.suffix, timestamp: 0 }] }) + protocolTokens <= budgets.inputTokens;
       if (!fits()) return { actions: [], reason: "input_budget", snapshot };
-      // Explicit reply identities first, then all remaining identities, before spending on prose.
+      // Current identities and usable goals precede optional historical candidates.
       const replyIds = new Set(snapshot.replyTargets);
-      const works = [...request.works.filter((work) => replyIds.has(work.id)), ...request.works.filter((work) => !replyIds.has(work.id))];
-      for (const work of works) {
+      const required = [...request.works.filter(work => replyIds.has(work.id)), ...request.works.filter(work => !replyIds.has(work.id) && !work.historical)];
+      const history = request.works.filter(work => !replyIds.has(work.id) && work.historical);
+      const works = [...required, ...history];
+      const addIdentity = (work: IntentWork) => {
         const identity: IntentWork = { id: work.id, status: work.status, summary: "", ...(work.inputId ? { inputId: work.inputId } : {}), ...(work.helperId ? { helperId: work.helperId } : {}) };
         for (const key of ["batchId", "submissionId", "executionId"]) if (work[key] !== undefined) identity[key] = work[key];
         snapshot.works.push(identity);
         if (!fits()) { snapshot.works.pop(); snapshot.incomplete = true; }
-      }
+      };
+      for (const work of required) addIdentity(work);
       if (snapshot.replyTargets.some((id) => !snapshot.works.some((work) => work.id === id))) return { actions: [], reason: "reply_context_budget", snapshot };
-      // Keep work goals usable before filling the remaining budget with chat.
-      for (const work of snapshot.works) {
+      const fillSummary = (work: IntentWork, length: number) => {
         const source = works.find((entry) => entry.id === work.id)!;
-        work.summary = [...source.summary].slice(0, 512).join("");
-        if (!fits()) work.summary = "";
+        const previous = work.summary;
+        work.summary = [...source.summary].slice(0, length).join("");
+        if (!fits()) work.summary = previous;
+      };
+      // Give each current goal a short description before expanding any one to 512 characters.
+      for (const length of [128, 512]) for (const work of snapshot.works) fillSummary(work, length);
+      for (const work of history) {
+        addIdentity(work);
+        const added = snapshot.works.at(-1);
+        if (added?.id === work.id) fillSummary(added, 512);
       }
       const recentStarts = request.recent.flatMap((entry, index) => entry.role === "user" || index === 0 ? [index] : []).slice(-budgets.recentTurns);
       for (let i = recentStarts.length - 1; i >= 0; i--) {

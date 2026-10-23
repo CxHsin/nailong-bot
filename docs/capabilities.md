@@ -12,7 +12,9 @@
 
 ## 模型
 
-沿用 `MODEL_NAMES`、`MODEL_DEFAULT`、`MODEL_<ALIAS>_*` 配置；仅列出有 API Key 的别名。`/model` 查看或切换主 Session。主助手模型与 herdr 外部 CLI 模型各自配置，切换主助手不会改变 Claude/Codex。当前 ds 额度不足会返回实际模型错误，不自动改模型。
+正式主助手和路由模型使用 Magpie 连接与模型目录。主模型按 Conversation 保存选择，路由模型由整个 Assistant Service 共用并独立保存；`/model` 打开模型菜单，`/model 完整模型ID` 选择主模型。连接、选择与升级方式见[操作说明](personal-agent-operations.md)。`MODEL_NAMES`、`MODEL_DEFAULT`、`ASSISTANT_INTENT_MODEL` 和 `MODEL_<ALIAS>_*` 不再决定正式入口的模型选择；测试中的显式模型注入不属于生产配置入口。
+
+Embedding 使用独立本地配置和服务级选择；主模型、路由模型与 Embedding 的选择互不覆盖。herdr 外部 CLI 继续使用其自身的 Claude/Codex 模型和账户设置，切换主助手模型不会改变它们。模型调用失败返回实际错误，不自动更换模型。
 
 旧自建 Tool Search provider 适配已退役，`TOOL_SEARCH` 配置不在新版入口启用该旧协议。新版通过 Durable 适配在用工具，不恢复旧适配器的发现回执或权限协议。历史对照见 [原发现记录](native-tool-search.md)。
 

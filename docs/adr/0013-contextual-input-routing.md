@@ -8,6 +8,8 @@ status: accepted
 
 会话没有先前未完成工作、主执行轮次或未交付 helper 时，保留原文并直接交给主助手；存在相关工作时在队首处理阶段判断。已完成、取消或已交付的历史本身不触发分类。分类失败或需要视觉理解时，原身份、附件及未判定原因交回同一个主助手。
 
+路由候选优先保留未结束工作与未交付 helper 的身份和简短目标；helper 交付不替代目标完成状态。已结束历史按真实回复、当前可见的有限近期对话或用户明确指定的身份及目标引入，其他历史持久保留但不占当前候选预算。明确回复对象及当前目标的身份、摘要先于可选历史；实际候选超预算时仍标记不完整，不据剩余候选推断全局唯一。
+
 路由决定、原输入与动作投递进度关联保存。取消尽快发起对应中断并核实实际停止，未知外部效果先对账；模型判断不覆盖执行事实，也不触发盲目重派。路由模型按 [ADR-0016](0016-magpie-catalog-and-conversation-settings.md)使用 Magpie 目录，选择属于整个 Assistant Service，每次判断开始时冻结；生产入口已结束独立路由别名配置职责。
 
 依据：[结论 #214](https://github.com/CxHsin/nailong-bot/issues/214)、[规格 #215](https://github.com/CxHsin/nailong-bot/issues/215)、[触发范围调整 #238](https://github.com/CxHsin/nailong-bot/issues/238)及[目录扩展规格 #260](https://github.com/CxHsin/nailong-bot/issues/260)。操作见[操作说明](../personal-agent-operations.md)，验证分别见[路由验收](../contextual-input-routing-acceptance-20261016.md)和[目录接入验收](../nailong-persona-acceptance-20261020.md)。

@@ -58,7 +58,7 @@ test("topic material and raw Akasha evidence preserve distinct sources after res
   const f = await assistantFixture((wire, response) => {
     seen.push(JSON.stringify(wire.messages));
     const last = wire.messages.at(-1)!;
-    if (last.role === "user" && JSON.stringify(last.content).includes("记为项目主题：红叶方案使用分批部署")) {
+    if (last.role === "user" && Array.isArray(last.content) && last.content.some(part => part.type === "text" && part.text.startsWith('<event identity="topic"'))) {
       sendChatCompletion(response, "", [{ index: 0, id: "topic", type: "function", function: {
         name: "memory_write", arguments: JSON.stringify({ action: "add", kind: "topic", topic: "红叶方案", content: "红叶方案采用分批部署", quote: "红叶方案使用分批部署", expectedVersion: 0 }),
       } }]);
@@ -74,7 +74,7 @@ test("topic material and raw Akasha evidence preserve distinct sources after res
     assert.match(request, /topic:红叶方案/);
     assert.match(request, /ROLLBACK-42/);
     assert.match(request, /role=user.*at=/);
-    assert.equal((request.match(/红叶方案采用分批部署/g) ?? []).length, 1, "topic evidence is not injected again as raw Akasha text");
+    assert.equal((request.match(/红叶方案采用分批部署/g) ?? []).length, 1, "topic fact is injected once even when its original source is recalled");
     assert.equal((request.match(/ROLLBACK-42/g) ?? []).length, 1);
   } finally { await f.close(); }
 });
