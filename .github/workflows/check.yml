@@ -28,5 +28,6 @@ jobs:
           fd --version
           rg --version
       - run: npm run typecheck
-      - run: node --import tsx --test --test-concurrency=4 test/*.test.ts
+      # Recovery tests persist real SQLite state; avoid contention between test files.
+      - run: node --import tsx --test --test-concurrency=1 test/*.test.ts
       - run: npm run build
