@@ -1,3 +1,7 @@
+## 开始工作
+
+先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，按共同流程建立独立任务分支和 worktree、验证并交付。任务分支直接向 `main` 创建 PR，不要求汇入 `development`。
+
 ## Agent skills
 
 ### Issue tracker
@@ -22,16 +26,6 @@
 
 ## 分支与提交
 
-每次修改前切换到 `development` 分支，并同步最新 `main`；所有改动先在 `development` 上完成验证和提交，向上游推送须用户明确同意，不直接向 `main` 提交或推送。
+Agent 可以在自己的任务分支上提交。推送须获用户明确同意；获得同意后，读取并使用 [pr 技能](C:/Users/Cx/.codex/skills/pr/SKILL.md)，撰写当前任务分支 → `main` 的 PR 标题和描述。交付 PR 链接和验证结果后停止，不执行合并。
 
-新 checkout 安装本地分支保护：`npm run hooks:install`；已有 hooks 的接入方式见 [git-hooks.md](docs/agents/git-hooks.md)。
-
-提交标题遵循 Conventional Commits：`<type>(<scope>): <summary>`；scope 取实际模块名，例如 `docs(agents): 规范分支与提交流程`。
-
-提交后向用户说明改动和验证结果，等待用户明确同意推送到上游。获得同意后，推送 `development`，读取并使用 [pr 技能](C:/Users/Cx/.codex/skills/pr/SKILL.md) 撰写 PR 标题和描述，创建或更新 `development` → `main` 的 PR。交付 PR 链接和验证结果后停止，不执行合并。用户完成合并后，同步本地 `main` 和 `development`，保留这两个分支。
-
-清理已合并分支时使用 `scripts/clean-branches.mjs`；预览、执行方式和停止条件见 [分支清理](docs/agents/branch-cleanup.md)。
-
-提交正文写清问题、结果，以及做法不显然时的原因，篇幅以几段为限。用 `Fixes #N` 关闭对应 Issue，`Refs #N` 表示仅作背景。验证段写实际跑过的检查和结果；涉及测试时记录测试条数，修复缺陷时附上去掉修复就会失败的用例。
-
-agent 的实质贡献在相应提交加 `Generated-by: <tool>` trailer。agent 可以在 `development` 上提交；人始终是贡献责任人，评审与是否合并由人决定。
+Agent 的实质贡献在相应提交加 `Generated-by: <tool>` trailer；人始终是贡献责任人，评审与是否合并由人决定。提交格式、验证证据和分支清理遵循 [CONTRIBUTING.md](CONTRIBUTING.md)。
