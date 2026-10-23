@@ -148,6 +148,7 @@ export async function connectTelegram(options: {
     download: options.download,
     document: options.downloadDocument ? async (id, name, messageId) => saveTelegramDocument(options.dataDir, messageId, name, await options.downloadDocument!(id)) : undefined,
     reportFailure,
+    log: (line) => console.error(line),
     async handle(update, started) {
       await app.receive({
         conversationId,
