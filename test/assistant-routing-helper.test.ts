@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServerResponse } from "node:http";
 import { Type } from "typebox";
 import { assistantFixture, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
+import { PersistentAssistantQueue } from "../src/assistant/queue.js";
+import { AssistantState } from "../src/assistant/state.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -22,7 +24,7 @@ function classified(response: ServerResponse, actions: unknown[]) {
   response.end(JSON.stringify({ id: "intent", object: "chat.completion", choices: [{ index: 0, message: { role: "assistant", content: JSON.stringify({ actions }) }, finish_reason: "stop" }] }));
 }
 
-async function helperFixture(options: { prompt?: (agent: string, text: string) => Promise<void>; pollMs?: number } = {}) {
+async function helperFixture(options: { prompt?: (agent: string, text: string) => Promise<void>; pollMs?: number; history?: number } = {}) {
   let directory = "";
   let status = "working";
   let mismatch = false;
@@ -39,7 +41,7 @@ async function helperFixture(options: { prompt?: (agent: string, text: string) =
       const text: string = context.current.text;
       const agent = text.includes("other") ? "other" : "coder";
       const kind = text.includes("补充") ? "supplement" : text.includes("停止") ? "cancel" : "request";
-      const target = context.works.find((work: { helperId?: string; summary: string }) => work.helperId && work.summary === `任务 ${agent}`)?.id;
+      const target = text.includes("旧成果") ? context.replyTargets[0] : context.works.find((work: { helperId?: string; summary: string }) => work.helperId && work.summary === `任务 ${agent}`)?.id;
       classified(response, [{ kind, text, ...(kind !== "request" ? { target } : {}) }]);
       return;
     }
@@ -55,6 +57,24 @@ async function helperFixture(options: { prompt?: (agent: string, text: string) =
   }, async (cwd) => {
     directory = cwd;
     await writeFile(join(cwd, "prompt.txt"), "registered original helper request");
+    if (options.history) {
+      const dataDir = join(cwd, "fresh");
+      await mkdir(dataDir, { recursive: true });
+      const queue = new PersistentAssistantQueue(join(dataDir, "queue.sqlite"));
+      const state = new AssistantState(dataDir);
+      try {
+        const history = [];
+        for (let index = 0; index < options.history; index++) {
+          const inputId = `archived-${index}`;
+          queue.receive({ conversationId: "one", inputId, text: `已验收的历史成果 ${index}` });
+          const work = queue.listWorks("one").find(work => work.inputId === inputId)!;
+          queue.settle(queue.claim("one")!.id, "completed");
+          history.push({ id: `archived-helper-${index}`, session: "fixture", agent: `archive-${index}`, paneId: `archive-${index}:p1`, workspaceId: "w1", cwd,
+            promptPath: join(cwd, "prompt.txt"), sequence: 1, delivered: true, targetIds: [work.id], summary: `已验收的历史成果 ${index}` });
+        }
+        state.saveHelpers("one", history);
+      } finally { state.close(); queue.close(); }
+    }
     return {
       pollMs: options.pollMs ?? 60_000,
       intent: { model: "router" },
@@ -79,6 +99,32 @@ async function helperFixture(options: { prompt?: (agent: string, text: string) =
     setStatus(value: string) { status = value; }, mismatch() { mismatch = true; },
     async register(agent = "coder") { await f.app.receive({ conversationId: "one", inputId: `register-${agent}`, text: `登记 ${agent}` }); await f.app.waitForIdle(); },
   };
+}
+
+for (const history of [0, 180]) {
+  test(`${history} archived helpers do not change live supplement delivery across reset and reopen`, { timeout: 20000 }, async () => {
+    const f = await helperFixture({ history });
+    try {
+      await f.register();
+      await f.app.control("one", { type: "reset", operationId: "reset-live-helper" });
+      await f.reopen();
+      const text = "补充 coder：增加一列，保留原数据";
+      await f.app.receive({ conversationId: "one", inputId: "live-supplement", text });
+      await f.app.waitForIdle();
+      const prompts = f.commands.filter(args => args[1] === "prompt");
+      assert.equal(prompts.length, 1, "live supplement must reach the helper exactly once");
+      assert.equal(prompts[0]![2], "coder");
+      assert.ok(prompts[0]![3]!.includes(text));
+      assert.ok(f.contexts.at(-1)!.works.some(work => work.helperId && work.summary === "任务 coder"));
+      if (history) {
+        await f.app.receive({ conversationId: "one", inputId: "old-result-followup", text: "补充旧成果：改成 CSV", replyToInputId: "archived-0" });
+        await f.app.waitForIdle();
+        assert.ok(f.contexts.at(-1)!.works.some(work => work.inputId === "archived-0" && work.status === "helper_result"));
+        assert.match(JSON.stringify(f.mainInputs.at(-1)?.messages), /基于已有成果的后续处理/);
+        assert.equal(f.commands.filter(args => args[1] === "prompt").length, 1, "historical follow-up must not revive a delivered helper");
+      }
+    } finally { f.mainRelease.resolve(); await f.close(); }
+  });
 }
 
 test("natural helper supplement is actually submitted while the main durable tool remains busy", { timeout: 15000 }, async () => {
@@ -136,6 +182,37 @@ test("a delivered helper no longer requires classification and follow-ups retain
     assert.equal(f.commands.filter((args) => args[1] === "prompt").length, 0);
     assert.match(JSON.stringify(f.mainInputs.at(-1)!.messages), /ARTIFACT_LEDGER_RESULT/);
     assert.match(JSON.stringify(f.mainInputs.at(-1)!.messages), /补充 coder：基于成果改成 CSV/);
+  } finally { unsubscribe(); f.mainRelease.resolve(); await f.close(); }
+});
+
+test("a recently delivered result retains its old target while another helper is active", { timeout: 15000 }, async () => {
+  const f = await helperFixture({ pollMs: 10 });
+  const delivered = deferred();
+  const unsubscribe = f.app.subscribe((output) => {
+    if (output.type === "text" && f.mainInputs.some(wire => JSON.stringify(wire.messages.at(-1)).includes("ARTIFACT_LEDGER_RESULT"))) delivered.resolve();
+  });
+  try {
+    await f.register();
+    for (let index = 0; index < 8; index++) {
+      await f.app.receive({ conversationId: "one", inputId: `unrelated-${index}`, text: `其他话题 ${index}` });
+      await f.app.waitForIdle();
+    }
+    f.setStatus("done");
+    await bounded(delivered.promise, "old helper result was not delivered");
+    await f.app.waitForIdle();
+    f.setStatus("working");
+    await f.register("other");
+    await f.reopen();
+    await f.app.receive({ conversationId: "one", inputId: "recent-result", text: "补充 coder：刚才的成果改为 CSV" });
+    await f.app.waitForIdle();
+    assert.ok(f.contexts.at(-1)!.works.some(work => work.summary === "任务 coder" && work.status === "helper_result"));
+    assert.match(JSON.stringify(f.mainInputs.at(-1)?.messages), /基于已有成果的后续处理/);
+    assert.equal(f.commands.filter(args => args[1] === "prompt").length, 0);
+    await f.app.control("one", { type: "reset", operationId: "clear-recent-result" });
+    await f.app.receive({ conversationId: "one", inputId: "after-result-reset", text: "查看当前工作" });
+    await f.app.waitForIdle();
+    assert.ok(!f.contexts.at(-1)!.works.some(work => work.summary === "任务 coder"), "reset removes the recent historical result from candidate context");
+    assert.ok(f.contexts.at(-1)!.works.some(work => work.summary === "任务 other"));
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.close(); }
 });
 
