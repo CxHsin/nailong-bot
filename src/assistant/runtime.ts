@@ -204,11 +204,11 @@ export async function createAssistant(options: AssistantOptions) {
         parameters:Type.Object({inputId:Type.String(),request:Type.String({minLength:1}),mood:Type.Union([Type.Literal("calm"),Type.Literal("happy"),Type.Literal("curious"),Type.Literal("concerned"),Type.Literal("tired"),Type.Literal("disappointed"),Type.Literal("disagreeing")]),label:Type.Optional(Type.String()),clear:Type.Optional(Type.Boolean()),source:Type.Optional(Type.Union([Type.Literal("user_input"),Type.Literal("correction"),Type.Literal("verified_work")])),workId:Type.Optional(Type.String())}),replay:"safe",
         async execute(args) {
           const input = currentUserInput(id,args.inputId,args.request);
-          if (args.source === "verified_work") {
-            const work = service.listWorks(id).find(candidate => candidate.id === args.workId);
-            if (!work || work.status !== "completed") throw new Error("只有本轮已核验完成的工作结果才能更新情绪。");
-          }
-          const result = state.updateMood(id,{mood:args.mood,label:args.label,clear:args.clear,operationId:`input:${input.source ?? "direct"}:${input.inputId}`,source:{kind:args.source ?? "user_input",inputId:input.inputId,...(args.workId ? {workId:args.workId} : {})}},now());
+          if (args.source === "verified_work") requireCurrentVerifiedWork(id, args.workId);
+          const source = args.source ?? "user_input";
+          const result = state.updateMood(id,{mood:args.mood,label:args.label,clear:args.clear,
+            operationId:`input:${input.source ?? "direct"}:${input.inputId}:source:${source}:mood:${args.mood}:label:${args.label ?? ""}:work:${args.workId ?? ""}`,
+            source:{kind:source,inputId:input.inputId,...(args.workId ? {workId:args.workId} : {})}},now());
           return {output:[{type:"text",text:JSON.stringify(result)}]};
         } }),
       durableHerdrWatch(client, helperRecords(id), () => saveHelpers(id), () => {
@@ -240,6 +240,14 @@ export async function createAssistant(options: AssistantOptions) {
     if (!input || (request !== undefined && (input.userText ?? input.text) !== request))
       throw new Error("互动需要本轮用户原话与可核对的输入身份；历史、引用和内部材料不是当前授权。");
     return input;
+  }
+  function requireCurrentVerifiedWork(id: string, workId: string | undefined) {
+    const batch = service.getActiveBatch(id);
+    const work = workId && service.listWorks(id).find(candidate => candidate.id === workId);
+    if (!batch || !work || work.batchId !== batch.id || !["running", "completed"].includes(work.status) ||
+      !batch.events.some(event => event.targetId === work.id))
+      throw new Error("只有当前 Processing Turn 中已核验完成的工作结果才能更新情绪。");
+    return work;
   }
 
   executor = await createDurableExecutor({
@@ -691,10 +699,7 @@ export async function createAssistant(options: AssistantOptions) {
       // The public update boundary is intentionally tied to the active Processing Turn.
       // A panel read, historical source, or idle service cannot mutate mood.
       const input = currentUserInput(conversationId, update.source.inputId);
-      if (update.source.kind === "verified_work") {
-        const work = service.listWorks(conversationId).find(candidate => candidate.id === update.source.workId);
-        if (!work || work.status !== "completed") throw new Error("只有已核验完成的工作结果才能更新情绪。");
-      }
+      if (update.source.kind === "verified_work") requireCurrentVerifiedWork(conversationId, update.source.workId);
       return state.updateMood(conversationId, update, now());
     },
     subscribe(listener: (output: AssistantOutput) => void | Promise<void>) {
