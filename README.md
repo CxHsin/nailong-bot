@@ -208,7 +208,7 @@ data/pi-durable-v1/
 
 ## 开发与验证
 
-在 `development` 分支上开发，修改前同步最新 `main`。新 checkout 运行 `npm run hooks:install`，本地 hooks 限制提交分支并拦截向 `main` 推送，细节见[本地分支保护](docs/agents/git-hooks.md)。提交遵循 Conventional Commits；推送须经用户明确同意，通过 `development` → `main` PR 评审，由人决定合并。
+开发与交付遵循 [贡献指南](CONTRIBUTING.md)：每个任务使用独立分支和 worktree，直接向 `main` 创建 PR；推送须经用户明确同意，合并由人决定。Agent 还须阅读 [AGENTS.md](AGENTS.md)。本地 hooks 的安装和保护边界见[本地分支保护](docs/agents/git-hooks.md)。
 
 常用检查命令：
 

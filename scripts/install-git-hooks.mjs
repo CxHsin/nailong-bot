@@ -12,4 +12,4 @@ for (const name of ["pre-commit", "pre-push"]) {
   accessSync(path); chmodSync(path, 0o755);
 }
 git("config", "--local", "core.hooksPath", ".githooks");
-console.log("Installed development commit guard and main push guard.");
+console.log("Installed main/detached HEAD commit guard, staged whitespace check, and main push guard.");
