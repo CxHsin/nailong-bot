@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0011-durable-main-agent-and-conversation-queue.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Pi Durable 接入验证
 
 > 本文保留正式实现前的独立实验环境与 9 项证据。后续队列、执行器和入口切换状态见 [当前验收](../durable-assistant-acceptance-20261015.md)，不将其混算为本实验通过项。

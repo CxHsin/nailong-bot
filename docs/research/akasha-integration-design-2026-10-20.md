@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0017-port-akasha-engine-and-independent-embedding.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Akasha 引擎接入与模型菜单讨论
 
 日期：2026-10-20。用户已确认本讨论全部设计选择；本文是设计结论归档，不是实现验收或最终规格。权威结论为 [Issue #267](https://github.com/CxHsin/nailong-bot/issues/267)，按 [Issue tracker](../agents/issue-tracker.md) 发布。
@@ -29,7 +31,7 @@
 
 ## 保持的现役边界
 
-沿用 [CONTEXT](../../CONTEXT.md) 的 Akasha Recall、Memory Snapshot 与 Default Forgetting 定义。现役来源拥有角色、时间、Conversation、inputId 与父来源，足够补建文本向量索引；来源行不等于上游已闭合学习轮次。历史图初始化须根据真实完成记录定义资格与顺序，不能补造历史召回反馈。
+沿用 [GLOSSARY](../../GLOSSARY.md) 的 Akasha Recall、Memory Snapshot 与 Default Forgetting 定义。现役来源拥有角色、时间、Conversation、inputId 与父来源，足够补建文本向量索引；来源行不等于上游已闭合学习轮次。历史图初始化须根据真实完成记录定义资格与顺序，不能补造历史召回反馈。
 
 默认遗忘的来源递归排除、快照与摘要失效仍由现役契约约束，上游节点抑制不能直接替代。原始记录、记忆与 Durable 的执行事实保持职责分离。
 

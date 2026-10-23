@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 路由三类上下文修复与同组重测
 
 2026-10-17（北京时间），任务 [#223](https://github.com/CxHsin/nailong-bot/issues/223)，Part of [#215](https://github.com/CxHsin/nailong-bot/issues/215)，承接 [#222](https://github.com/CxHsin/nailong-bot/issues/222)。用户明确每次用户输入触发判断，每次提供当前消息及 Telegram 回复、近期交流、当前/排队/helper 工作身份与目标状态。受检基准为 `ba555b0` 加本次修改。

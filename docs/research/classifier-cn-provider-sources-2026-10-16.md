@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 国内分类器 API 候选官方来源核验（2026-10-16）
 
 访问日期：2026-10-16。目标是中文上下文 request / supplement / cancel / clarify 分类，现有总超时 8 秒、输出上限 1024 tokens。本文仅核验公开官方文档，没有注册、充值或调用模型；模型真实延迟、准确率与账号可开通范围尚未实测。

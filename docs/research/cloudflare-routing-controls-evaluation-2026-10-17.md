@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Cloudflare 分类调用修复与同组重测
 
 后续核对发现本轮样本 8、14 的助手单独历史被组装器丢弃。此文保留当时实际成绩；不能把第 14 例算作已经验证了嵌入指令隔离。修正三类上下文后的独立重测见[后续记录](routing-three-context-evaluation-2026-10-17.md)，不把前轮全部失败归因于模型能力。

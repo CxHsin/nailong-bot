@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0016-magpie-catalog-and-conversation-settings.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 会话控制面板与 Magpie 模型目录讨论
 
 2026-10-18，通过 `grill-with-docs` 逐轮讨论并获用户整体确认。设计结论以 [Issue #242](https://github.com/CxHsin/nailong-bot/issues/242)为准，架构取舍见 [ADR-0016](../adr/0016-magpie-catalog-and-conversation-settings.md)。正式规格为 [Issue #244](https://github.com/CxHsin/nailong-bot/issues/244)，见[本地规格归档](conversation-control-panel-spec-2026-10-18.md)。本文保留讨论范围和事实依据，不表示功能已实现。

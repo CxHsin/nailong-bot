@@ -1,6 +1,4 @@
-> 2026-10-17 退役补注：旧源码链接已固定到核对过的历史提交；旧实现与离线工具按 [ADR-0014](../adr/0014-retire-legacy-code-and-data.md)退役。本文保留当时结论，现役行为见[操作说明](../personal-agent-operations.md)。
-
-> 2026-10-14 历史记录：本文的旧 Host/Task、权限与结算、记忆或实验行为已从在线入口退役。当前行为见 [ADR-0010](../adr/0010-native-pi-assistant.md)；当时证据保留，不能作为新版保证。源码基准为 727a294293463332e55558fa3e5ba518719d6890。
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0011-durable-main-agent-and-conversation-queue.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。 原核对源码基准：`727a294293463332e55558fa3e5ba518719d6890`。
 
 # Personal agent 的工具面：调研与实验方案
 

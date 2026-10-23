@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0017-port-akasha-engine-and-independent-embedding.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Akasha TypeScript 移植、独立 Embedding 与统一模型菜单规格
 
 Based on #267。正式规格为 [Issue #268](https://github.com/CxHsin/nailong-bot/issues/268)；本文为本地归档，不表示功能已实现。

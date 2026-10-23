@@ -1,51 +1,19 @@
-# Domain Docs
+# 领域文档
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+## 按任务读取
 
-## Before exploring, read these
+- 命名领域概念时，使用根目录 [GLOSSARY.md](../../GLOSSARY.md) 的定义。
+- 理解当前实现时，从 [README](../../README.md) 和[操作说明](../personal-agent-operations.md)定位入口，再核对相关代码与测试。
+- 设计或修改行为时，从 [ADR 索引](../adr/README.md)选择相关现役决定，读取其职责边界和取舍。`superseded` ADR 仅用于追溯历史；部分替代关系见索引。
+- 需要追溯理由、比较方案或核查某次验收时，再读取 ADR 链接的 Issue、`docs/research/` 或验收记录。原文中的“当前”“待实现”和测试结果属于原文日期与基准；它们不证明今天的实现或部署状态。
 
-- **`CONTEXT.md`** at the repo root, or
-- **`CONTEXT-MAP.md`** at the repo root if it exists: it points at one `CONTEXT.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+代码与现役决定不一致时，明确指出差异，查后续决定和相关证据；需要改变仍有效的决定时，说明要重开的取舍。
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+## 随变更更新
 
-## File structure
+- `GLOSSARY.md` 只保存本项目的领域定义，每项一两句话；实现路径、规格、进展和验收放在各自文档中。
+- ADR 记录重要且不易逆转、缺少背景会令人疑惑的真实取舍。通常用一段说明背景、决定和原因；操作步骤与实现过程链接到对应文档。
+- 决定变化时，在同一次改动中更新原 ADR 的现行表述或替代状态，以及索引中的阅读入口。旧规则与过程通过原 Issue、历史文档或经核对的 Git 提交追溯。
+- research 保存当次调查、讨论及规格归档。新增材料保留日期、必要基准及来源；临时探索笔记可留在仓库外，只有值得长期引用的证据才进入仓库。
 
-Single-context repo (most repos):
-
-```
-/
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-event-sourced-orders.md
-│   └── 0002-postgres-for-write-model.md
-└── src/
-```
-
-Multi-context repo (presence of `CONTEXT-MAP.md` at the root):
-
-```
-/
-├── CONTEXT-MAP.md
-├── docs/adr/                          ← system-wide decisions
-└── src/
-    ├── ordering/
-    │   ├── CONTEXT.md
-    │   └── docs/adr/                  ← context-specific decisions
-    └── billing/
-        ├── CONTEXT.md
-        └── docs/adr/
-```
-
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
-
-If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
-
-## Flag ADR conflicts
-
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_
+采用 single-context 布局：根目录一份 `GLOSSARY.md`，决策位于 `docs/adr/`。多上下文仓库才使用 `GLOSSARY-MAP.md` 指向各上下文词汇表；按已确认内容按需创建。

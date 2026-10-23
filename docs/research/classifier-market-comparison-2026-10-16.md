@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 上下文决策分类模型注册与选型调查
 
 用户随后澄清需要的是 TypeSafe Jev 一类专用决策模型。当前选型与注册建议见 [Jev 同类专用决策产品调查](system-one-decision-alternatives-2026-10-16.md)；下文保留此前对通用语言模型的调查，不作为该请求的选型结论。

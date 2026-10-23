@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0013-contextual-input-routing.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # Clef 中文上下文决策 API 实测
 
 历史记录：用户随后要求移除 Clef 程序，当前已删除专用入口和实验脚本。以下结论和命令仅对应当时的版本；[原脚本永久链接](https://github.com/CxHsin/nailong-bot/blob/1161899/scripts/acceptance/clef-live.ts)，当前入口见[操作说明](../personal-agent-operations.md)。

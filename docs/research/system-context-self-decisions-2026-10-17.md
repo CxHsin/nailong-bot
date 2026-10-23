@@ -1,3 +1,5 @@
+> 历史材料：下文的结论、状态与验证属于原文日期和基准。现行职责见[相关 ADR](../adr/0015-system-context-order-and-self-file.md)，运行方式见[操作说明](../personal-agent-operations.md)；本地规格归档的权威版本仍为原文链接的 Issue。
+
 # 系统内容排序与 SELF 文件讨论
 
 日期：2026-10-17。状态：设计方向已逐项确认，正式规格已整理；未修改运行代码或部署服务。核查基准为 development 的 `780f2ea`，Pi Durable 版本为 1.2.0。
