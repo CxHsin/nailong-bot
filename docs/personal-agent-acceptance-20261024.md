@@ -1,6 +1,6 @@
 # Personal Agent 首轮验收记录（2026-10-24）
 
-本记录对应 `integration/personal-agent`，基准为 `origin/main`（`92dec6790c7b4f76fc7f6a75d7bb434ea27f1864`），当前验收提交为 `efbe81a`。工作区在检查期间保持无未提交差异；交付不包含推送、生产部署或真实 Telegram/模型验收。
+本记录对应 `integration/personal-agent`，基准为 `origin/main`（`92dec6790c7b4f76fc7f6a75d7bb434ea27f1864`），当前验收提交为 `ed3a0c3`（包含审查后的 mood replay 修复 `d7bd8be`）。工作区在检查期间保持无未提交差异；交付不包含推送、生产部署或真实 Telegram/模型验收。
 
 已执行的检查：
 
