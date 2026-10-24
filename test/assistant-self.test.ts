@@ -2,9 +2,68 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import { assistantFixture, type Wire } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
+import { INITIAL_SELF, SelfFile } from "../src/assistant/self.js";
+
+test("default SELF keeps the confirmed core without making old traits permanent", async () => {
+  const requests: Wire[] = [];
+  const f = await assistantFixture((wire, response) => {
+    requests.push(wire);
+    sendChatCompletion(response, "ack");
+  });
+  try {
+    await f.app.receive({ conversationId: "one", inputId: "first", text: "hello" });
+    await f.app.waitForIdle();
+    const system = JSON.stringify(requests[0]!.messages[0]);
+    assert.match(system, /纯真善意/);
+    assert.match(system, /乐观好奇/);
+    assert.match(system, /呆萌中带小机灵/);
+    assert.match(system, /爱吃和享受生活/);
+    assert.match(system, /可成长的个人偏好/);
+    assert.match(system, /不是固定持续标签/);
+    assert.doesNotMatch(system, /傲娇/);
+    assert.match(await readFile(join(f.options.dataDir, "memory", "SELF.md"), "utf8"), /可成长的个人偏好/);
+
+    await f.reopen();
+    await f.app.receive({ conversationId: "one", inputId: "after-restart", text: "continue" });
+    await f.app.waitForIdle();
+    const restarted = JSON.stringify(requests.at(-1)!.messages[0]);
+    assert.match(restarted, /可成长的个人偏好/);
+    assert.doesNotMatch(restarted, /傲娇/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("managed legacy defaults reconcile through the SELF file boundary", async () => {
+  const path = join(tmpdir(), `nailong-self-${Date.now()}-${Math.random()}.md`);
+  const legacy = {
+    id: "self:legacy-core", sourceId: "source:legacy-core", quote: "", content: "我是用户的私人助手奶龙。天真烂漫、有点傲娇、贪吃，最爱奶香小面包；偶尔迷糊，做正事认真靠谱。",
+    kind: "SELF" as const, action: "add" as const, selfSection: "identity" as const, active: true, version: 0, at: "2026-10-17T00:00:00.000Z",
+  };
+  const legacyExpression = { ...legacy, id: "self:legacy-expression", sourceId: "source:legacy-expression", content: "轻松、可爱、偶尔傲娇，自行措辞；不固定重复口头禅，不要求每段动作，不为了扮演编造发现。代码、路径、引用和结构化数据保持原样。", selfSection: "expression" as const };
+  const old = `# SELF\n\n## 身份与基础人设\n\n<!-- self-entry ${JSON.stringify(legacy)} -->\n${legacy.content}\n<!-- /self-entry -->\n\n## 表达习惯\n\n<!-- self-entry ${JSON.stringify(legacyExpression)} -->\n${legacyExpression.content}\n<!-- /self-entry -->\n`;
+  await writeFile(path, old);
+  try {
+    const file = new SelfFile(path, INITIAL_SELF, [legacy, legacyExpression]);
+    const entries = file.entries((content, key, section) => ({
+      id: `self:${key}`, sourceId: `source:${key}`, quote: "", content,
+      kind: "SELF", action: "add", selfSection: section, active: true, version: 1, at: "2026-10-24T00:00:00.000Z",
+    }));
+    file.update(entries);
+    const updated = await readFile(path, "utf8");
+    assert.match(updated, /纯真善意/);
+    assert.match(updated, /可成长的个人偏好/);
+    assert.match(updated, /不是固定持续标签/);
+    assert.doesNotMatch(updated, /傲娇/);
+    assert.match(updated, /self-entry/);
+  } finally {
+    await rm(path, { force: true });
+  }
+});
 
 test("SELF is a directly editable authority and base instructions lead the encoded system", async () => {
   const requests: Wire[] = [];

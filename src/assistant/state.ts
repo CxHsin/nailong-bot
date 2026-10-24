@@ -8,7 +8,26 @@ import type { HelperControlRecord } from "./helper-control.js";
 import type { CollectedSticker } from "./persona.js";
 
 export type ExpressionFrequency = "quiet" | "restrained" | "natural" | "lively";
-type PersonaState = { frequency: ExpressionFrequency; value: number; at: number; observedAt: number };
+export type MoodState = "calm" | "happy" | "curious" | "concerned" | "tired" | "disappointed" | "disagreeing";
+export type MoodSourceKind = "user_input" | "correction" | "verified_work";
+export type MoodSource = { kind: MoodSourceKind; inputId: string; workId?: string; ref?: string };
+export type MoodSnapshot = {
+  state: MoodState;
+  label: string;
+  status: "active" | "calm" | "cleared";
+  source: MoodSource | null;
+  sourceRefs: string[];
+  updatedAt: number;
+};
+export type MoodUpdate = {
+  mood: MoodState;
+  label?: string;
+  clear?: boolean;
+  source: MoodSource;
+  operationId?: string;
+};
+const moodLabels: Record<MoodState,string> = {calm:"平稳",happy:"开心",curious:"好奇",concerned:"有点担心",tired:"有点累",disappointed:"有点失望",disagreeing:"有不同想法"};
+type PersonaState = { frequency: ExpressionFrequency; value: number; at: number; observedAt: number; mood?: MoodSnapshot };
 
 export type SteerRecord = {
   key: string;
@@ -61,6 +80,7 @@ export class AssistantState {
   private persona(id: string, now: number): PersonaState {
     const row = this.db.prepare("SELECT payload FROM persona WHERE conversation=?").get(id) as {payload:string}|undefined;
     const value: PersonaState = row ? JSON.parse(row.payload) : {frequency:"natural",value:100,at:now,observedAt:now};
+    if (!value.mood) value.mood = {state:"calm",label:"平稳",status:"calm",source:null,sourceRefs:[],updatedAt:now};
     value.observedAt = Math.max(value.observedAt, now);
     this.savePersona(id,value);
     return value;
@@ -72,7 +92,33 @@ export class AssistantState {
     const saved = this.persona(id,now);
     const value = Math.max(0,saved.value - Math.max(0,saved.observedAt-saved.at) * 100 / (48*60*60*1000));
     const boundaryTolerance = Number.EPSILON * 100;
-    return {expressionFrequency:saved.frequency,satiety:{value,label:value >= 100*2/3-boundaryTolerance ? "饱饱的" : value >= 100/3-boundaryTolerance ? "有点馋" : "肚子空空"}};
+    return {expressionFrequency:saved.frequency,satiety:{value,label:value >= 100*2/3-boundaryTolerance ? "饱饱的" : value >= 100/3-boundaryTolerance ? "有点馋" : "肚子空空"},mood:structuredClone(saved.mood!)};
+  }
+  moodSnapshot(id: string, now: number): MoodSnapshot { return structuredClone(this.persona(id,now).mood!); }
+  updateMood(id: string, update: MoodUpdate, now: number) {
+    if (!update.source?.inputId || !["user_input","correction","verified_work"].includes(update.source.kind))
+      throw new Error("情绪更新需要当前用户输入、明确纠正或已核验工作结果的来源");
+    if (!["calm","happy","curious","concerned","tired","disappointed","disagreeing"].includes(update.mood))
+      throw new Error("未知情绪状态");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      // A Processing Turn may contain more than one mood call for the same
+      // input (for example, an initial inference followed by a correction).
+      // The durable call identity is supplied by the public tool seam; the
+      // fallback still scopes retries to the complete source identity.
+      const operation = update.operationId ?? `${update.source.kind}:${update.source.inputId}:${update.source.workId ?? ""}:${update.source.ref ?? ""}`;
+      const fresh = this.db.prepare("INSERT OR IGNORE INTO persona_actions VALUES(?,?,?)").run(id,`mood:${operation}`,JSON.stringify(update)).changes > 0;
+      const saved = this.persona(id,now);
+      if (fresh) {
+        const cleared = update.clear || update.mood === "calm";
+        const sourceRef = update.source.ref ?? update.source.workId ?? update.source.inputId;
+        saved.mood = {state:cleared ? "calm" : update.mood,label:cleared ? "平稳" : (update.label?.trim() || moodLabels[update.mood]),status:cleared ? (update.clear ? "cleared" : "calm") : "active",
+          source:update.source,sourceRefs:[sourceRef].slice(0,8),updatedAt:now};
+        this.savePersona(id,saved);
+      }
+      this.db.exec("COMMIT");
+      return {accepted:fresh,snapshot:structuredClone(saved.mood!)};
+    } catch(error) { this.db.exec("ROLLBACK"); throw error; }
   }
   feed(id: string, operation: string, now: number) {
     this.db.exec("BEGIN IMMEDIATE");
