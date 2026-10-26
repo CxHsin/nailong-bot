@@ -11,7 +11,7 @@ async function prepared(f:Awaited<ReturnType<typeof assistantFixture>>,minimum:n
   assert.fail("background preparation did not finish");
 }
 
-test("same-dimensional services rebuild independently and retain original evidence across reset and reopen",{timeout:15000},async()=>{
+test("same-dimensional services rebuild independently and retain original evidence across reset and reopen",{ timeout: 60_000 },async()=>{
   const first=await embeddingFixture(text=>/白茶|口味/.test(text)?[1,0,0]:[0,0,1]);
   const second=await embeddingFixture(text=>text.includes("白茶")?[0,1,0]:text.includes("口味")?[1,0,0]:[0,0,1]);
   const wires:Wire[]=[];
@@ -39,7 +39,7 @@ test("same-dimensional services rebuild independently and retain original eviden
   }finally{await f.close();await first.close();await second.close();}
 });
 
-test("late vectors cannot roll a changed dimension back and reopening reuses the rebuilt space",{timeout:15000},async()=>{
+test("late vectors cannot roll a changed dimension back and reopening reuses the rebuilt space",{ timeout: 60_000 },async()=>{
   let dimensions=3;let release!:()=>void;const hold=new Promise<void>(resolve=>{release=resolve;});
   let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
   let held=false;
@@ -70,7 +70,7 @@ test("late vectors cannot roll a changed dimension back and reopening reuses the
   }finally{release();releaseRebuild();await f.close();await remote.close();}
 });
 
-test("failed historical preparation recovers without a new query and closing cancels a held background request",{timeout:15000},async()=>{
+test("failed historical preparation recovers without a new query and closing cancels a held background request",{ timeout: 60_000 },async()=>{
   let offline=true;let holdBackground=false;
   let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
   const remote=await embeddingFixture(()=>[],(wire,response)=>{

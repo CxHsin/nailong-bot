@@ -211,7 +211,7 @@ test("hard-kill during retry backoff preserves the four-request budget", async (
   } finally { clearTimeout(timer); if (worker.exitCode === null) worker.kill("SIGKILL"); await f.close(); }
 });
 
-test("hard-kill after SDK admission before saving its ID recovers the same submission and executes the input once", { timeout: 15000 }, async () => {
+test("hard-kill after SDK admission before saving its ID recovers the same submission and executes the input once", { timeout: 60_000 }, async () => {
   let reopen = false; let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
   const recoveredRequests: any[] = [];

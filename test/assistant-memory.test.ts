@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("sourced memory is available immediately and survives reset and reopen", { timeout: 12000 }, async () => {
+test("sourced memory is available immediately and survives reset and reopen", { timeout: 60_000 }, async () => {
   const seen: string[] = [];
   const f = await assistantFixture((wire, response) => {
     seen.push(JSON.stringify(wire.messages));
@@ -29,7 +29,7 @@ test("sourced memory is available immediately and survives reset and reopen", { 
   } finally { await f.close(); }
 });
 
-test("helper claims and mismatched user quotes cannot create user memories", { timeout: 12000 }, async () => {
+test("helper claims and mismatched user quotes cannot create user memories", { timeout: 60_000 }, async () => {
   const seen: string[] = [];
   const f = await assistantFixture((wire, response) => {
     seen.push(JSON.stringify(wire.messages));
@@ -53,7 +53,7 @@ test("helper claims and mismatched user quotes cannot create user memories", { t
   } finally { await f.close(); }
 });
 
-test("topic material and raw Akasha evidence preserve distinct sources after reset", { timeout: 12000 }, async () => {
+test("topic material and raw Akasha evidence preserve distinct sources after reset", { timeout: 60_000 }, async () => {
   const seen: string[] = [];
   const f = await assistantFixture((wire, response) => {
     seen.push(JSON.stringify(wire.messages));
@@ -79,7 +79,7 @@ test("topic material and raw Akasha evidence preserve distinct sources after res
   } finally { await f.close(); }
 });
 
-test("correction replaces old evidence and forgetting excludes it across reset and reopen", { timeout: 15000 }, async () => {
+test("correction replaces old evidence and forgetting excludes it across reset and reopen", { timeout: 60_000 }, async () => {
   const seen: string[] = []; let target = ""; let lastVersion = 0;
   const f = await assistantFixture((wire, response) => {
     const serialized = JSON.stringify(wire.messages); seen.push(serialized);

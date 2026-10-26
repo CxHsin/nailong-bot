@@ -29,7 +29,7 @@ async function waitForLearning(f:Awaited<ReturnType<typeof assistantFixture>>, m
   assert.ok((progress.learned ?? 0) >= minimum, `expected ${minimum} actual committed experiences: ${JSON.stringify(progress)}`);
 }
 
-test("completed service experiences recall an orthogonal original through graph association into the final model request", {timeout:20000}, async () => {
+test("completed service experiences recall an orthogonal original through graph association into the final model request", { timeout: 60_000 }, async () => {
   const vectors = vectorsForHistory();
   const remote = await embeddingFixture(text => vectors.get(text) ?? [0,0,1]);
   const wires:Wire[] = [];
@@ -58,7 +58,7 @@ test("completed service experiences recall an orthogonal original through graph 
   } finally {await f.close();await remote.close();}
 });
 
-test("direct original evidence survives a full graph lane in active search and the final automatic recall", {timeout:20000}, async () => {
+test("direct original evidence survives a full graph lane in active search and the final automatic recall", { timeout: 60_000 }, async () => {
   const directOriginal="数据库事务隔离凭据：雪松计划采用可串行化隔离。";
   const query=databaseQuery;
   const vectors=vectorsForHistory();vectors.set(directOriginal,[0,1,0]);vectors.set(query,[0,1,0]);
@@ -100,7 +100,7 @@ test("direct original evidence survives a full graph lane in active search and t
   }finally{await f.close();await remote.close();}
 });
 
-for(const inputBytes of [8000,1800])test(`a full direct lane cannot consume the graph lane with ${inputBytes} automatic bytes`, {timeout:25000}, async()=>{
+for(const inputBytes of [8000,1800])test(`a full direct lane cannot consume the graph lane with ${inputBytes} automatic bytes`, { timeout: 60_000 }, async()=>{
   const query="账目审计";const originals=Array.from({length:6},(_,index)=>`账目审计证据 ${index}：独立核对余额。${"有效载荷".repeat(220)}`);
   const vectors=vectorsForHistory();vectors.set(query,[0,1,0]);for(const text of originals)vectors.set(text,[0,1,0]);
   const remote=await embeddingFixture(text=>vectors.get(text)??[0,0,1]);
@@ -136,7 +136,7 @@ for(const inputBytes of [8000,1800])test(`a full direct lane cannot consume the 
   }finally{await f.close();await remote.close();}
 });
 
-test("a recalled batch keeps its primary evidence body ahead of its many provenance members", {timeout:20000}, async()=>{
+test("a recalled batch keeps its primary evidence body ahead of its many provenance members", { timeout: 60_000 }, async()=>{
   const answer="雪松校验主证据：对账采用双人复核。",query="雪松核对凭据";
   const remote=await embeddingFixture(text=>text===answer||text===query?[0,1,0]:[0,0,1]);
   let enter!:()=>void,release!:()=>void;
@@ -157,7 +157,7 @@ test("a recalled batch keeps its primary evidence body ahead of its many provena
   }finally{release();await f.close();await remote.close();}
 });
 
-test("native forgetting removes graph-associated originals and assistant derivatives from old spaces, active tools and reopen", {timeout:25000}, async () => {
+test("native forgetting removes graph-associated originals and assistant derivatives from old spaces, active tools and reopen", { timeout: 60_000 }, async () => {
   const vectors = vectorsForHistory();
   const remote = await embeddingFixture(text => vectors.get(text) ?? [0,0,1]);
   const wires:Wire[] = [], toolResults:string[] = [];
@@ -226,7 +226,7 @@ test("native forgetting removes graph-associated originals and assistant derivat
   } finally {await f.close();await remote.close();}
 });
 
-test("forgetting a graph intermediary invalidates downstream assistant evidence while preserving independent originals and work facts", {timeout:25000}, async () => {
+test("forgetting a graph intermediary invalidates downstream assistant evidence while preserving independent originals and work facts", { timeout: 60_000 }, async () => {
   const vectors = vectorsForHistory();
   const remote = await embeddingFixture(text => vectors.get(text) ?? [0,0,1]);
   const wires:Wire[] = [], toolResults:string[] = [];

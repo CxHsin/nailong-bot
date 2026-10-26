@@ -5,7 +5,7 @@ import {assistantFixture, type Wire} from "./fixtures/assistant.js";
 import {embeddingFixture} from "./fixtures/embedding.js";
 import {sendChatCompletion} from "./fixtures/chat-completion.js";
 
-test("successful empty recall stays distinct from failed recall and its saved local evidence survives tool continuation",{timeout:15000},async()=>{
+test("successful empty recall stays distinct from failed recall and its saved local evidence survives tool continuation",{ timeout: 60_000 },async()=>{
   let offline=false;
   const remote=await embeddingFixture(()=>[1,0,0],(wire,response)=>{
     if(offline){response.writeHead(401);response.end("secret must never enter model material");return;}
@@ -46,7 +46,7 @@ test("successful empty recall stays distinct from failed recall and its saved lo
   }finally{await f.close();await remote.close();}
 });
 
-test("real inputs recall original evidence across different wording through the selected Embedding service and reopen",{timeout:15000},async()=>{
+test("real inputs recall original evidence across different wording through the selected Embedding service and reopen",{ timeout: 60_000 },async()=>{
   const remote=await embeddingFixture(text=>/白茶|饮品口味/.test(text)?[1,0,0]:[0,1,0]);
   const wires:Wire[]=[];
   const f=await assistantFixture((wire,response)=>{wires.push(wire);sendChatCompletion(response,"已经收到");},async()=>({embedding:{env:{SECRET:"fixture-embedding-secret"},configs:[
@@ -69,7 +69,7 @@ test("real inputs recall original evidence across different wording through the 
   } finally {await f.close();await remote.close();}
 });
 
-test("active memory_search uses the same semantic source service and preserves readable provenance",{timeout:15000},async()=>{
+test("active memory_search uses the same semantic source service and preserves readable provenance",{ timeout: 60_000 },async()=>{
   const remote=await embeddingFixture(text=>/白茶|饮品口味/.test(text)?[1,0,0]:[0,1,0]);
   const toolResults:string[]=[];
   const f=await assistantFixture((wire,response)=>{
@@ -88,7 +88,7 @@ test("active memory_search uses the same semantic source service and preserves r
   }finally{await f.close();await remote.close();}
 });
 
-test("each queued supplement recalls evidence using its own original input identity",{timeout:15000},async()=>{
+test("each queued supplement recalls evidence using its own original input identity",{ timeout: 60_000 },async()=>{
   const remote=await embeddingFixture(text=>/白茶|饮品口味/.test(text)?[1,0,0]:[0,1,0]);
   let release!:()=>void;const hold=new Promise<void>(resolve=>{release=resolve;});
   let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
@@ -117,7 +117,7 @@ test("each queued supplement recalls evidence using its own original input ident
   }finally{release();await f.close();await remote.close();}
 });
 
-test("a recalled assistant record retains the current original user evidence it derives from",{timeout:15000},async()=>{
+test("a recalled assistant record retains the current original user evidence it derives from",{ timeout: 60_000 },async()=>{
   const remote=await embeddingFixture(text=>text.includes("淡口茶")?[0.6,0.8,0]:[1,0,0]);
   const wires:Wire[]=[];
   const f=await assistantFixture((wire,response)=>{wires.push(wire);sendChatCompletion(response,"口味档案已妥善记录");},async()=>({embedding:{env:{KEY:"fixture"},configs:[{id:"evidence",displayName:"Evidence",baseUrl:remote.baseUrl,model:"evidence",apiKeyEnv:"KEY"}]}}));

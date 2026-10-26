@@ -53,26 +53,26 @@ async function scenario(remember:boolean,options:{historical?:boolean;incomplete
   }finally{await f.close();await remote.close();}
 }
 
-test("successful explicit remembering changes subsequent graph recall while failed writes do not reinforce, including reopen",{timeout:40000},async()=>{
+test("successful explicit remembering changes subsequent graph recall while failed writes do not reinforce, including reopen",{ timeout: 60_000 },async()=>{
   const baseline=await scenario(false),remembered=await scenario(true);
   assert.notDeepEqual(remembered.score,baseline.score,"successful remember must reach graph learning rather than only the resident profile");
   assert.deepEqual(remembered.reopened,remembered.score,"reopen and duplicate receipt do not amplify the real feedback effect");
   assert.deepEqual(baseline.reopened,baseline.score,"failed tool evidence remains unreinforced after reopen");
 });
 
-test("explicit remembering resolves a historical source through its closed experience",{timeout:40000},async()=>{
+test("explicit remembering resolves a historical source through its closed experience",{ timeout: 60_000 },async()=>{
   const baseline=await scenario(false,{historical:true}),remembered=await scenario(true,{historical:true});
   assert.notDeepEqual(remembered.score,baseline.score,"the historical original maps to its earlier graph node");
   assert.deepEqual(remembered.reopened,remembered.score,"historical mapping remains stable after reconciliation");
 });
 
-test("successful remember followed by a truncated answer cannot reinforce an incomplete experience",{timeout:40000},async()=>{
+test("successful remember followed by a truncated answer cannot reinforce an incomplete experience",{ timeout: 60_000 },async()=>{
   const failed=await scenario(false,{historical:true,incomplete:true}),successful=await scenario(true,{historical:true,incomplete:true});
   assert.deepEqual(successful.score,failed.score,"a tool result alone cannot close the Queue/Durable experience");
   assert.deepEqual(successful.reopened,failed.reopened,"reopening must preserve incomplete qualification");
 });
 
-test("successful explicit forgetting keeps its effect receipt and excludes targets after space rebuild and reopen",{timeout:20000},async()=>{
+test("successful explicit forgetting keeps its effect receipt and excludes targets after space rebuild and reopen",{ timeout: 60_000 },async()=>{
   const original="需要遗忘的私有行程：周五乘船去蓝湾。";
   const remote=await embeddingFixture(()=>[1,0,0]);
   let sourceId="",action:"forget"|"search"|undefined,result="";

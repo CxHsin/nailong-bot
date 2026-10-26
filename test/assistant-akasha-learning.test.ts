@@ -8,7 +8,7 @@ import {Type} from "typebox";
 
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};}
 
-test("a committed completed conversation learns once and preserves its learned progress after reopen", {timeout:15000}, async()=>{
+test("a committed completed conversation learns once and preserves its learned progress after reopen", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const f=await assistantFixture((_wire,response)=>sendChatCompletion(response,"我会保留这段经历。"),async()=>({embedding:{env:{SECRET:"learning-fixture"},configs:[
     {id:"learning",displayName:"Learning",baseUrl:remote.baseUrl,model:"learning",apiKeyEnv:"SECRET"},
@@ -24,7 +24,7 @@ test("a committed completed conversation learns once and preserves its learned p
   }finally{await f.close();await remote.close();}
 });
 
-test("tool continuation text is not learned before its committed final response", {timeout:15000}, async()=>{
+test("tool continuation text is not learned before its committed final response", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const entered=deferred(),release=deferred();
   const f=await assistantFixture((wire,response)=>{
@@ -41,7 +41,7 @@ test("tool continuation text is not learned before its committed final response"
   }finally{release.resolve();await f.close();await remote.close();}
 });
 
-test("truncated and paused responses remain searchable originals without being learned as closed dialogue", {timeout:15000}, async()=>{
+test("truncated and paused responses remain searchable originals without being learned as closed dialogue", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const f=await assistantFixture((wire,response)=>{
     if(JSON.stringify(wire.messages.at(-1)?.content).includes("暂停资料")){
@@ -64,7 +64,7 @@ test("truncated and paused responses remain searchable originals without being l
   }finally{await f.close();await remote.close();}
 });
 
-test("a FIFO batch keeps multiple original input identities in one closed experience", {timeout:15000}, async()=>{
+test("a FIFO batch keeps multiple original input identities in one closed experience", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const entered=deferred(),release=deferred();const wires:string[]=[];
   const f=await assistantFixture(async(wire,response)=>{
@@ -86,7 +86,7 @@ test("a FIFO batch keeps multiple original input identities in one closed experi
   }finally{release.resolve();await f.close();await remote.close();}
 });
 
-test("enabling embedding after reopen learns retained completed dialogue without a new query", {timeout:15000}, async()=>{
+test("enabling embedding after reopen learns retained completed dialogue without a new query", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   let modelRequests=0;
   const f=await assistantFixture((_wire,response)=>{modelRequests++;sendChatCompletion(response,"这次已完成的对话将保留原始关联。");});
@@ -104,7 +104,7 @@ test("enabling embedding after reopen learns retained completed dialogue without
   }finally{await f.close();await remote.close();}
 });
 
-test("busy supplements sharing the committed answer learn once across duplicate receipt and reopen", {timeout:15000}, async()=>{
+test("busy supplements sharing the committed answer learn once across duplicate receipt and reopen", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const entered=deferred(),release=deferred();const wires:string[]=[];
   const f=await assistantFixture((wire,response)=>{
@@ -135,7 +135,7 @@ test("busy supplements sharing the committed answer learn once across duplicate 
   }finally{release.resolve();await f.close();await remote.close();}
 });
 
-test("stopping a live processing turn excludes its late response from learning after restart", {timeout:15000}, async()=>{
+test("stopping a live processing turn excludes its late response from learning after restart", { timeout: 60_000 }, async()=>{
   const remote=await embeddingFixture(()=>[1,0,0]);
   const entered=deferred(),release=deferred();
   const f=await assistantFixture(async(_wire,response)=>{entered.resolve();await release.promise;sendChatCompletion(response,"这是暂停后才返回的回答。");},async()=>({

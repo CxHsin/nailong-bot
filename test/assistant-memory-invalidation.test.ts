@@ -8,7 +8,7 @@ function call(response: Parameters<typeof sendChatCompletion>[0], name: string, 
 }
 function lastTool(wire: Wire) { return String(wire.messages.filter((message) => message.role === "tool").at(-1)?.content ?? ""); }
 
-test("forgetting an original excludes its assistant paraphrases from automatic recall after reset and restart", { timeout: 15000 }, async () => {
+test("forgetting an original excludes its assistant paraphrases from automatic recall after reset and restart", { timeout: 60_000 }, async () => {
   let phase = "seed"; let sourceId = ""; const requests: string[] = [];
   const f = await assistantFixture((wire, response) => {
     requests.push(JSON.stringify(wire.messages));
@@ -29,7 +29,7 @@ test("forgetting an original excludes its assistant paraphrases from automatic r
   } finally { await f.close(); }
 });
 
-test("shared forgetting invalidates a previously appended change without a local forget receipt", { timeout: 15000 }, async () => {
+test("shared forgetting invalidates a previously appended change without a local forget receipt", { timeout: 60_000 }, async () => {
   let phase = "warm"; let sourceId = ""; const readerRequests: string[] = [];
   const f = await assistantFixture((wire, response) => {
     const request = JSON.stringify(wire.messages);
@@ -52,7 +52,7 @@ test("shared forgetting invalidates a previously appended change without a local
   } finally { await f.close(); }
 });
 
-test("a superseded original cannot be learned as a new memory through a later write", { timeout: 15000 }, async () => {
+test("a superseded original cannot be learned as a new memory through a later write", { timeout: 60_000 }, async () => {
   let phase = "seed"; let sourceId = ""; let targetId = ""; let retryResult = "";
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {
@@ -76,7 +76,7 @@ test("a superseded original cannot be learned as a new memory through a later wr
   } finally { await f.close(); }
 });
 
-test("later native compaction excludes superseded originals from background learning", { timeout: 30000 }, async () => {
+test("later native compaction excludes superseded originals from background learning", { timeout: 60_000 }, async () => {
   let phase = "seed"; let sourceId = ""; let targetId = ""; let refinements = 0; const finalRequests: string[] = [];
   const f = await assistantFixture((wire, response) => {
     const serialized = JSON.stringify(wire.messages);

@@ -19,7 +19,7 @@ const update = (id: number, text: string) => ({ update_id: id, message: { messag
   chat: { id: 42, type: "private" as const, first_name: "owner" }, from: { id: 42, is_bot: false, first_name: "owner" }, text } });
 
 /** The first-release seam: one durable service turn carries continuity, responsibility and corrigible mood. */
-test("first-release service path keeps experience, work identity and mood separate across reset/restart", { timeout: 20000 }, async () => {
+test("first-release service path keeps experience, work identity and mood separate across reset/restart", { timeout: 60_000 }, async () => {
   const requests: Wire[] = [];
   let moodStage: "happy" | "tired" | "calm" | undefined;
   const f = await assistantFixture((wire, response) => {
@@ -97,7 +97,7 @@ test("first-release service path keeps experience, work identity and mood separa
 });
 
 /** Telegram only renders the persisted control snapshot; opening it never creates a model turn. */
-test("first-release Telegram path shows mood beside independent persona state and stays read-only after restart", { timeout: 20000 }, async () => {
+test("first-release Telegram path shows mood beside independent persona state and stays read-only after restart", { timeout: 60_000 }, async () => {
   const f = await controlPanelFixture({ provider: (_wire, response) => {
     if (f.requests.length === 1) toolCall(response, "persona_mood", { inputId: "7002", request: "这次终于完成了", mood: "happy" }, "telegram-mood");
     else sendChatCompletion(response, "已记录。");

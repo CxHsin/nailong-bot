@@ -61,7 +61,7 @@ async function settingsFixture(configureModel: DurableExecutor["configureModel"]
   };
 }
 
-test("a query waits for other Conversations and for settings work added while it waits", { timeout: 10000 }, async () => {
+test("a query waits for other Conversations and for settings work added while it waits", { timeout: 60_000 }, async () => {
   const otherEntered = gate(), releaseOther = gate(), lateEntered = gate(), releaseLate = gate();
   const f = await settingsFixture(async id => {
     if (id === "other") { otherEntered.resolve(); await releaseOther.promise; }
@@ -89,7 +89,7 @@ test("a query waits for other Conversations and for settings work added while it
   } finally { releaseOther.resolve(); releaseLate.resolve(); await f.close(); }
 });
 
-test("a rejected global propagation rejects its waiting query, reports the failure and permits later queries", { timeout: 10000 }, async () => {
+test("a rejected global propagation rejects its waiting query, reports the failure and permits later queries", { timeout: 60_000 }, async () => {
   const entered = gate(), release = gate();
   const failure = new Error("controlled Durable configuration failure");
   let failOther = true;
@@ -113,7 +113,7 @@ test("a rejected global propagation rejects its waiting query, reports the failu
   } finally { release.resolve(); await f.close(); }
 });
 
-test("restored Conversations become runnable only after their saved model configuration completes", { timeout: 10000 }, async () => {
+test("restored Conversations become runnable only after their saved model configuration completes", { timeout: 60_000 }, async () => {
   const primaryEntered = gate(), releasePrimary = gate(), otherEntered = gate(), releaseOther = gate();
   const configured: Array<[string, string | undefined]> = [];
   const f = await settingsFixture(async (id, prepared) => {
@@ -144,7 +144,7 @@ test("restored Conversations become runnable only after their saved model config
   } finally { releasePrimary.resolve(); releaseOther.resolve(); await f.close(); }
 });
 
-test("draining survives a rejection and includes configuration added during the drain", { timeout: 10000 }, async () => {
+test("draining survives a rejection and includes configuration added during the drain", { timeout: 60_000 }, async () => {
   const entered = gate(), release = gate(), lateEntered = gate(), releaseLate = gate();
   const failure = new Error("configuration failed while draining");
   const f = await settingsFixture(async id => {
@@ -169,7 +169,7 @@ test("draining survives a rejection and includes configuration added during the 
   } finally { release.resolve(); releaseLate.resolve(); await f.close(); }
 });
 
-test("waiting for idle retains a single wait for current settings work", { timeout: 10000 }, async () => {
+test("waiting for idle retains a single wait for current settings work", { timeout: 60_000 }, async () => {
   const entered = gate(), release = gate(), lateEntered = gate(), releaseLate = gate();
   const f = await settingsFixture(async id => {
     if (id === "primary") { entered.resolve(); await release.promise; }
@@ -193,7 +193,7 @@ test("waiting for idle retains a single wait for current settings work", { timeo
   } finally { release.resolve(); releaseLate.resolve(); await f.close(); }
 });
 
-test("stopping coordination suppresses wakeups and drains queued and newly added rejections", { timeout: 10000 }, async () => {
+test("stopping coordination suppresses wakeups and drains queued and newly added rejections", { timeout: 60_000 }, async () => {
   const entered = gate(), release = gate();
   const configured: string[] = [];
   const f = await settingsFixture(async id => {

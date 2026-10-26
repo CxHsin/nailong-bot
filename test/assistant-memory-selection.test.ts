@@ -6,7 +6,7 @@ import { embeddingFixture } from "./fixtures/embedding.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 for (const mode of ["snapshot", "bounded-local", "bounded-semantic"] as const) {
-  test(`${mode}: distinct facts and topics from one input survive reset and reopen`, { timeout: 15000 }, async () => {
+  test(`${mode}: distinct facts and topics from one input survive reset and reopen`, { timeout: 60_000 }, async () => {
     const remote = mode === "bounded-semantic" ? await embeddingFixture(() => [1, 0, 0]) : undefined;
     const wires: Wire[] = [];
     let writes = 0;

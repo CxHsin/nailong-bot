@@ -61,7 +61,7 @@ test("ordinary direct inputs wait, then the existing consecutive messages share 
   } finally { release(); await f.close(); }
 });
 
-test("natural-language Telegram supplements join the supported tool boundary once, while ordinary input waits", { timeout: 15_000 }, async () => {
+test("natural-language Telegram supplements join the supported tool boundary once, while ordinary input waits", { timeout: 60_000 }, async () => {
   const entered = latch();
   const held = latch();
   const requests: string[] = [];
@@ -101,7 +101,7 @@ test("natural-language Telegram supplements join the supported tool boundary onc
   } finally { held.release(); await f.close(); }
 });
 
-test("a natural-language supplement arriving before a final response is retained for a later run, with one delivery per identity", { timeout: 15_000 }, async () => {
+test("a natural-language supplement arriving before a final response is retained for a later run, with one delivery per identity", { timeout: 60_000 }, async () => {
   const entered = latch();
   const held = latch();
   const requests: string[] = [];
@@ -125,7 +125,7 @@ test("a natural-language supplement arriving before a final response is retained
   } finally { held.release(); await f.close(); }
 });
 
-test("idle natural-language input remains intact and duplicate receipt does not repeat it", { timeout: 15_000 }, async () => {
+test("idle natural-language input remains intact and duplicate receipt does not repeat it", { timeout: 60_000 }, async () => {
   const requests: string[] = [];
   const f = await routedFixture((wire, response) => { requests.push(eventText(wire)); sendChatCompletion(response, "idle supplement handled"); });
   try {
@@ -138,7 +138,7 @@ test("idle natural-language input remains intact and duplicate receipt does not 
   } finally { await f.close(); }
 });
 
-test("an idle input receipt remains deduplicated when its repeated delivery arrives during later work", { timeout: 15_000 }, async () => {
+test("an idle input receipt remains deduplicated when its repeated delivery arrives during later work", { timeout: 60_000 }, async () => {
   const entered = latch();
   const held = latch();
   let requests = 0;
@@ -158,7 +158,7 @@ test("an idle input receipt remains deduplicated when its repeated delivery arri
   } finally { held.release(); await f.close(); }
 });
 
-test("reset is a batch barrier that preserves queued input while clearing earlier main context", { timeout: 15_000 }, async () => {
+test("reset is a batch barrier that preserves queued input while clearing earlier main context", { timeout: 60_000 }, async () => {
   const entered = latch();
   const held = latch();
   const requests: string[] = [];

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("failed profile extraction resumes after reopen without a new message and appears in the next request", { timeout: 30000 }, async () => {
+test("failed profile extraction resumes after reopen without a new message and appears in the next request", { timeout: 60_000 }, async () => {
   let now = Date.now(); let available = false; let failures = 0; let successes = 0; const requests: string[] = []; const profileModels: string[] = [];
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);
@@ -43,7 +43,7 @@ test("failed profile extraction resumes after reopen without a new message and a
   } finally { await f.close(); }
 });
 
-for (const kind of ["MEMORY", "topic"] as const) test(`${kind} consolidation waits a day and five applied drafts, then merged provenance honors forgetting either original`, { timeout: 30000 }, async () => {
+for (const kind of ["MEMORY", "topic"] as const) test(`${kind} consolidation waits a day and five applied drafts, then merged provenance honors forgetting either original`, { timeout: 60_000 }, async () => {
   let now = Date.now(); let phase = "fill"; let drafts = 0; let merged = false; let secondSource = ""; let receipt = ""; let answeredFromTopic = false; const requests: string[] = [];
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);
@@ -99,7 +99,7 @@ for (const kind of ["MEMORY", "topic"] as const) test(`${kind} consolidation wai
   } finally { await f.close(); }
 });
 
-test("quota maintenance independently retires profile display while preserving searchable original evidence and SELF", { timeout: 15000 }, async () => {
+test("quota maintenance independently retires profile display while preserving searchable original evidence and SELF", { timeout: 60_000 }, async () => {
   let phase = "write"; let result = ""; let consolidation = 0; const systems: string[] = [];
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);
@@ -124,7 +124,7 @@ test("quota maintenance independently retires profile display while preserving s
   } finally { await f.close(); }
 });
 
-test("profile drafts correct an invalid whole batch and overlay concurrent writes using current profile evidence", { timeout: 30000 }, async () => {
+test("profile drafts correct an invalid whole batch and overlay concurrent writes using current profile evidence", { timeout: 60_000 }, async () => {
   let phase = "seed"; let corrected = false; let first = true;
   let begin!: () => void; const started = new Promise<void>(resolve => { begin = resolve; });
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });

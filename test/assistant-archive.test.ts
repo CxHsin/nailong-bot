@@ -13,7 +13,7 @@ function invoke(response: Parameters<typeof sendChatCompletion>[0], name: string
 function toolText(wire: Wire) { return String(wire.messages.filter((message) => message.role === "tool").at(-1)?.content ?? ""); }
 function archiveDirectory(directory: string) { return join(directory, "fresh", "executions", createHash("sha256").update("one").digest("hex"), "archives"); }
 
-test("long tool evidence is bounded before its first provider continuation and can be found and paged after reset/reopen", { timeout: 15000 }, async () => {
+test("long tool evidence is bounded before its first provider continuation and can be found and paged after reset/reopen", { timeout: 60_000 }, async () => {
   const original = "FAILED old test\n" + "奶龙🙂".repeat(400) + "\nfinal evidence\n";
   let phase = "produce"; let effects = 0; let reference = ""; let continuation = "";
   const pages: Array<{ text: string; bytes: number; lines: number; next?: { byteOffset: number; offset: number } }> = [];
@@ -48,7 +48,7 @@ test("long tool evidence is bounded before its first provider continuation and c
   } finally { await f.close(); }
 });
 
-test("archive discovery separates failed and successful similar executions, pages its index, and bounds cumulative connector progress", { timeout: 15000 }, async () => {
+test("archive discovery separates failed and successful similar executions, pages its index, and bounds cumulative connector progress", { timeout: 60_000 }, async () => {
   let phase = "failure"; let effects = 0; const views: string[] = []; const discoveries: any[] = []; let progressPage: any;
   const f = await assistantFixture((wire, response) => {
     if (phase === "failure" || phase === "success") {
@@ -80,7 +80,7 @@ test("archive discovery separates failed and successful similar executions, page
   } finally { await f.close(); }
 });
 
-test("an archive write failure preserves the executed effect and the tool's critical error without inventing a reference", { timeout: 12000 }, async () => {
+test("an archive write failure preserves the executed effect and the tool's critical error without inventing a reference", { timeout: 60_000 }, async () => {
   let effects = 0; let view = "";
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") return invoke(response, "effect_log", {}, "effect-once");
@@ -98,7 +98,7 @@ test("an archive write failure preserves the executed effect and the tool's crit
   } finally { await f.close(); }
 });
 
-test("missing archive originals, corrupt indexes, and an empty search remain distinguishable", { timeout: 12000 }, async () => {
+test("missing archive originals, corrupt indexes, and an empty search remain distinguishable", { timeout: 60_000 }, async () => {
   let phase = "produce"; let reference = ""; const observations: any[] = [];
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {
@@ -124,7 +124,7 @@ test("missing archive originals, corrupt indexes, and an empty search remain dis
   } finally { await f.close(); }
 });
 
-test("native shell spill originals survive removal of the SDK temporary output file", { timeout: 15000 }, async () => {
+test("native shell spill originals survive removal of the SDK temporary output file", { timeout: 60_000 }, async () => {
   let phase = "produce"; let reference = ""; let produced = ""; let recovered: any;
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {

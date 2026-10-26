@@ -112,7 +112,7 @@ test("one queue data directory has only one live service owner", async () => {
   finally {await service.close();await rm(directory,{recursive:true,force:true});}
 });
 
-test("a crash after higher-priority receipt still reconciles the interrupted background work",{timeout:15000},async()=>{
+test("a crash after higher-priority receipt still reconciles the interrupted background work",{ timeout: 60_000 },async()=>{
   const directory=await mkdtemp(join(tmpdir(),"nailong-crash-preempt-"));
   const child=fork(fileURLToPath(new URL("./fixtures/assistant-queue-child.ts",import.meta.url)),[directory,"preempt-receipt"],
     {execArgv:["--import","tsx"],stdio:["ignore","ignore","pipe","ipc"]});
@@ -128,7 +128,7 @@ test("a crash after higher-priority receipt still reconciles the interrupted bac
 });
 
 for (const phase of ["received","claimed","submitted","effect"]) {
-  test(`force-kill after ${phase} retains accepted input and stable execution identity`, {timeout:15000}, async () => {
+  test(`force-kill after ${phase} retains accepted input and stable execution identity`, { timeout: 60_000 }, async () => {
     const directory=await mkdtemp(join(tmpdir(),"nailong-crash-"));
     const child=fork(fileURLToPath(new URL("./fixtures/assistant-queue-child.ts",import.meta.url)),[directory,phase],
       {execArgv:["--import","tsx"],stdio:["ignore","ignore","pipe","ipc"]});

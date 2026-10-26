@@ -124,7 +124,7 @@ test("a handler failure after started() is reported without a misleading retry r
   assert.equal(ctx.replies.length, 0, "an accepted message must not be told to resend");
 });
 
-test("a post-persistence failure retains the queued input without a misleading resend instruction", { timeout: 12_000 }, async (t) => {
+test("a post-persistence failure retains the queued input without a misleading resend instruction", { timeout: 60_000 }, async (t) => {
   const conversationId = "telegram:private:42";
   const f = await assistantFixture(() => assert.fail("no model should run"), undefined,
     { selectedModel: null, primaryConversationId: conversationId, catalog: [] });

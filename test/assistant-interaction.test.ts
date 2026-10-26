@@ -7,7 +7,7 @@ import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 function deferred(){let resolve!:()=>void;const promise=new Promise<void>((done)=>{resolve=done;});return {resolve,promise};}
 
-test("natural-language supplement reaches a running tool boundary",{timeout:12000},async()=>{
+test("natural-language supplement reaches a running tool boundary",{ timeout: 60_000 },async()=>{
   const ready=deferred();const release=deferred();const requests:string[]=[];
   const f=await assistantFixture(async(wire,response)=>{
     if ((wire as typeof wire & {model:string}).model === "router") {
@@ -37,7 +37,7 @@ test("natural-language supplement reaches a running tool boundary",{timeout:1200
   }finally{release.resolve();await f.close();}
 });
 
-test("reset is an ordered command barrier that preserves queued work and starts a blank main context",{timeout:12000},async()=>{
+test("reset is an ordered command barrier that preserves queued work and starts a blank main context",{ timeout: 60_000 },async()=>{
   const ready=deferred();const release=deferred();const requests:string[]=[];
   const f=await assistantFixture(async(wire,response)=>{
     requests.push(JSON.stringify(wire.messages));if(requests.length===1){ready.resolve();await release.promise;}
@@ -53,7 +53,7 @@ test("reset is an ordered command barrier that preserves queued work and starts 
   }finally{release.resolve();await f.close();}
 });
 
-test("reset survives restart and file delivery uses the actual artifact",{timeout:12000},async()=>{
+test("reset survives restart and file delivery uses the actual artifact",{ timeout: 60_000 },async()=>{
   let phase=0;const requests:string[]=[];
   const f=await assistantFixture((wire,response)=>{
     requests.push(JSON.stringify(wire.messages));

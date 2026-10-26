@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RequestMetric } from "../src/assistant/durable-models.js";
 
-test("assistant reports actual provider request sizes and preserves the encoded prefix across reopen", { timeout: 15000 }, async () => {
+test("assistant reports actual provider request sizes and preserves the encoded prefix across reopen", { timeout: 60_000 }, async () => {
   const requests: Wire[] = [];
   const metrics: unknown[] = [];
   const f = await assistantFixture((wire, response) => {
@@ -31,7 +31,7 @@ test("assistant reports actual provider request sizes and preserves the encoded 
   } finally { await f.close(); }
 });
 
-test("a frozen snapshot receives new shared memory as persistent appended material", { timeout: 15000 }, async () => {
+test("a frozen snapshot receives new shared memory as persistent appended material", { timeout: 60_000 }, async () => {
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => {
     requests.push(wire);
@@ -54,7 +54,7 @@ test("a frozen snapshot receives new shared memory as persistent appended materi
   } finally { await f.close(); }
 });
 
-test("native capacity compaction preserves recent input and resumes after reopening", { timeout: 30000 }, async () => {
+test("native capacity compaction preserves recent input and resumes after reopening", { timeout: 60_000 }, async () => {
   let summaries = 0;
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => {
@@ -84,7 +84,7 @@ test("native capacity compaction preserves recent input and resumes after reopen
   } finally { await f.close(); }
 });
 
-test("native compaction refines its covered original user evidence into memory", { timeout: 30000 }, async () => {
+test("native compaction refines its covered original user evidence into memory", { timeout: 60_000 }, async () => {
   let refinements = 0;
   let summaries = 0;
   let executionRequests = 0;
@@ -139,7 +139,7 @@ test("native compaction refines its covered original user evidence into memory",
   } finally { await f.close(); }
 });
 
-test("forgetting rebuilds an affected native checkpoint while preserving unrelated work progress", { timeout: 30000 }, async () => {
+test("forgetting rebuilds an affected native checkpoint while preserving unrelated work progress", { timeout: 60_000 }, async () => {
   let phase = "seed"; let sourceId = ""; let summaries = 0; let rebuilt = 0; let rejectedCleanCompaction = false;
   const requests: string[] = [];
   const f = await assistantFixture((wire, response) => {

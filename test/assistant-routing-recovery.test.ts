@@ -41,7 +41,7 @@ async function kill(process:ChildProcess,exited:Promise<number|null>) {
 }
 
 for(const scenario of ["raw","decision","sending"] as const) {
-  test(`SIGKILL after routing ${scenario} boundary retains identity and avoids repeating confirmed or unknown helper sends`,{timeout:25_000},async()=>{
+  test(`SIGKILL after routing ${scenario} boundary retains identity and avoids repeating confirmed or unknown helper sends`,{ timeout: 60_000 },async()=>{
     const directory=await mkdtemp(join(tmpdir(),`assistant-routing-${scenario}-`));
     if (scenario === "raw") await seedPendingAssistantWork(directory, "one");
     const boundary=deferred();

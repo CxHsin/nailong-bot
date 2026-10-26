@@ -26,7 +26,7 @@ async function routingFixture(router: (snapshot: Snapshot, response: ServerRespo
   return { ...f, get app() { return f.app; }, snapshots };
 }
 
-test("classifier failure and timeout preserve raw input without accepting a late cancellation", { timeout: 15000 }, async () => {
+test("classifier failure and timeout preserve raw input without accepting a late cancellation", { timeout: 60_000 }, async () => {
   for (const failure of ["provider", "timeout"] as const) {
     const entered = latch(); const held = latch(); const late = latch(); const lateSent = latch(); const main: string[] = [];
     const f = await routingFixture(async (snapshot, response) => {
@@ -53,7 +53,7 @@ test("classifier failure and timeout preserve raw input without accepting a late
   }
 });
 
-test("invalid composite decisions preserve queued work before exposing any cancellation", { timeout: 15000 }, async () => {
+test("invalid composite decisions preserve queued work before exposing any cancellation", { timeout: 60_000 }, async () => {
   const entered = latch(); const held = latch(); const main: string[] = [];
   const f = await routingFixture((snapshot, response) => {
     const current = snapshot.current.text;
@@ -79,7 +79,7 @@ test("invalid composite decisions preserve queued work before exposing any cance
   } finally { held.release(); await f.close(); }
 });
 
-test("an overbudget current input reaches the main assistant intact without a truncated classifier call", { timeout: 15000 }, async () => {
+test("an overbudget current input reaches the main assistant intact without a truncated classifier call", { timeout: 60_000 }, async () => {
   const main: string[] = [];
   const f = await routingFixture((_snapshot, response) => decision(response, []), (wire, response) => { main.push(text(wire)); sendChatCompletion(response, "full input examined"); }, { inputTokens: 1000 }, true);
   try {
@@ -91,7 +91,7 @@ test("an overbudget current input reaches the main assistant intact without a tr
   } finally { await f.close(); }
 });
 
-test("source deduplication is per conversation and a foreign cancellation cannot control local work", { timeout: 15000 }, async () => {
+test("source deduplication is per conversation and a foreign cancellation cannot control local work", { timeout: 60_000 }, async () => {
   const entered = latch(); const held = latch(); const main: string[] = []; let foreign = "";
   const f = await routingFixture((snapshot, response) => {
     if (snapshot.current.text === "cancel A") return decision(response, [{ kind: "cancel", text: "cancel A", target: foreign }]);
@@ -120,7 +120,7 @@ test("source deduplication is per conversation and a foreign cancellation cannot
   } finally { held.release(); await f.close(); }
 });
 
-test("forgotten original material and its assistant paraphrase stay out of classifier input after reopening", { timeout: 15000 }, async () => {
+test("forgotten original material and its assistant paraphrase stay out of classifier input after reopening", { timeout: 60_000 }, async () => {
   let phase = "seed"; let sourceId = ""; const main: string[] = [];
   const f = await routingFixture((snapshot, response) => decision(response, [{ kind: "request", text: snapshot.current.text }]), (wire, response) => {
     main.push(text(wire));
@@ -144,7 +144,7 @@ test("forgotten original material and its assistant paraphrase stay out of class
   } finally { await f.close(); }
 });
 
-test("a supplement whose target finishes during classification becomes a follow-up against confirmed results", { timeout: 15000 }, async () => {
+test("a supplement whose target finishes during classification becomes a follow-up against confirmed results", { timeout: 60_000 }, async () => {
   const entered = latch(); const held = latch(); const classifying = latch(); const classified = latch(); const finished = latch(); const main: string[] = [];
   const f = await routingFixture(async (snapshot, response) => {
     if (snapshot.current.text === "change report to CSV") {

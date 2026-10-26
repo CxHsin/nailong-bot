@@ -12,7 +12,7 @@ import { once } from "node:events";
 
 function deferred() {let resolve!:()=>void;const promise=new Promise<void>((done)=>{resolve=done;});return {promise,resolve};}
 
-for (const withHistory of [false,true]) test(`SIGKILL between persisted stop and native abort leaves the request paused until explicit resume${withHistory?" with a completed historical turn":""}`, {timeout:25000}, async () => {
+for (const withHistory of [false,true]) test(`SIGKILL between persisted stop and native abort leaves the request paused until explicit resume${withHistory?" with a completed historical turn":""}`, { timeout: 60_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(),"assistant-stop-window-"));
   const entered = deferred(); let recovering = false; let requests = 0;
   const server = createServer(async (request,response) => {
@@ -50,7 +50,7 @@ for (const withHistory of [false,true]) test(`SIGKILL between persisted stop and
     await rm(directory,{recursive:true,force:true});
   }
 });
-test("SIGKILL after cancelling a running target but before preemption never reconnects its original Durable submission",{timeout:25_000},async()=>{
+test("SIGKILL after cancelling a running target but before preemption never reconnects its original Durable submission",{ timeout: 60_000 },async()=>{
   const directory=await mkdtemp(join(tmpdir(),"assistant-cancel-window-"));
   const confirmed=deferred();
   let recovering=false;

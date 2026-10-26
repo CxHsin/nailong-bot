@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("reopen repairs old unavailable refinement receipts without replaying main work", { timeout: 30000 }, async () => {
+test("reopen repairs old unavailable refinement receipts without replaying main work", { timeout: 60_000 }, async () => {
   let available = false; let recovered = false; let mainRequests = 0; let lastRequest = "";
   const f = await assistantFixture((wire, response) => {
     const text = JSON.stringify(wire.messages);

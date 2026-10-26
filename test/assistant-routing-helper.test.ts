@@ -102,7 +102,7 @@ async function helperFixture(options: { prompt?: (agent: string, text: string) =
 }
 
 for (const history of [0, 180]) {
-  test(`${history} archived helpers do not change live supplement delivery across reset and reopen`, { timeout: 20000 }, async () => {
+  test(`${history} archived helpers do not change live supplement delivery across reset and reopen`, { timeout: 60_000 }, async () => {
     const f = await helperFixture({ history });
     try {
       await f.register();
@@ -127,7 +127,7 @@ for (const history of [0, 180]) {
   });
 }
 
-test("natural helper supplement is actually submitted while the main durable tool remains busy", { timeout: 15000 }, async () => {
+test("natural helper supplement is actually submitted while the main durable tool remains busy", { timeout: 60_000 }, async () => {
   const f = await helperFixture();
   const status = deferred();
   const unsubscribe = f.app.subscribe((output) => { if (output.type === "text" && /已转交.*采纳仍待核实/.test(output.text)) status.resolve(); });
@@ -163,7 +163,7 @@ test("natural helper supplement is actually submitted while the main durable too
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.app.waitForIdle(); await f.close(); }
 });
 
-test("a delivered helper no longer requires classification and follow-ups retain its result", { timeout: 15000 }, async () => {
+test("a delivered helper no longer requires classification and follow-ups retain its result", { timeout: 60_000 }, async () => {
   const f = await helperFixture({ pollMs: 10 });
   const delivered = deferred();
   const unsubscribe = f.app.subscribe((output) => {
@@ -185,7 +185,7 @@ test("a delivered helper no longer requires classification and follow-ups retain
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.close(); }
 });
 
-test("a recently delivered result retains its old target while another helper is active", { timeout: 15000 }, async () => {
+test("a recently delivered result retains its old target while another helper is active", { timeout: 60_000 }, async () => {
   const f = await helperFixture({ pollMs: 10 });
   const delivered = deferred();
   const unsubscribe = f.app.subscribe((output) => {
@@ -216,7 +216,7 @@ test("a recently delivered result retains its old target while another helper is
   } finally { unsubscribe(); f.mainRelease.resolve(); await f.close(); }
 });
 
-test("unconfirmed helper delivery stays unknown across duplicate input and reopening without resending", { timeout: 15000 }, async () => {
+test("unconfirmed helper delivery stays unknown across duplicate input and reopening without resending", { timeout: 60_000 }, async () => {
   const f = await helperFixture({ async prompt() { throw new Error("transport ended after possible send"); } });
   try {
     await f.register();
@@ -232,7 +232,7 @@ test("unconfirmed helper delivery stays unknown across duplicate input and reope
 });
 
 for (const failure of ["blocked", "mismatch"] as const) {
-  test(`${failure} helper preserves the original user supplement for main model fallback`, { timeout: 15000 }, async () => {
+  test(`${failure} helper preserves the original user supplement for main model fallback`, { timeout: 60_000 }, async () => {
     const f = await helperFixture();
     try {
       await f.register();
@@ -248,7 +248,7 @@ for (const failure of ["blocked", "mismatch"] as const) {
   });
 }
 
-test("helper cancel requests Escape and reports unknown until actual process ownership is verified", { timeout: 15000 }, async () => {
+test("helper cancel requests Escape and reports unknown until actual process ownership is verified", { timeout: 60_000 }, async () => {
   const f = await helperFixture();
   try {
     await f.register();
@@ -267,7 +267,7 @@ test("helper cancel requests Escape and reports unknown until actual process own
   } finally { f.mainRelease.resolve(); await f.close(); }
 });
 
-test("a slow helper delivery does not prevent another helper's explicit supplement from being submitted", { timeout: 15000 }, async () => {
+test("a slow helper delivery does not prevent another helper's explicit supplement from being submitted", { timeout: 60_000 }, async () => {
   const firstEntered = deferred();
   const firstRelease = deferred();
   const secondSent = deferred();

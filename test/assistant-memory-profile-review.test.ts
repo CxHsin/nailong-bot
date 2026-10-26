@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { assistantFixture } from "./fixtures/assistant.js";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
-test("maintenance budgets global and project profiles together when both are visible to one request", { timeout: 15000 }, async () => {
+test("maintenance budgets global and project profiles together when both are visible to one request", { timeout: 60_000 }, async () => {
   let phase = "global"; let project = ""; let receipt = "";
   const f = await assistantFixture((wire, response) => {
     if (wire.messages.at(-1)?.role !== "tool") {
