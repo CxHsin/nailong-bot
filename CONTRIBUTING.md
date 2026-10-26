@@ -28,6 +28,15 @@
 
 设计决策与代码中看不出的约束写回现役仓库文档，遵循 [domain.md](docs/agents/domain.md)；进度由 Issue 跟踪，历史由 Git 保留。能用测试或检查守住的保证，优先写成测试或检查，文档解释原因和边界。
 
+## 证据与脱敏
+
+Issue、PR、验收记录和交接都遵循以下约定。缺陷和功能 Issue 使用 [Issue 模板](.github/ISSUE_TEMPLATE/)，通过 `gh issue create` 创建时也先读取模板并按结构填写；PR 使用 [PR 模板](.github/pull_request_template.md)。
+
+- 区分“已复现（注明环境）”“源码阅读确认”和“推测（需复现）”；推测写明如何确认。源码位置使用固定提交的永久链接 `blob/<完整 SHA>/path#Lx-Ly`，不使用会移动的 `main` 链接。
+- 不公开凭据和身份标识：`.env` 中的 token、API key 只写键名；Telegram 的 Bot token、用户 id、chat id 和 message id 用“<主用户>”“<会话>”等占位符代替。
+- 不公开个人数据：`ASSISTANT_DATA_DIR` 下的对话、SELF、Akasha 记忆与档案、上传文件及工具原件，只引用合成数据或脱敏后的最小片段；本机路径写成 `<数据目录>`、`<维护者主目录>`。
+- 日志、截图、trace 和 acceptance 输出按同一规则脱敏后再贴；不确定能否公开时，只写摘要数字和结论。
+
 ## 提交与交付
 
 提交标题遵循 Conventional Commits：`<type>(<scope>): <summary>`，scope 取实际模块名。正文写清问题、结果，以及做法不显然时的原因，篇幅以几段为限。用 `Fixes #N` 关闭对应 Issue；仅作背景或尚未完整解决时使用 `Refs #N`。验证段记录实际执行的检查和结果；涉及测试时写明条数，修复缺陷时附上去掉修复就会失败的用例。
