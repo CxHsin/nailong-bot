@@ -8,4 +8,6 @@
 
 运行 `npm run docs:check` 验证 Git 跟踪的 Markdown 中的本地文件链接，CI 也执行此检查。目标须存在且受 Git 跟踪，目录须含跟踪文件。检查解析普通链接、引用式链接及图片，跳过代码示例、外部 URL 和环境专属绝对路径；它不校验章节锚点、外部页面存活或文字含义，这些由评审核对。新文档先加入暂存区再检查；退役文件一并暂存删除。
 
+运行 `npm run check:hygiene` 检查能用代码守住的仓库规则，CI 也执行：每份 ADR 声明 `status`，`accepted` 的 ADR 列入 [ADR 索引](../adr/README.md)；`src/`、`test/`、`scripts/` 不再导入 ADR-0014 退役的 `src/host`、`src/personal`、`src/memory` 和 `src/pi-agent`；跟踪的文本文件不含原始控制字符。新增一条可检查的约束时，优先加进 `scripts/check-hygiene.mjs`，文档只说明原因。
+
 综合验证与交接遵循 [context-handoff.md](context-handoff.md)；提交前检查遵循 [git-hooks.md](git-hooks.md)。

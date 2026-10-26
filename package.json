@@ -9,6 +9,7 @@
   "scripts": {
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "docs:check": "node scripts/check-doc-links.mjs",
+    "check:hygiene": "node scripts/check-hygiene.mjs",
     "start": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "agent": "node --env-file-if-exists=.env --import tsx src/main.ts",
     "chat": "node --env-file-if-exists=.env --import tsx src/cli/main.ts chat",
