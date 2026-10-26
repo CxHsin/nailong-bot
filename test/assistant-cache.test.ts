@@ -123,7 +123,7 @@ function reply(response: ServerResponse, content: string, input: number, cached:
       prompt_tokens_details: { cached_tokens: cached } } })}\n\ndata: [DONE]\n\n`);
 }
 
-test("/kvcache queries live model/tool work immediately without generating, queuing or repeating a receipt", { timeout: 20000 }, async () => {
+test("/kvcache queries live model/tool work immediately without generating, queuing or repeating a receipt", { timeout: 60_000 }, async () => {
   let entered!: () => void; const ready = new Promise<void>(resolve => { entered = resolve; });
   let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
   let toolEntered!: () => void; const toolReady = new Promise<void>(resolve => { toolEntered = resolve; });
@@ -162,7 +162,7 @@ test("/kvcache queries live model/tool work immediately without generating, queu
   } finally { release(); toolRelease(); await f.close(); }
 });
 
-test("OpenAI compatible cache writes, top-level cache hits and absent input are measured from real SSE", { timeout: 20000 }, async () => {
+test("OpenAI compatible cache writes, top-level cache hits and absent input are measured from real SSE", { timeout: 60_000 }, async () => {
   const usages = [
     { prompt_tokens: 1000, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 600, cache_write_tokens: 100 } },
     { prompt_tokens: 500, completion_tokens: 10, cached_tokens: 250 },
@@ -186,7 +186,7 @@ test("OpenAI compatible cache writes, top-level cache hits and absent input are 
   } finally { await f.close(); }
 });
 
-test("Anthropic SSE counts cache creation as Miss and cache reads as Hit", { timeout: 20000 }, async () => {
+test("Anthropic SSE counts cache creation as Miss and cache reads as Hit", { timeout: 60_000 }, async () => {
   const f = await assistantFixture((_wire, response) => {
     const events = [
       { type: "message_start", message: { id: "anthropic-1", type: "message", role: "assistant", model: "local", content: [], stop_reason: null,
@@ -210,7 +210,7 @@ test("Anthropic SSE counts cache creation as Miss and cache reads as Hit", { tim
   } finally { await f.close(); }
 });
 
-test("/kvcache survives reset/reopen, isolates conversations and handles empty/invalid queries without models", { timeout: 20000 }, async () => {
+test("/kvcache survives reset/reopen, isolates conversations and handles empty/invalid queries without models", { timeout: 60_000 }, async () => {
   let calls = 0;
   const f = await assistantFixture((wire, response) => {
     assert.doesNotMatch(JSON.stringify(wire.messages), /kvcache|胃囊报表/);

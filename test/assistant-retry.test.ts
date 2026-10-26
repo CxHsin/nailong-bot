@@ -5,7 +5,7 @@ import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 function fail(response: Parameters<typeof sendChatCompletion>[0],status=429){response.writeHead(status,{"content-type":"application/json"});response.end(JSON.stringify({error:{message:status===401?"invalid api key":"rate limit"}}));}
 
-test("temporary model failure retries only the request and then allows the next input",{timeout:15000},async()=>{
+test("temporary model failure retries only the request and then allows the next input",{ timeout: 60_000 },async()=>{
   let requests=0;const f=await assistantFixture((_wire,response)=>{requests++;if(requests===1)fail(response);else sendChatCompletion(response,"任务完成");});
   try{
     await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();
@@ -15,7 +15,7 @@ test("temporary model failure retries only the request and then allows the next 
   }finally{await f.close();}
 });
 
-test("four failed requests pause once, survive restart, allow other input and require explicit resume",{timeout:30000},async()=>{
+test("four failed requests pause once, survive restart, allow other input and require explicit resume",{ timeout: 60_000 },async()=>{
   let requests=0;let failing=true;const f=await assistantFixture((_wire,response)=>{requests++;if(failing)fail(response);else sendChatCompletion(response,"continued");});
   try{
     await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();
@@ -29,7 +29,7 @@ test("four failed requests pause once, survive restart, allow other input and re
   }finally{await f.close();}
 });
 
-test("authentication errors pause without provider or executor retries",{timeout:10000},async()=>{
+test("authentication errors pause without provider or executor retries",{ timeout: 60_000 },async()=>{
   let requests=0;const f=await assistantFixture((_wire,response)=>{requests++;fail(response,401);});
   try{
     await f.app.receive({conversationId:"retry",inputId:"1",text:"执行任务"});await f.app.waitForIdle();

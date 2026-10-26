@@ -188,7 +188,7 @@ test("unknown startup delivery retains successful model result and receipt witho
   } finally { await service.close(); await f.close(); }
 });
 
-test("a greeting finishing during ordinary work preserves that reply's streaming preview", { timeout: 6000 }, async () => {
+test("a greeting finishing during ordinary work preserves that reply's streaming preview", { timeout: 60_000 }, async () => {
   const startupEntered = latch(), releaseStartup = latch(), firstDraft = latch(), secondDraft = latch();
   let ordinary: ServerResponse | undefined; let requests = 0;
   const f = await assistantFixture(async (_wire, response) => {

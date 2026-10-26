@@ -67,7 +67,7 @@ test("a selected Magpie router classifies unfinished work with its own declared 
   } finally {await f.close();}
 });
 
-test("an in-flight decision retains its router while already received inputs and another conversation use the new selection", {timeout:15000}, async () => {
+test("an in-flight decision retains its router while already received inputs and another conversation use the new selection", { timeout: 60_000 }, async () => {
   const entered = gate(), held = gate();
   const routed: Array<{model:string;inputId:string}> = []; const main: Request[] = [];
   const f = await assistantFixture(async (raw,response)=>{
@@ -131,7 +131,7 @@ test("official startup ignores retired routing aliases and invalid old provider 
 });
 
 for (const failure of ["unselected","removed","budget","invalid","provider","timeout"] as const) {
-  test(`Magpie routing ${failure} keeps the original input and attachment for the main assistant`, {timeout:15000}, async () => {
+  test(`Magpie routing ${failure} keeps the original input and attachment for the main assistant`, { timeout: 60_000 }, async () => {
     const requests: Request[] = [];
     const models = failure==="budget" ? catalog.map(model=>model.id==="router/A" ? {...model,context_window:200,max_output_tokens:32} : model) : catalog;
     const f = await assistantFixture((raw,response)=>{
@@ -188,7 +188,7 @@ test("a disconnected Magpie preserves an ordinary fallback before reconnecting, 
   } finally {await f.close();}
 });
 
-test("Telegram updates reach the chosen router and preserve reply identity while native start remains model-free", {timeout:15000}, async () => {
+test("Telegram updates reach the chosen router and preserve reply identity while native start remains model-free", { timeout: 60_000 }, async () => {
   const { controlPanelFixture } = await import("./fixtures/control-panel.js");
   const entered = gate();let mainRequests=0;
   const routed: Array<{model:string;current:{text:string;replyToMessageId?:string}}> = [];

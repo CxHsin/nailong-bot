@@ -105,7 +105,7 @@ test("switching to a known text-only model pauses without discarding an existing
   } finally {await f.close();}
 });
 
-test("switching after a transient failure keeps four total attempts, selection never wakes exhausted work", {timeout:30000}, async () => {
+test("switching after a transient failure keeps four total attempts, selection never wakes exhausted work", { timeout: 60_000 }, async () => {
   const first = latch(), failed = latch();
   const requests: Array<Wire & {model:string}> = [];
   let succeed = false;

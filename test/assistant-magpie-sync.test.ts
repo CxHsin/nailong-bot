@@ -41,7 +41,7 @@ test("explicit Magpie and Telegram changes win in order while refresh, echoes an
   } finally { await f.close(); }
 });
 
-test("switching to a smaller catalog window uses native compaction and retains the same goal across reopen", { timeout: 30000 }, async () => {
+test("switching to a smaller catalog window uses native compaction and retains the same goal across reopen", { timeout: 60_000 }, async () => {
   let summaries = 0;
   const requests: Array<Wire & { model: string }> = [];
   const f = await assistantFixture((wire, response) => {

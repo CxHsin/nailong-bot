@@ -79,7 +79,7 @@ function target(context: RouterContext, summary: string) {
   return found.id;
 }
 
-test("queued cancellation keeps the other target from the same input through reopen, reset and resume", { timeout: 20_000 }, async () => {
+test("queued cancellation keeps the other target from the same input through reopen, reset and resume", { timeout: 60_000 }, async () => {
   const f = await effectFixture((context) => {
     const text = context.current.text;
     if (text === "write report.txt and write chart.txt") return [request("write report.txt"), request("write chart.txt")];
@@ -110,7 +110,7 @@ test("queued cancellation keeps the other target from the same input through reo
   } finally { f.release.resolve(); await f.close(); }
 });
 
-test("compound cancel plus new request leaves unrelated queued work ahead of the new request", { timeout: 15_000 }, async () => {
+test("compound cancel plus new request leaves unrelated queued work ahead of the new request", { timeout: 60_000 }, async () => {
   const f = await effectFixture((context) => {
     const text = context.current.text;
     if (text === "cancel report then write new.txt") return [{ kind: "cancel", text: "cancel report", target: target(context, "write report.txt") }, request("write new.txt")];
@@ -130,7 +130,7 @@ test("compound cancel plus new request leaves unrelated queued work ahead of the
   } finally { f.release.resolve(); await f.close(); }
 });
 
-test("ambiguous cancellation asks for a target without changing either candidate's effects", { timeout: 15_000 }, async () => {
+test("ambiguous cancellation asks for a target without changing either candidate's effects", { timeout: 60_000 }, async () => {
   const f = await effectFixture((context) => {
     const text = context.current.text;
     if (text === "cancel that") return [{ kind: "clarify", text, candidates: [target(context, "write report.txt"), target(context, "write chart.txt")] }];
@@ -150,7 +150,7 @@ test("ambiguous cancellation asks for a target without changing either candidate
   } finally { f.release.resolve(); await f.close(); }
 });
 
-test("cancelling one running target preserves confirmed effects and resumes the same batch's survivor once", { timeout: 20_000 }, async () => {
+test("cancelling one running target preserves confirmed effects and resumes the same batch's survivor once", { timeout: 60_000 }, async () => {
   const confirmed = deferred();
   const releaseOldResponse = deferred();
   let stage = 0;

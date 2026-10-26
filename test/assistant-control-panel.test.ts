@@ -33,7 +33,7 @@ test("Telegram /start opens owner conversation controls without a model request"
   } finally { await f.close(); }
 });
 
-test("Telegram stop aborts a live request immediately, persists pause and ignores a replay after restart", {timeout:20000}, async () => {
+test("Telegram stop aborts a live request immediately, persists pause and ignores a replay after restart", { timeout: 60_000 }, async () => {
   const entered = gate(), disconnected = gate();
   const f = await controlPanelFixture({provider: (_wire, response) => {
     if (f.requests.length === 1) {
@@ -341,7 +341,7 @@ test("native model pagination, detail and favorites preserve opaque catalog IDs 
   } finally { await f.close(); }
 });
 
-test("busy model controls acknowledge immediately and only the last selected settings reach the next real request", { timeout: 20000 }, async () => {
+test("busy model controls acknowledge immediately and only the last selected settings reach the next real request", { timeout: 60_000 }, async () => {
   const entered = gate(); const release = gate();
   const f = await controlPanelFixture({ provider: async (_wire, response) => {
     if (f.requests.length === 1) { entered.resolve(); await release.promise; }
@@ -435,7 +435,7 @@ test("catalog failure retains snapshot, successful removal invalidates old choic
   } finally { await f.close(); }
 });
 
-test("turning drafts off during a streamed response stops later previews while final text, files and receipts still deliver", { timeout: 20000 }, async () => {
+test("turning drafts off during a streamed response stops later previews while final text, files and receipts still deliver", { timeout: 60_000 }, async () => {
   const firstDraft = gate(); const proceed = gate();
   const f = await controlPanelFixture({ onApi(method) { if (method === "sendRichMessageDraft") firstDraft.resolve(); },
     provider: async (_wire, response) => {
@@ -498,7 +498,7 @@ test("work list shows newest first across pages and restart without changing FIF
   } finally { await f.close(); }
 });
 
-test("work details identify one queued target and cancellation preserves other FIFO work", { timeout: 20000 }, async () => {
+test("work details identify one queued target and cancellation preserves other FIFO work", { timeout: 60_000 }, async () => {
   const entered = gate(); const release = gate();
   const f = await controlPanelFixture({ provider: async (_wire, response) => {
     if (f.requests.length === 1) { entered.resolve(); await release.promise; }

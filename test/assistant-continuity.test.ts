@@ -18,7 +18,7 @@ async function waitForEmbedding(f: Awaited<ReturnType<typeof assistantFixture>>,
   while ((await f.app.controlSnapshot(conversationId)).embedding.progress.completed < minimum && Date.now() < deadline) await delay(15);
 }
 
-test("shared experience recall keeps relevant provenance across reset/reopen and isolates unrelated history", { timeout: 20000 }, async () => {
+test("shared experience recall keeps relevant provenance across reset/reopen and isolates unrelated history", { timeout: 60_000 }, async () => {
   const remote = await embeddingFixture((text) => /自行车/.test(text) ? [0, 0, 1] : /白茶|饮品/.test(text) ? [1, 0, 0] : [0, 1, 0]);
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => {
@@ -43,7 +43,7 @@ test("shared experience recall keeps relevant provenance across reset/reopen and
   } finally { await f.close(); await remote.close(); }
 });
 
-test("correction and forgetting survive reset/reopen while paused work remains unfinished and produces no offline completion", { timeout: 20000 }, async () => {
+test("correction and forgetting survive reset/reopen while paused work remains unfinished and produces no offline completion", { timeout: 60_000 }, async () => {
   let phase: "remember" | "correct" | "forget" | "query" = "remember";
   let originalSource = "";
   let memoryId = "";

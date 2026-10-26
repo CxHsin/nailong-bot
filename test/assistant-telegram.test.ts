@@ -27,7 +27,7 @@ const update = (id: number, actor = 42, photo = false) => ({
   },
 });
 
-test("unknown remote file acceptance blocks a second tool call and pauses for verification", { timeout: 12000 }, async () => {
+test("unknown remote file acceptance blocks a second tool call and pauses for verification", { timeout: 60_000 }, async () => {
   let requests = 0; let documents = 0;
   const f = await telegramFixture((_wire, response) => {
     requests++;

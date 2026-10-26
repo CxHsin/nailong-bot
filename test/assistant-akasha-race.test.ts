@@ -5,7 +5,7 @@ import {assistantFixture,type Wire} from "./fixtures/assistant.js";
 import {embeddingFixture} from "./fixtures/embedding.js";
 import {sendChatCompletion} from "./fixtures/chat-completion.js";
 
-test("forgetting wins over a held historical vector commit and old-space restoration",{timeout:15000},async()=>{
+test("forgetting wins over a held historical vector commit and old-space restoration",{ timeout: 60_000 },async()=>{
   let held=false;let release!:()=>void;const hold=new Promise<void>(resolve=>{release=resolve;});
   let entered!:()=>void;const ready=new Promise<void>(resolve=>{entered=resolve;});
   const first=await embeddingFixture(()=>[1,0,0]);

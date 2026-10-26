@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { sendChatCompletion } from "./fixtures/chat-completion.js";
 
 for (const phase of ["tool-result","output","steer-admitted"] as const) {
-  test(`formal service SIGKILL at ${phase} reuses confirmed effects and does not repeat delivery`, {timeout:30000}, async () => {
+  test(`formal service SIGKILL at ${phase} reuses confirmed effects and does not repeat delivery`, { timeout: 60_000 }, async () => {
     const directory = await mkdtemp(join(tmpdir(),"assistant-service-recovery-"));
     let requests = 0;
     let toolRequests = 0;

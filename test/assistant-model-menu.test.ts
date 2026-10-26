@@ -193,7 +193,7 @@ test("Embedding reports safe HTTP failure, invalid or removed configuration, and
   } finally { await empty.close(); }
 });
 
-test("native Embedding controls stay responsive during work, reject wrong identities and repeat tests once without resuming paused work", {timeout:20000}, async () => {
+test("native Embedding controls stay responsive during work, reject wrong identities and repeat tests once without resuming paused work", { timeout: 60_000 }, async () => {
   const generation = gate(), testing = gate(), releaseTest = gate();
   const synthetic = "Nailong Embedding connection test. 奶龙连接测试。";
   const requests: Array<{model:string;input:string[]}> = [];

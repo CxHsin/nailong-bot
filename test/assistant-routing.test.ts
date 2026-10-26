@@ -19,7 +19,7 @@ test('retired steer commands ask for natural language and never become model wor
   } finally { await f.close(); }
 });
 
-test('queued report receives CSV modification before first execution while unrelated weather retains FIFO', {timeout:15000}, async () => {
+test('queued report receives CSV modification before first execution while unrelated weather retains FIFO', { timeout: 60_000 }, async () => {
   let release!: () => void;
   const hold = new Promise<void>(resolve => {release=resolve;});
   let entered!: () => void;

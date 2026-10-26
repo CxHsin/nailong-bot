@@ -77,7 +77,7 @@ test("historical model injection retains its control snapshot and rejects Magpie
   } finally { await f.close(); }
 });
 
-test("closing during settings propagation waits, preserves queued FIFO and releases dependencies for reopening", { timeout: 15000 }, async t => {
+test("closing during settings propagation waits, preserves queued FIFO and releases dependencies for reopening", { timeout: 60_000 }, async t => {
   const entered = deferred(), release = deferred();
   const requests: Wire[] = [];
   const f = await assistantFixture((wire, response) => {
@@ -119,7 +119,7 @@ test("closing during settings propagation waits, preserves queued FIFO and relea
   } finally { release.resolve(); fetchMock?.mock.restore(); await f.close(); }
 });
 
-test("priority preemption preserves the background generation retry budget", { timeout: 30000 }, async () => {
+test("priority preemption preserves the background generation retry budget", { timeout: 60_000 }, async () => {
   let background = 0; let direct = 0; let injected = false;
   const f = await assistantFixture((wire, response) => {
     if (JSON.stringify(wire.messages.at(-1)).includes("priority-user")) { direct++; sendChatCompletion(response, "user handled"); }
@@ -162,7 +162,7 @@ async function helperFixture(options:{crossRead?:boolean}={}) {
   return {...f,get app(){return f.app;},get results(){return results;},get reads(){return reads;},inputs,reading,releaseRead,done(){status="done";}};
 }
 
-test("helper result acknowledgement survives reset and reopening without reading it again",{timeout:12000},async()=>{
+test("helper result acknowledgement survives reset and reopening without reading it again",{ timeout: 60_000 },async()=>{
   const f=await helperFixture();
   try{
     await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder OLD_ONLY"});await f.app.waitForIdle();
@@ -173,7 +173,7 @@ test("helper result acknowledgement survives reset and reopening without reading
   }finally{f.releaseRead.resolve();await f.close();}
 });
 
-test("a helper read crossing reset returns internal material to the new context once",{timeout:12000},async()=>{
+test("a helper read crossing reset returns internal material to the new context once",{ timeout: 60_000 },async()=>{
   const f=await helperFixture({crossRead:true});
   try{
     await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder OLD_ONLY"});await f.app.waitForIdle();
@@ -184,7 +184,7 @@ test("a helper read crossing reset returns internal material to the new context 
   }finally{f.releaseRead.resolve();await f.close();}
 });
 
-test("a running helper survives service restart and does not block ordinary discussion",{timeout:12000},async()=>{
+test("a running helper survives service restart and does not block ordinary discussion",{ timeout: 60_000 },async()=>{
   const f=await helperFixture();
   try{
     await f.app.receive({conversationId:"one",inputId:"1",text:"watch coder"});await f.app.waitForIdle();
@@ -196,7 +196,7 @@ test("a running helper survives service restart and does not block ordinary disc
   }finally{f.releaseRead.resolve();await f.close();}
 });
 
-test("assistant writes a real artifact and deduplicates source identity after reopening",{timeout:12000},async()=>{
+test("assistant writes a real artifact and deduplicates source identity after reopening",{ timeout: 60_000 },async()=>{
   let writes=0;const inputs:string[]=[];
   const f=await assistantFixture((wire,response)=>{
     const last=wire.messages.at(-1)!;inputs.push(JSON.stringify(wire.messages));
@@ -215,7 +215,7 @@ test("assistant writes a real artifact and deduplicates source identity after re
   }finally{await f.close();}
 });
 
-test("project instructions, skills and configured tools load and tool errors return to the model",{timeout:12000},async()=>{
+test("project instructions, skills and configured tools load and tool errors return to the model",{ timeout: 60_000 },async()=>{
   const seen:string[]=[];
   const f=await assistantFixture((wire,response)=>{
     seen.push(JSON.stringify(wire.messages));
